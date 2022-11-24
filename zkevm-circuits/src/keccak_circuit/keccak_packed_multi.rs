@@ -29,8 +29,8 @@ const RHO_PI_LOOKUP_RANGE: usize = 4;
 const CHI_BASE_LOOKUP_RANGE: usize = 5;
 
 fn get_num_rows_per_round() -> usize {
-    8
-    //10
+    //8
+    28
     /*
         .unwrap_or_else(|_| "5".to_string())
         .parse()
@@ -1347,6 +1347,11 @@ impl<F: Field> KeccakPackedConfig<F> {
         let q = |col: Column<Fixed>, meta: &mut VirtualCells<'_, F>| {
             meta.query_fixed(col, Rotation::cur())
         };
+        let q_first8 = |meta: &mut VirtualCells<'_, F>| {
+            (0..8 as i32)
+                .map(|i| meta.query_fixed(q_enable, Rotation(-i)))
+                .fold(0.expr(), |acc, elem| acc + elem)
+        };
         let q_r = |col: Column<Fixed>, meta: &mut VirtualCells<'_, F>| {
             (0..get_num_rows_per_round() as i32)
                 .map(|i| meta.query_fixed(col, Rotation(-i)))
@@ -1364,24 +1369,29 @@ impl<F: Field> KeccakPackedConfig<F> {
             meta.query_fixed(col, Rotation(-(get_num_rows_per_round() as i32)))
         };
         /*
+                get_num_rows_per_round = 18
                 input is "12345678abc"
-        offset  value bytes_left  is_padding q_enable q_padding_last
-        8         1      11          0         1        0
-        9         2      10          0         0        0
-        10        3      9           0         0        0
-        11        4      8           0         0        0
-        12        5      7           0         0        0
-        13        6      6           0         0        0
-        14        7      5           0         0        0
-        15        8      4           0         0        0  // 1st round end
-        16        a      3           0         1        1  // 2nd round start
-        17        b      2           0         0        0
-        18        c      1           0         0        0
-        19        0      0           1         0        0
-        20        0      0           1         0        0
-        21        0      0           1         0        0
-        22        0      0           1         0        0
-        23        0      0           1         0        0 // 2nd round end
+                be careful: is_paddings is not column here! It is [Cell; 8].
+        offset  value bytes_left  is_paddings q_enable q_padding_last
+        18         1      11          0         1        0
+        19         2      10          0         0        0
+        20        3      9           0         0        0
+        21        4      8           0         0        0
+        22        5      7           0         0        0
+        23        6      6           0         0        0
+        24        7      5           0         0        0
+        25        8      4           0         0        0  
+        26        8      4           NA         0        0 
+        ...
+        35        8      4           NA         0        0  // 1st round end
+        36        a      3           0         1        1  // 2nd round start
+        37        b      2           0         0        0
+        38        c      1           0         0        0
+        39        0      0           1         0        0
+        40        0      0           1         0        0
+        41        0      0           1         0        0
+        42        0      0           1         0        0
+        43        0      0           1         0        0
 
              */
 
@@ -1428,11 +1438,12 @@ impl<F: Field> KeccakPackedConfig<F> {
             let mut cb = BaseConstraintBuilder::new(MAX_DEGREE);
             for idx in 0..get_num_rows_per_round() {
                 cb.condition(
-                    q_r(q_padding, meta) * not::expr(is_paddings[idx].expr()),
+                    //meta.query_fixed(q_padding, Rotation(-(idx as i32))),
+                    q(q_padding, meta) * not::expr(is_paddings[std::cmp::min(idx, 7)].expr()),
                     |cb| {
                         cb.require_equal(
                             "input byte",
-                            input_bytes[idx].expr.clone(),
+                            input_bytes[std::cmp::min(idx, 7)].expr.clone(),
                             meta.query_advice(keccak_table.byte_value, Rotation(idx as i32)),
                         );
                     },
@@ -1450,7 +1461,6 @@ impl<F: Field> KeccakPackedConfig<F> {
                 );
             });
             // is_paddings only be true when
-
             cb.condition(
                 q(q_padding, meta), /* - q(q_padding_last, meta) */
                 |cb| {
@@ -1459,10 +1469,13 @@ impl<F: Field> KeccakPackedConfig<F> {
                             meta.query_advice(keccak_table.bytes_left, Rotation(i as i32));
                         let bytes_left_next =
                             meta.query_advice(keccak_table.bytes_left, Rotation(i as i32 + 1));
+                        // real input only when !is_paddings[i] && i < 8
                         cb.require_equal(
                             "if not padding, bytes_left decreases by 1, else, stay same",
                             bytes_left_next,
-                            bytes_left.clone() - (not::expr(is_paddings[i].expr())),
+                            bytes_left.clone() - if (i < 7 || i == get_num_rows_per_round() - 1) { 
+                                not::expr(is_paddings[std::cmp::min(i, 7)].expr()) 
+                            } else { 0.expr() },
                         );
                         // cb.require_zero("bytes_left should be 0 when
                         // padding", bytes_left * is_paddings[i].expr());
@@ -2220,7 +2233,7 @@ fn keccak<F: Field>(rows: &mut Vec<KeccakRow<F>>, bytes: &[u8], r: F) {
             let round_cst = pack_u64(ROUND_CST[round]);
             for row_idx in 0..get_num_rows_per_round() {
                 let byte_idx = if round < NUM_WORDS_TO_ABSORB {
-                    round * 8 + row_idx
+                    round * 8 + std::cmp::min(row_idx, 7)
                 } else {
                     NUM_WORDS_TO_ABSORB * 8
                 } + idx * NUM_WORDS_TO_ABSORB * 8;
@@ -2349,7 +2362,7 @@ mod tests {
 
     #[test]
     fn packed_multi_keccak_simple() {
-        let k = 11;
+        let k = 14;
         let inputs = vec![
             vec![],
             (0u8..1).collect::<Vec<_>>(),

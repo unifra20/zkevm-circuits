@@ -216,7 +216,7 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
         );
         // copy circuit <-> keccak circuit
         meta.lookup_any("copy<->keccak", |meta| {
-            let enabled = meta.query_fixed(copy_circuit.q_enable, Rotation::cur())
+            let input_enabled = meta.query_fixed(copy_circuit.q_enable, Rotation::cur())
                 * not::expr(meta.query_selector(copy_circuit.q_step))
                 * copy_table
                     .tag
@@ -224,15 +224,15 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
 
             vec![
                 (
-                    enabled.clone() * meta.query_advice(copy_table.id, Rotation::cur()),
+                    input_enabled.clone() * meta.query_advice(copy_table.id, Rotation::cur()),
                     meta.query_advice(keccak_table.hash_id, Rotation::cur()),
                 ),
                 (
-                    enabled.clone() * meta.query_advice(copy_table.bytes_left, Rotation::cur()),
+                    input_enabled.clone() * meta.query_advice(copy_table.bytes_left, Rotation::cur()),
                     meta.query_advice(keccak_table.bytes_left, Rotation::cur()),
                 ),
                 (
-                    enabled * meta.query_advice(copy_circuit.value, Rotation::cur()),
+                    input_enabled * meta.query_advice(copy_circuit.value, Rotation::cur()),
                     meta.query_advice(keccak_table.byte_value, Rotation::cur()),
                 ),
             ]
