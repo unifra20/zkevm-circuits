@@ -54,7 +54,7 @@
 use crate::bytecode_circuit::bytecode_unroller::{
     unroll, Config as BytecodeConfig, UnrolledBytecode,
 };
-use crate::copy_circuit::{CopyCircuit};
+use crate::copy_circuit::CopyCircuit;
 use crate::evm_circuit::{table::FixedTableTag, EvmCircuit};
 use crate::exp_circuit::ExpCircuitConfig;
 use crate::keccak_circuit::keccak_packed_multi::KeccakPackedConfig as KeccakConfig;
@@ -64,8 +64,8 @@ use crate::table::{BlockTable, BytecodeTable, CopyTable, ExpTable, MptTable, RwT
 use crate::tx_circuit::{TxCircuit, TxCircuitConfig};
 use crate::util::Challenges;
 use crate::witness::{block_convert, Block, MptUpdates};
-use bus_mapping::circuit_input_builder::{CircuitInputBuilder, CircuitsParams};
 use bus_mapping::circuit_input_builder::CopyDataType;
+use bus_mapping::circuit_input_builder::{CircuitInputBuilder, CircuitsParams};
 use bus_mapping::mock::BlockData;
 use eth_types::geth_types::{self, GethData, Transaction};
 use eth_types::Field;
@@ -228,7 +228,8 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
                     meta.query_advice(keccak_table.hash_id, Rotation::cur()),
                 ),
                 (
-                    input_enabled.clone() * meta.query_advice(copy_table.bytes_left, Rotation::cur()),
+                    input_enabled.clone()
+                        * meta.query_advice(copy_table.bytes_left, Rotation::cur()),
                     meta.query_advice(keccak_table.bytes_left, Rotation::cur()),
                 ),
                 (

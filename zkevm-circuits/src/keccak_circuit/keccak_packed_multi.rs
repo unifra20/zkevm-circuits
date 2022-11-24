@@ -84,9 +84,9 @@ pub(crate) struct KeccakRow<F: Field> {
     length: usize,
     data_rlc: F,
     hash_rlc: F,
-    bytes_left: F,   // from len to 1
-    hash_id: F, // 0 when first row, then 1,2,3,..
-    value: F,        // byte
+    bytes_left: F, // from len to 1
+    hash_id: F,    // 0 when first row, then 1,2,3,..
+    value: F,      // byte
 }
 
 /// Part
@@ -1347,8 +1347,8 @@ impl<F: Field> KeccakPackedConfig<F> {
         let q = |col: Column<Fixed>, meta: &mut VirtualCells<'_, F>| {
             meta.query_fixed(col, Rotation::cur())
         };
-        let q_first8 = |meta: &mut VirtualCells<'_, F>| {
-            (0..8 as i32)
+        let _q_first8 = |meta: &mut VirtualCells<'_, F>| {
+            (0..8_i32)
                 .map(|i| meta.query_fixed(q_enable, Rotation(-i)))
                 .fold(0.expr(), |acc, elem| acc + elem)
         };
@@ -1357,7 +1357,7 @@ impl<F: Field> KeccakPackedConfig<F> {
                 .map(|i| meta.query_fixed(col, Rotation(-i)))
                 .fold(0.expr(), |acc, elem| acc + elem)
         };
-        let q_round_trailing = |col: Column<Fixed>, meta: &mut VirtualCells<'_, F>| {
+        let _q_round_trailing = |col: Column<Fixed>, meta: &mut VirtualCells<'_, F>| {
             (1..get_num_rows_per_round() as i32)
                 .map(|i| meta.query_fixed(col, Rotation(-i)))
                 .fold(0.expr(), |acc, elem| acc + elem)
@@ -1380,8 +1380,8 @@ impl<F: Field> KeccakPackedConfig<F> {
         22        5      7           0         0        0
         23        6      6           0         0        0
         24        7      5           0         0        0
-        25        8      4           0         0        0  
-        26        8      4           NA        0        0 
+        25        8      4           0         0        0
+        26        8      4           NA        0        0
         ...
         35        8      4           NA        0        0  // 1st round end
         36        a      3           0         1        1  // 2nd round start
@@ -1410,11 +1410,7 @@ impl<F: Field> KeccakPackedConfig<F> {
                 |cb| {
                     let hash_id = meta.query_advice(keccak_table.hash_id, Rotation::cur());
                     let hash_rlc = meta.query_advice(hash_rlc, Rotation::cur());
-                    cb.require_equal(
-                        "hash_id == hash_output",
-                        hash_rlc,
-                        hash_id,
-                    );
+                    cb.require_equal("hash_id == hash_output", hash_rlc, hash_id);
                 },
             );
             cb.condition(
@@ -1423,8 +1419,7 @@ impl<F: Field> KeccakPackedConfig<F> {
                     - q(q_enable, meta) * q_prev_r(q_absorb, meta),
                 |cb| {
                     let counter = meta.query_advice(keccak_table.hash_id, Rotation::cur());
-                    let counter_prev =
-                        meta.query_advice(keccak_table.hash_id, Rotation::prev());
+                    let counter_prev = meta.query_advice(keccak_table.hash_id, Rotation::prev());
                     cb.require_equal(
                         "hash_id keeps same when no new hash input",
                         counter_prev,
@@ -1473,11 +1468,17 @@ impl<F: Field> KeccakPackedConfig<F> {
                         cb.require_equal(
                             "if not padding, bytes_left decreases by 1, else, stay same",
                             bytes_left_next,
-                            bytes_left.clone() - if (i < 7 || i == get_num_rows_per_round() - 1) { 
-                                not::expr(is_paddings[std::cmp::min(i, 7)].expr()) 
-                            } else { 0.expr() },
+                            bytes_left.clone()
+                                - if i < 7 || i == get_num_rows_per_round() - 1 {
+                                    not::expr(is_paddings[std::cmp::min(i, 7)].expr())
+                                } else {
+                                    0.expr()
+                                },
                         );
-                        cb.require_zero("bytes_left should be 0 when padding", bytes_left * is_paddings[std::cmp::min(i, 7)].expr());
+                        cb.require_zero(
+                            "bytes_left should be 0 when padding",
+                            bytes_left * is_paddings[std::cmp::min(i, 7)].expr(),
+                        );
                     }
                     //cb.require_equal("bytes_left decreases by 1 for each
                     // row", bytes_left_next + 1.expr(), bytes_left);
@@ -1918,7 +1919,6 @@ fn keccak<F: Field>(rows: &mut Vec<KeccakRow<F>>, bytes: &[u8], r: F) {
         bits.push(0);
     }
     bits.push(1);
-
 
     let mut hash_out: [u8; 32] = ethers_core::utils::keccak256(bytes);
     hash_out.reverse();
