@@ -5,8 +5,8 @@ use std::marker::PhantomData;
 
 use crate::table::TxFieldTag;
 use crate::table::TxTable;
-use crate::table::{BlockTable, KeccakTable, RlpTable};
-use crate::util::random_linear_combine_word as rlc;
+use crate::table::{BlockTable, KeccakTable};
+use crate::util::{random_linear_combine_word as rlc, Challenges};
 use bus_mapping::circuit_input_builder::get_dummy_tx;
 use eth_types::geth_types::BlockConstants;
 use eth_types::sign_types::SignData;
@@ -166,6 +166,12 @@ impl PublicData {
             .map(Transaction::from)
             .collect()
     }
+
+    fn get_pi<const MAX_TXS: usize, const MAX_CALLDATA: usize>(&self) -> H256 {
+        let rpi_bytes = raw_public_input_bytes::<MAX_TXS, MAX_CALLDATA>(&self);
+        let rpi_keccak = keccak256(&rpi_bytes);
+        H256(rpi_keccak)
+    }
 }
 
 /// Config for PiCircuit
@@ -174,7 +180,6 @@ pub struct PiCircuitConfig<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: u
     block_table: BlockTable,
     tx_table: TxTable,
     keccak_table: KeccakTable,
-    rlp_table: RlpTable,
 
     raw_public_inputs: Column<Advice>, // block, extra, tx hashes
     rpi_field_bytes: Column<Advice>,   // rpi in bytes
@@ -204,7 +209,6 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize>
         meta: &mut ConstraintSystem<F>,
         block_table: BlockTable,
         tx_table: TxTable,
-        rlp_table: RlpTable,
         keccak_table: KeccakTable,
     ) -> Self {
         let rpi = meta.advice_column();
@@ -310,13 +314,16 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize>
             let output_rlc = meta.query_advice(keccak_table.output_rlc, Rotation::cur());
             let q_keccak = meta.query_selector(q_keccak);
 
-            let rpi_rlc = meta.query_advice(rpi_rlc_acc, Rotation::prev());
-            let output = meta.query_advice(rpi, Rotation::cur());
+            let rpi_rlc = meta.query_advice(rpi, Rotation::cur());
+            let output = meta.query_advice(rpi_rlc_acc, Rotation::cur());
 
             vec![
                 (q_keccak.expr() * 1.expr(), is_enabled),
                 (q_keccak.expr() * rpi_rlc, input_rlc),
-                (q_keccak.expr() * 1.expr(), input_len),
+                (
+                    q_keccak.expr() * (116 + (MAX_TXS + 256) * 32).expr(),
+                    input_len,
+                ),
                 (q_keccak * output, output_rlc),
             ]
         });
@@ -324,7 +331,6 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize>
         Self {
             block_table,
             tx_table,
-            rlp_table,
             keccak_table,
             raw_public_inputs: rpi,
             rpi_field_bytes: rpi_bytes,
@@ -348,6 +354,7 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize>
     pub fn assign_rlc_pi(
         &self,
         region: &mut Region<'_, F>,
+        public_data: &PublicData,
         block_values: BlockValues,
         rand_rpi: F,
         tx_hashes: Vec<H256>,
@@ -496,20 +503,25 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize>
         // assign rpi_acc, keccak_rpi
         let cells = cells.unwrap();
         let (rand_cell, rpi_rlc_cell) = (cells[0].clone(), cells[1].clone());
-        let keccak_input_cell = rpi_rlc_cell.copy_advice(
+        rpi_rlc_cell.copy_advice(
             || "keccak(rpi)_input",
             region,
             self.raw_public_inputs,
             offset,
         )?;
-        // let keccak_output = region.assign_advice(
-        //     || "keccak(rpi)_output",
-        //     self.rpi_rlc_acc,
-        //     offset,
-        //     || Value::known(F::zero())
-        // )?;
+        let keccak = public_data.get_pi::<MAX_TXS, MAX_CALLDATA>();
+        let keccak_rlc = keccak.to_fixed_bytes().iter().fold(F::zero(), |acc, byte| {
+            acc * rand_rpi + F::from(*byte as u64)
+        });
+        let keccak_output_cell = region.assign_advice(
+            || "keccak(rpi)_output",
+            self.rpi_rlc_acc,
+            offset,
+            || Value::known(keccak_rlc),
+        )?;
+        self.q_keccak.enable(region, offset)?;
 
-        Ok((rand_cell, keccak_input_cell))
+        Ok((rand_cell, keccak_output_cell))
     }
 
     fn assign_field_in_pi(
@@ -824,8 +836,7 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize> Circuit<F>
         let block_table = BlockTable::construct(meta);
         let tx_table = TxTable::construct(meta);
         let keccak_table = KeccakTable::construct(meta);
-        let rlp_table = RlpTable::construct(meta);
-        PiCircuitConfig::new(meta, block_table, tx_table, rlp_table, keccak_table)
+        PiCircuitConfig::new(meta, block_table, tx_table, keccak_table)
     }
 
     fn synthesize(
@@ -833,6 +844,7 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize> Circuit<F>
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
+        let challenges = Challenges::mock(Value::known(self.rand_rpi));
         let pi_cells = layouter.assign_region(
             || "region 0",
             |mut region| {
@@ -931,6 +943,7 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize> Circuit<F>
                 // rpi_rlc and rand_rpi cols
                 let (rand_cell, keccak_input_cell) = config.assign_rlc_pi(
                     &mut region,
+                    &self.public_data,
                     block_values,
                     self.rand_rpi,
                     self.public_data
@@ -944,20 +957,11 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize> Circuit<F>
             },
         )?;
 
-        // assign rlp table
-        // config.rlp_table.dev_load(
-        //     &mut layouter,
-        //
-        // )?;
-
         // assign keccak table
-        // config.keccak_table.dev_load(
-        //     &mut layouter,
-        //     signed_tx_from_geth_tx(&self.public_data.eth_block.transactions,
-        //         self.public_data.chain_id.as_u64(),
-        //     ),
-        //     self.rand_rpi,
-        // )?;
+        let rpi_bytes = raw_public_input_bytes::<MAX_TXS, MAX_CALLDATA>(&self.public_data);
+        config
+            .keccak_table
+            .dev_load(&mut layouter, vec![&rpi_bytes], &challenges)?;
 
         // Constrain raw_public_input cells to public inputs
         for (i, pi_cell) in pi_cells.iter().enumerate() {
@@ -973,16 +977,13 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize>
 {
     /// Compute the public inputs for this circuit.
     pub fn instance(&self) -> Vec<Vec<F>> {
-        let rpi_bytes = raw_public_input_bytes::<F, MAX_TXS, MAX_CALLDATA>(&self.public_data);
-
-        // Computation of raw_pulic_inputs
-        let rlc_rpi = rpi_bytes.iter().fold(F::zero(), |acc, val| {
-            acc * self.rand_rpi + F::from(*val as u64)
-        });
-        let keccak_rpi = keccak256(rpi_bytes);
-        let rlc_keccak = keccak_rpi.iter().rev().fold(F::zero(), |acc, val| {
-            acc * self.rand_rpi + F::from(*val as u64)
-        });
+        let keccak_rpi = self.public_data.get_pi::<MAX_TXS, MAX_CALLDATA>();
+        let rlc_keccak = keccak_rpi
+            .to_fixed_bytes()
+            .iter()
+            .fold(F::zero(), |acc, val| {
+                acc * self.rand_rpi + F::from(*val as u64)
+            });
 
         // let block_hash = public_data
         //     .eth_block
@@ -990,7 +991,7 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize>
         //     .unwrap_or_else(H256::zero)
         //     .to_fixed_bytes();
 
-        let public_inputs = vec![self.rand_rpi, rlc_rpi, rlc_keccak];
+        let public_inputs = vec![self.rand_rpi, rlc_keccak];
 
         vec![public_inputs]
     }
@@ -1008,7 +1009,7 @@ fn get_dummy_tx_hash(chain_id: u64) -> H256 {
 }
 
 /// Compute the raw_public_inputs bytes from the verifier's perspective.
-fn raw_public_input_bytes<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize>(
+fn raw_public_input_bytes<const MAX_TXS: usize, const MAX_CALLDATA: usize>(
     public_data: &PublicData,
 ) -> Vec<u8> {
     let block = public_data.get_block_table_values();

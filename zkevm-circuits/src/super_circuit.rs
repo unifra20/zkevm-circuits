@@ -207,7 +207,7 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
         );
         let state_circuit =
             StateCircuitConfig::configure(meta, &rw_table, &mpt_table, challenges.clone());
-        let pi_circuit = PiCircuitConfig::new(meta, block_table, tx_table, rlp_table, keccak_table);
+        let pi_circuit = PiCircuitConfig::new(meta, block_table, tx_table, keccak_table);
 
         Self::Config {
             tx_table,
@@ -323,6 +323,7 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
             |mut region| {
                 config.pi_circuit.assign_rlc_pi(
                     &mut region,
+                    &self.pi_circuit.public_data,
                     self.pi_circuit.public_data.get_block_table_values(),
                     self.pi_circuit.rand_rpi,
                     self.pi_circuit
