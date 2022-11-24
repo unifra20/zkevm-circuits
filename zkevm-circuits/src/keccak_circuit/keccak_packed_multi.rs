@@ -1373,17 +1373,17 @@ impl<F: Field> KeccakPackedConfig<F> {
                 input is "12345678abc"
                 be careful: is_paddings is not column here! It is [Cell; 8].
         offset  value bytes_left  is_paddings q_enable q_padding_last
-        18         1      11          0         1        0
-        19         2      10          0         0        0
+        18        1      11          0         1        0
+        19        2      10          0         0        0
         20        3      9           0         0        0
         21        4      8           0         0        0
         22        5      7           0         0        0
         23        6      6           0         0        0
         24        7      5           0         0        0
         25        8      4           0         0        0  
-        26        8      4           NA         0        0 
+        26        8      4           NA        0        0 
         ...
-        35        8      4           NA         0        0  // 1st round end
+        35        8      4           NA        0        0  // 1st round end
         36        a      3           0         1        1  // 2nd round start
         37        b      2           0         0        0
         38        c      1           0         0        0
@@ -1477,8 +1477,7 @@ impl<F: Field> KeccakPackedConfig<F> {
                                 not::expr(is_paddings[std::cmp::min(i, 7)].expr()) 
                             } else { 0.expr() },
                         );
-                        // cb.require_zero("bytes_left should be 0 when
-                        // padding", bytes_left * is_paddings[i].expr());
+                        cb.require_zero("bytes_left should be 0 when padding", bytes_left * is_paddings[std::cmp::min(i, 7)].expr());
                     }
                     //cb.require_equal("bytes_left decreases by 1 for each
                     // row", bytes_left_next + 1.expr(), bytes_left);
