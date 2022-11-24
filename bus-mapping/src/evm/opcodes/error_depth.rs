@@ -2,7 +2,7 @@ use crate::circuit_input_builder::{CircuitInputStateRef, ExecStep};
 use crate::error::ExecError;
 use crate::evm::{Opcode, OpcodeId};
 use crate::Error;
-use eth_types::{GethExecStep, ToAddress, ToWord, Word};
+use eth_types::{GethExecStep, Word};
 
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct ErrorDepth;
@@ -29,6 +29,9 @@ impl Opcode for ErrorDepth {
         let mut exec_step = state.new_step(geth_step)?;
         exec_step.error = Some(ExecError::Depth);
 
+        // let call = state.parse_call(geth_step)?;
+        // let current_call = state.call()?.clone();
+
         // we don't need to parse the call, only need the word value here
         for offset in 0..minimal_stack_elements {
             let value = geth_step.stack.nth_last(offset)?;
@@ -41,12 +44,22 @@ impl Opcode for ErrorDepth {
 
         // the call attempt must fail immediately (sub context reverts)
         // but won't revert current context
-        assert_eq!(next_step.stack.nth_last(0)?, Word::zero());
+        // assert_eq!(next_step.stack.nth_last(0)?, Word::zero());
         state.stack_write(
             &mut exec_step,
-            next_step.stack.nth_last_filled(0),
+            geth_step.stack.nth_last_filled(minimal_stack_elements - 1),
             Word::zero(),
         )?;
+        //
+        // state.call_context_read(
+        //     &mut exec_step,
+        //     current_call.call_id,
+        //     CallContextField::CalleeAddress,
+        //     current_call.address.to_word(),
+        // );
+        //
+        // state.push_call(call);
+        // state.handle_return(geth_step)?;
         Ok(vec![exec_step])
     }
 }

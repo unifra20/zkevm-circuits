@@ -87,6 +87,7 @@ mod stop;
 mod swap;
 
 use self::sha3::Sha3Gadget;
+use crate::evm_circuit::execution::error_depth::ErrorDepthGadget;
 use add_sub::AddSubGadget;
 use addmod::AddModGadget;
 use address::AddressGadget;
@@ -271,7 +272,7 @@ pub(crate) struct ExecutionConfig<F> {
     error_oog_code_store: DummyGadget<F, 0, 0, { ExecutionState::ErrorOutOfGasCodeStore }>,
     error_insufficient_balance: DummyGadget<F, 0, 0, { ExecutionState::ErrorInsufficientBalance }>,
     error_invalid_jump: ErrorInvalidJumpGadget<F>,
-    error_depth: DummyGadget<F, 0, 0, { ExecutionState::ErrorDepth }>,
+    error_depth: ErrorDepthGadget<F>,
     error_write_protection: DummyGadget<F, 0, 0, { ExecutionState::ErrorWriteProtection }>,
     error_contract_address_collision:
         DummyGadget<F, 0, 0, { ExecutionState::ErrorContractAddressCollision }>,
@@ -948,7 +949,7 @@ impl<F: Field> ExecutionConfig<F> {
         call: &Call,
         step: &ExecStep,
     ) -> Result<(), Error> {
-        log::trace!("assign_exec_step offset:{} step:{:?}", offset, step);
+        log::info!("assign_exec_step offset:{} step:{:?}", offset, step);
         self.step
             .assign_exec_step(region, offset, block, call, step)?;
 

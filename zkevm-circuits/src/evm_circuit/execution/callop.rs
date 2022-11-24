@@ -99,7 +99,7 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
         ]
         .map(|field_tag| cb.call_context(None, field_tag));
 
-        cb.range_lookup(depth.expr(), 1024);
+        //FIXME cb.range_lookup(depth.expr(), 1024);
 
         // Lookup values from stack
         cb.stack_pop(gas_word.expr());
