@@ -757,7 +757,6 @@ impl KeccakTable {
 
     /// Generate the keccak table assignments from a byte array input.
     pub fn assignments<F: Field>(
-        counter: usize,
         input: &[u8],
         challenges: &Challenges<Value<F>>,
     ) -> Vec<[Value<F>; 3]> {
@@ -782,7 +781,7 @@ impl KeccakTable {
                 //Value::known(F::zero()),
                 //Value::known(F::zero()),
                 Value::known(F::zero()),
-                Value::known(F::from_u128(counter as u128)),
+                output_rlc,
                 //Value::known(F::from_u128(*byte as u128)),
                 //Value::known(F::from_u128((input.len() - idx) as u128)),
             ]);
@@ -792,7 +791,7 @@ impl KeccakTable {
             //input_rlc,
             //Value::known(input_len),
             output_rlc,
-            Value::known(F::from_u128(counter as u128)),
+            output_rlc,
             //Value::known(F::zero()),
             //Value::known(F::zero()),
         ];
@@ -843,8 +842,8 @@ impl KeccakTable {
                 offset += 1;
 
                 let keccak_table_columns = self.columns();
-                for (idx, input) in inputs.clone().into_iter().enumerate() {
-                    for row in Self::assignments(idx + 1, input, challenges) {
+                for input in inputs.clone() {
+                    for row in Self::assignments(input, challenges) {
                         // let mut column_index = 0;
                         for (column, value) in keccak_table_columns.iter().zip_eq(row) {
                             region.assign_advice(
