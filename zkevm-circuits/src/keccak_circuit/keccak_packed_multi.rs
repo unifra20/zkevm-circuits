@@ -1834,14 +1834,15 @@ impl<F: Field> KeccakPackedConfig<F> {
             offset,
             [
                 F::from(row.is_final),
-                //row.data_rlc,
-                //F::from(row.length as u64),
+                row.data_rlc,
+                F::from(row.length as u64),
                 row.hash_rlc,
                 row.hash_id,
-                //F::from(row.value),
-                //F::from(row.bytes_left),
+                row.value,
+                row.bytes_left,
             ],
         )?;
+        /*
         for (column, value) in [
             (self.keccak_table.input_rlc, row.data_rlc),
             (self.keccak_table.input_len, F::from(row.length as u64)),
@@ -1855,6 +1856,7 @@ impl<F: Field> KeccakPackedConfig<F> {
                 || Value::known(value),
             )?;
         }
+        */
 
         // Cell values
         for (idx, (bit, column)) in row

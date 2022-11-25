@@ -480,10 +480,10 @@ mod super_circuit_tests {
         let chain_id = (*MOCK_CHAIN_ID).as_u64();
 
         let bytecode = bytecode! {
-            PUSH32(100)
-            PUSH32(0)
+            PUSH32(100) // size
+            PUSH32(0) // offset
             SHA3
-            PUSH32(100)
+            PUSH32(200)
             PUSH32(0)
             SHA3
             STOP

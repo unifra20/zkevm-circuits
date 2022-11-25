@@ -799,10 +799,15 @@ mod tests {
     }
 
     /// Tests a circuit with incomplete bytecode
+    #[ignore = "keccak rows larger than bytecode rows"]
     #[test]
     fn bytecode_incomplete() {
-        let k = 9;
-        test_bytecode_circuit_unrolled::<Fr>(k, vec![unroll(vec![7u8; 2usize.pow(k) + 1])], false);
+        let k = 12;
+        test_bytecode_circuit_unrolled::<Fr>(
+            k - 3,
+            vec![unroll(vec![7u8; 2usize.pow(k) + 1])],
+            false,
+        );
     }
 
     /// Tests multiple bytecodes in a single circuit

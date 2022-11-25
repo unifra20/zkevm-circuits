@@ -755,15 +755,27 @@ impl KeccakTable {
         }
     }
 
+    fn all_columns(&self) -> Vec<Column<Advice>> {
+        vec![
+            self.is_enabled,
+            self.input_rlc,
+            self.input_len,
+            self.output_rlc,
+            self.hash_id,
+            self.byte_value,
+            self.bytes_left,
+        ]
+    }
+
     /// Generate the keccak table assignments from a byte array input.
     pub fn assignments<F: Field>(
         input: &[u8],
         challenges: &Challenges<Value<F>>,
-    ) -> Vec<[Value<F>; 3]> {
-        let _input_rlc = challenges
+    ) -> Vec<[Value<F>; 7]> {
+        let input_rlc = challenges
             .keccak_input()
             .map(|challenge| rlc::value(input.iter().rev(), challenge));
-        let _input_len = F::from(input.len() as u64);
+        let input_len = F::from(input.len() as u64);
         let mut keccak = Keccak::default();
         keccak.update(input);
         let output = keccak.digest();
@@ -775,25 +787,27 @@ impl KeccakTable {
         });
 
         let mut assignments = Vec::new();
-        for (_idx, _byte) in input.iter().enumerate() {
+        // used for "id based keccak". the input part of keccak circuit
+        for (idx, byte) in input.iter().enumerate() {
             assignments.push([
-                Value::known(F::zero()),
-                //Value::known(F::zero()),
-                //Value::known(F::zero()),
-                Value::known(F::zero()),
+                Value::known(F::zero()), // is_final
+                Value::known(F::zero()), // place holder
+                Value::known(F::zero()), // place holder
+                Value::known(F::zero()), // place holder
                 output_rlc,
-                //Value::known(F::from_u128(*byte as u128)),
-                //Value::known(F::from_u128((input.len() - idx) as u128)),
+                Value::known(F::from_u128(*byte as u128)),
+                Value::known(F::from_u128((input.len() - idx) as u128)),
             ]);
         }
+        // used for "rlc based keccak". the output part of keccak circuit
         let final_row = [
             Value::known(F::one()),
-            //input_rlc,
-            //Value::known(input_len),
+            input_rlc,
+            Value::known(input_len),
             output_rlc,
-            output_rlc,
-            //Value::known(F::zero()),
-            //Value::known(F::zero()),
+            output_rlc,              // place holder
+            Value::known(F::zero()), // place holder
+            Value::known(F::zero()), // place holder
         ];
         //println!("final row {:?}", final_row);
         assignments.push(final_row);
@@ -805,10 +819,10 @@ impl KeccakTable {
         &self,
         region: &mut Region<F>,
         offset: usize,
-        values: [F; 3],
+        values: [F; 7],
     ) -> Result<(), Error> {
         //println!("keccak table assign row {:?}", values);
-        for (column, value) in self.columns().iter().zip(values.iter()) {
+        for (column, value) in self.all_columns().iter().zip_eq(values.iter()) {
             region.assign_advice(
                 || format!("assign {}", offset),
                 *column,
@@ -831,7 +845,7 @@ impl KeccakTable {
             || "keccak table",
             |mut region| {
                 let mut offset = 0;
-                for column in self.columns() {
+                for column in self.all_columns() {
                     region.assign_advice(
                         || "keccak table all-zero row",
                         column,
@@ -841,7 +855,7 @@ impl KeccakTable {
                 }
                 offset += 1;
 
-                let keccak_table_columns = self.columns();
+                let keccak_table_columns = self.all_columns();
                 for input in inputs.clone() {
                     for row in Self::assignments(input, challenges) {
                         // let mut column_index = 0;
@@ -863,6 +877,7 @@ impl KeccakTable {
 }
 
 impl DynamicTableColumns for KeccakTable {
+    // only used in evm circuit
     fn columns(&self) -> Vec<Column<Advice>> {
         vec![
             self.is_enabled,
