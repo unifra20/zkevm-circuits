@@ -168,7 +168,7 @@ impl PublicData {
     }
 
     fn get_pi<const MAX_TXS: usize, const MAX_CALLDATA: usize>(&self) -> H256 {
-        let rpi_bytes = raw_public_input_bytes::<MAX_TXS, MAX_CALLDATA>(&self);
+        let rpi_bytes = raw_public_input_bytes::<MAX_TXS, MAX_CALLDATA>(self);
         let rpi_keccak = keccak256(&rpi_bytes);
         H256(rpi_keccak)
     }
