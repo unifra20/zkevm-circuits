@@ -844,7 +844,7 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize> Circuit<F>
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
-        let challenges = Challenges::mock(Value::known(self.rand_rpi));
+        let challenges = Challenges::mock(Value::known(self.rand_rpi), Value::known(self.rand_rpi));
         let pi_cells = layouter.assign_region(
             || "region 0",
             |mut region| {

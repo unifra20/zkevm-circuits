@@ -1319,7 +1319,10 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize> Circuit<F>
         let tx_table = TxTable::construct(meta);
         let keccak_table = KeccakTable::construct(meta);
         let rlp_table = RlpTable::construct(meta);
-        let challenges = Challenges::mock(Expression::Constant(Self::get_randomness()));
+        let challenges = Challenges::mock(
+            Expression::Constant(Self::get_randomness()),
+            Expression::Constant(Self::get_randomness()),
+        );
         TxCircuitConfig::new(meta, tx_table, keccak_table, rlp_table, challenges)
     }
 
@@ -1328,7 +1331,8 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize> Circuit<F>
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
-        let challenges = Challenges::mock(Value::known(self.randomness));
+        let challenges =
+            Challenges::mock(Value::known(self.randomness), Value::known(self.randomness));
 
         config.load(&mut layouter)?;
         self.assign(&config, &mut layouter, &challenges)?;
