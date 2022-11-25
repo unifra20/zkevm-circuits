@@ -59,7 +59,7 @@ impl<F: Field, C: Into<Column<Any>> + Clone, const W: usize> LookupTable<F> for 
 
 /// Tag used to identify each field in the transaction in a row of the
 /// transaction table.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter)]
 pub enum TxFieldTag {
     /// Unused tag
     Null = 0,
@@ -81,21 +81,33 @@ pub enum TxFieldTag {
     CallDataLength,
     /// Gas cost for transaction call data (4 for byte == 0, 16 otherwise)
     CallDataGasCost,
-    /// RLC-encoded calldata.
-    CallDataRlc,
+    /// Signature field V.
+    SigV,
+    /// Signature field R.
+    SigR,
+    /// Signature field S.
+    SigS,
     /// TxSignHash: Hash of the transaction without the signature, used for
     /// signing.
     TxSignHash,
+    /// TxHash: Hash of the transaction with the signature
+    TxHash,
     /// CallData
     CallData,
 }
 impl_expr!(TxFieldTag);
 
+impl From<TxFieldTag> for usize {
+    fn from(t: TxFieldTag) -> Self {
+        t as usize
+    }
+}
+
 /// Alias for TxFieldTag used by EVM Circuit
 pub type TxContextFieldTag = TxFieldTag;
 
 /// Table that contains the fields of all Transactions in a block
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct TxTable {
     /// Tx ID
     pub tx_id: Column<Advice>,
@@ -552,7 +564,7 @@ pub enum BytecodeFieldTag {
 impl_expr!(BytecodeFieldTag);
 
 /// Table with Bytecode indexed by its Code Hash
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct BytecodeTable {
     /// Code Hash
     pub code_hash: Column<Advice>,
@@ -659,7 +671,7 @@ pub enum BlockContextFieldTag {
 impl_expr!(BlockContextFieldTag);
 
 /// Table with Block header fields
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct BlockTable {
     /// Tag
     pub tag: Column<Advice>,
@@ -726,7 +738,7 @@ impl DynamicTableColumns for BlockTable {
 }
 
 /// Keccak Table, used to verify keccak hashing from RLC'ed input.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct KeccakTable {
     /// True when the row is enabled
     pub is_enabled: Column<Advice>,
@@ -1354,9 +1366,9 @@ impl RlpTable {
             for row in signed_tx
                 .gen_witness(randomness)
                 .iter()
-                .chain(std::iter::once(&signed_tx.rlp_row(randomness)))
+                .chain(signed_tx.rlp_rows(randomness).iter())
                 .chain(signed_tx.tx.gen_witness(randomness).iter())
-                .chain(std::iter::once(&signed_tx.tx.rlp_row(randomness)))
+                .chain(signed_tx.tx.rlp_rows(randomness).iter())
             {
                 assignments.push([
                     F::from(row.id as u64),
@@ -1393,15 +1405,15 @@ impl RlpTable {
                 }
 
                 for row in Self::dev_assignments(txs.clone(), randomness) {
+                    offset += 1;
                     for (column, value) in self.columns().iter().zip(row) {
                         region.assign_advice(
-                            || format!("empty row: {}", offset),
+                            || format!("row: {}", offset),
                             *column,
                             offset,
                             || Value::known(value),
                         )?;
                     }
-                    offset += 1;
                 }
 
                 Ok(())

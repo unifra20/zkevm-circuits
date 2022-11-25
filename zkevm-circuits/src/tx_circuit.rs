@@ -60,7 +60,7 @@ impl<F: Field> TxCircuitConfig<F> {
         let value = tx_table.value;
         meta.enable_equality(value);
 
-        let sign_verify = SignVerifyConfig::new(meta, keccak_table.clone(), challenges);
+        let sign_verify = SignVerifyConfig::new(meta, keccak_table, challenges);
 
         Self {
             tx_id,
