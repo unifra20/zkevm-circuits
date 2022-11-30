@@ -7,6 +7,7 @@ use eth_types::evm_types::GasCost;
 use eth_types::{GethExecStep, ToWord};
 use keccak256::EMPTY_HASH;
 use log::warn;
+use crate::error::ExecError;
 
 /// Placeholder structure used to implement [`Opcode`] trait over it
 /// corresponding to the `OpcodeId::CALL` and `OpcodeId::STATICCALL`.
@@ -153,7 +154,7 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
         // There are 3 branches from here.
         match (
             state.is_precompiled(&call.address),
-            callee_code_hash.to_fixed_bytes() == *EMPTY_HASH,
+            callee_code_hash.to_fixed_bytes() == *EMPTY_HASH || geth_step.depth > 1024,
         ) {
             // 1. Call to precompiled.
             (true, _) => {
@@ -169,7 +170,12 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
                 ] {
                     state.call_context_write(&mut exec_step, current_call.call_id, field, value);
                 }
-                state.handle_return(geth_step)?;
+                if let Ok(caller) = state.caller_mut() {
+                    caller.last_callee_id = call.call_id;
+                    caller.last_callee_return_data_length = call.return_data_length;
+                    caller.last_callee_return_data_offset = call.return_data_offset;
+                }
+                state.tx_ctx.pop_call_ctx();
                 Ok(vec![exec_step])
             }
             // 3. Call to account with non-empty code.

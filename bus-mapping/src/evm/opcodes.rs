@@ -53,7 +53,6 @@ mod stackonlyop;
 mod stop;
 mod swap;
 
-mod error_depth;
 mod error_invalid_jump;
 
 #[cfg(test)]
@@ -72,7 +71,6 @@ use codecopy::Codecopy;
 use codesize::Codesize;
 use create::DummyCreate;
 use dup::Dup;
-use error_depth::ErrorDepth;
 use error_invalid_jump::ErrorInvalidJump;
 use exp::Exponentiation;
 use extcodecopy::Extcodecopy;
@@ -262,7 +260,7 @@ fn fn_gen_associated_ops(opcode_id: &OpcodeId) -> FnGenAssociatedOps {
 
 fn fn_gen_error_state_associated_ops(error: &ExecError) -> FnGenAssociatedOps {
     match error {
-        ExecError::Depth => ErrorDepth::gen_associated_ops,
+        ExecError::Depth => CallOpcode::<7>::gen_associated_ops,
         ExecError::InvalidJump => ErrorInvalidJump::gen_associated_ops,
         // more future errors place here
         _ => {

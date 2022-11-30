@@ -1,14 +1,12 @@
 use crate::evm_circuit::execution::ExecutionGadget;
-use crate::evm_circuit::param::{N_BYTES_ACCOUNT_ADDRESS, N_BYTES_GAS, N_BYTES_MEMORY_WORD_SIZE};
+use crate::evm_circuit::param::{N_BYTES_ACCOUNT_ADDRESS, N_BYTES_GAS, N_BYTES_U64, N_BYTES_MEMORY_WORD_SIZE};
 use crate::evm_circuit::step::ExecutionState;
 use crate::evm_circuit::util::common_gadget::TransferGadget;
 use crate::evm_circuit::util::constraint_builder::Transition::{Delta, To};
 use crate::evm_circuit::util::constraint_builder::{
     ConstraintBuilder, ReversionInfo, StepStateTransition,
 };
-use crate::evm_circuit::util::math_gadget::{
-    BatchedIsZeroGadget, ConstantDivisionGadget, IsEqualGadget, IsZeroGadget, MinMaxGadget,
-};
+use crate::evm_circuit::util::math_gadget::{BatchedIsZeroGadget, ConstantDivisionGadget, IsEqualGadget, IsZeroGadget, LtGadget, MinMaxGadget};
 use crate::evm_circuit::util::memory_gadget::{MemoryAddressGadget, MemoryExpansionGadget};
 use crate::evm_circuit::util::{from_bytes, select, sum, CachedRegion, Cell, Word};
 use crate::evm_circuit::witness::{Block, Call, ExecStep, Transaction};
@@ -19,6 +17,7 @@ use eth_types::evm_types::{GasCost, GAS_STIPEND_CALL_WITH_VALUE};
 use eth_types::{Field, ToLittleEndian, ToScalar, U256};
 use halo2_proofs::circuit::Value;
 use halo2_proofs::plonk::Error;
+use gadgets::util::{not, or};
 use keccak256::EMPTY_HASH_LE;
 
 /// Gadget for call related opcodes. It supports `OpcodeId::CALL` and
@@ -36,6 +35,7 @@ pub(crate) struct CallOpGadget<F> {
     callee_address: Word<F>,
     value: Word<F>,
     is_success: Cell<F>,
+    is_depth_ok: LtGadget<F, N_BYTES_U64>,
     gas_is_u64: IsZeroGadget<F>,
     is_warm: Cell<F>,
     is_warm_prev: Cell<F>,
@@ -99,7 +99,7 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
         ]
         .map(|field_tag| cb.call_context(None, field_tag));
 
-        //FIXME cb.range_lookup(depth.expr(), 1024);
+        let is_depth_ok = LtGadget::construct(cb, depth.expr(), 1026.expr());
 
         // Lookup values from stack
         cb.stack_pop(gas_word.expr());
@@ -115,6 +115,15 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
             rd_length.expr(),
         ]
         .map(|expression| cb.stack_pop(expression));
+
+        cb.condition(
+            not::expr(is_depth_ok.expr()),
+            |cb| cb.require_equal(
+                "call must fail when ErrorDepth",
+                is_success.expr(),
+                0.expr(),
+            )
+        );
         cb.stack_push(is_success.expr());
 
         // Recomposition of random linear combination to integer
@@ -220,7 +229,9 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
         // TODO: Handle precompiled
 
         let stack_pointer_delta = select::expr(is_call.expr(), 6.expr(), 5.expr());
-        cb.condition(is_empty_code_hash.expr(), |cb| {
+        cb.condition(
+            or::expr([is_empty_code_hash.expr(), not::expr(is_depth_ok.expr())]),
+            |cb| {
             // Save caller's call state
             for field_tag in [
                 CallContextFieldTag::LastCalleeId,
@@ -325,6 +336,7 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
             callee_address: callee_address_word,
             value,
             is_success,
+            is_depth_ok,
             gas_is_u64,
             is_warm,
             is_warm_prev,
@@ -419,6 +431,8 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
             .assign(region, offset, Some(value.to_le_bytes()))?;
         self.is_success
             .assign(region, offset, Value::known(F::from(is_success.low_u64())))?;
+        self.is_depth_ok
+            .assign(region, offset, F::from(depth.low_u64()), F::from(1026))?;
         self.gas_is_u64.assign(
             region,
             offset,
@@ -914,6 +928,61 @@ mod test {
                 ..Default::default()
             },
             callee(callee_bytecode),
+        );
+    }
+
+
+    #[test]
+    fn test_depth() {
+        let code = bytecode! {
+            PUSH32(word!("0x7f602060006000376000600060206000600060003561ffff5a03f16001030000"))
+            PUSH1(0x0)
+            MSTORE
+            PUSH32(word!("0x0060005260206000F30000000000000000000000000000000000000000000000"))
+            PUSH1(0x20)
+            MSTORE
+
+            PUSH1(0x40)
+            PUSH1(0x0)
+            PUSH1(0x0)
+            CREATE
+
+            DUP1
+            PUSH1(0x40)
+            MSTORE
+
+            PUSH1(0x0) // retSize
+            PUSH1(0x0) // retOffset
+            PUSH1(0x20) // argSize
+            PUSH1(0x40) // argOffset
+            PUSH1(0x0) // Value
+            DUP6
+            PUSH2(0xFF)
+            GAS
+            SUB
+            CALL
+        };
+        assert_eq!(
+            run_test_circuits_with_params(
+                TestContext::<2, 1>::new(
+                    None,
+                    account_0_code_account_1_no_code(code),
+                    |mut txs, accs| {
+                        txs[0]
+                            .to(accs[0].address)
+                            .from(accs[1].address)
+                            .gas(word!("0x2386F26FC10000"));
+                    },
+                    |block, _tx| block.number(0xcafeu64),
+                )
+                    .unwrap(),
+                None,
+                CircuitsParams {
+                    max_rws: 200000,
+                    ..Default::default()
+                }
+            ),
+            Ok(())
         );
     }
 }
