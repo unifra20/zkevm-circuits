@@ -34,11 +34,9 @@ mod tests {
         const MAX_CALLDATA: usize = 128;
 
         let mut rng = ChaCha20Rng::seed_from_u64(2);
-        let randomness = Fr::random(&mut rng);
-        let rand_rpi = Fr::random(&mut rng);
         let public_data = generate_publicdata::<MAX_TXS, MAX_CALLDATA>();
         let circuit =
-            PiCircuit::<Fr, MAX_TXS, MAX_CALLDATA>::new(randomness, rand_rpi, public_data);
+            PiCircuit::<Fr, MAX_TXS, MAX_CALLDATA>::new(public_data);
         let public_inputs = circuit.instance();
         let instance: Vec<&[Fr]> = public_inputs.iter().map(|input| &input[..]).collect();
         let instances = &[&instance[..]][..];
