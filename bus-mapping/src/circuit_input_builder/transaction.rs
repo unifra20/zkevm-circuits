@@ -58,7 +58,7 @@ impl TransactionContext {
                         call_is_success_map.insert(call_indices.pop().unwrap(), is_success);
                     // Callee with empty code
                     } else if CallKind::try_from(geth_step.op).is_ok() {
-                        let is_success = !geth_next_step.stack.last()?.is_zero();
+                        let is_success = true;// !geth_next_step.stack.last()?.is_zero();
                         call_is_success_map.insert(index, is_success);
                     }
                 }

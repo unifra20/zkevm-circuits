@@ -170,12 +170,15 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
                 ] {
                     state.call_context_write(&mut exec_step, current_call.call_id, field, value);
                 }
+                state.handle_return(geth_step)?;
+                /* 
                 if let Ok(caller) = state.caller_mut() {
                     caller.last_callee_id = call.call_id;
                     caller.last_callee_return_data_length = call.return_data_length;
                     caller.last_callee_return_data_offset = call.return_data_offset;
                 }
                 state.tx_ctx.pop_call_ctx();
+                */
                 Ok(vec![exec_step])
             }
             // 3. Call to account with non-empty code.

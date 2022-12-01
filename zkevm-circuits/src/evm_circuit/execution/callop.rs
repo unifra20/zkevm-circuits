@@ -99,7 +99,7 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
         ]
         .map(|field_tag| cb.call_context(None, field_tag));
 
-        let is_depth_ok = LtGadget::construct(cb, depth.expr(), 1026.expr());
+        let is_depth_ok = LtGadget::construct(cb, depth.expr(), 1025.expr());
 
         // Lookup values from stack
         cb.stack_pop(gas_word.expr());
@@ -255,7 +255,7 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
             });
         });
 
-        cb.condition(1.expr() - is_empty_code_hash.expr(), |cb| {
+        cb.condition(1.expr() - or::expr([is_empty_code_hash.expr(), not::expr(is_depth_ok.expr())]), |cb| {
             // Save caller's call state
             for (field_tag, value) in [
                 (
@@ -431,8 +431,9 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
             .assign(region, offset, Some(value.to_le_bytes()))?;
         self.is_success
             .assign(region, offset, Value::known(F::from(is_success.low_u64())))?;
-        self.is_depth_ok
-            .assign(region, offset, F::from(depth.low_u64()), F::from(1026))?;
+        let aa = self.is_depth_ok
+            .assign(region, offset, F::from(depth.low_u64()), F::from(1025))?;
+        println!("is_depth_ok {:?} {:?}", depth.low_u64(), aa);
         self.gas_is_u64.assign(
             region,
             offset,
@@ -535,8 +536,9 @@ mod test {
     use crate::evm_circuit::test::{
         run_test_circuit_geth_data, run_test_circuit_geth_data_default,
     };
+    use crate::test_util::run_test_circuits_with_params;
     use bus_mapping::circuit_input_builder::CircuitsParams;
-    use eth_types::{address, bytecode, Address, ToWord, Word};
+    use eth_types::{address, bytecode, Address, ToWord, Word, word};
     use eth_types::{
         bytecode::Bytecode,
         evm_types::OpcodeId,
@@ -545,6 +547,7 @@ mod test {
     use halo2_proofs::halo2curves::bn256::Fr;
     use itertools::Itertools;
     use mock::TestContext;
+    use mock::test_ctx::helpers::account_0_code_account_1_no_code;
     use std::default::Default;
 
     #[test]
