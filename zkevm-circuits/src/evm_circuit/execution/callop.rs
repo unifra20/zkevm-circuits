@@ -116,6 +116,7 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
         ]
         .map(|expression| cb.stack_pop(expression));
 
+        /* 
         cb.condition(
             not::expr(is_depth_ok.expr()),
             |cb| cb.require_equal(
@@ -124,7 +125,8 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
                 0.expr(),
             )
         );
-        cb.stack_push(is_success.expr());
+        */
+        cb.stack_push(select::expr(is_depth_ok.expr(), is_success.expr(), 0.expr()));
 
         // Recomposition of random linear combination to integer
         let callee_address =
