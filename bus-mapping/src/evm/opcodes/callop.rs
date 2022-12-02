@@ -10,11 +10,10 @@ use keccak256::EMPTY_HASH;
 use log::warn;
 
 /// Placeholder structure used to implement [`Opcode`] trait over it
-/// corresponding to the `OpcodeId::CALL` and `OpcodeId::STATICCALL`.
-/// - CALL: N_ARGS = 7
-/// - STATICCALL: N_ARGS = 6
-/// TODO: Suppose to add bus-mapping of `OpcodeId::CALLCODE` and
-/// `OpcodeId::DELEGATECALL` here.
+/// corresponding to the `OpcodeId::CALL`, `OpcodeId::CALLCODE`,
+/// `OpcodeId::DELEGATECALL` and `OpcodeId::STATICCALL`.
+/// - CALL and CALLCODE: N_ARGS = 7
+/// - DELEGATECALL and STATICCALL: N_ARGS = 6
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct CallOpcode<const N_ARGS: usize>;
 
@@ -37,26 +36,43 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
         let call = state.parse_call(geth_step)?;
         let current_call = state.call()?.clone();
 
-        // NOTE: For `RwCounterEndOfReversion` we use the `0` value as a placeholder,
-        // and later set the proper value in
-        // `CircuitInputBuilder::set_value_ops_call_context_rwc_eor`
-        for (field, value) in [
+        // For both CALLCODE and DELEGATECALL opcodes, `call.address` is caller
+        // address which is different from callee_address (code address).
+        let callee_address = match call.code_source {
+            CodeSource::Address(address) => address,
+            _ => call.address,
+        };
+
+        let mut field_values = vec![
             (CallContextField::TxId, tx_id.into()),
+            // NOTE: For `RwCounterEndOfReversion` we use the `0` value as a
+            // placeholder, and later set the proper value in
+            // `CircuitInputBuilder::set_value_ops_call_context_rwc_eor`
             (CallContextField::RwCounterEndOfReversion, 0.into()),
             (
                 CallContextField::IsPersistent,
                 (current_call.is_persistent as u64).into(),
             ),
             (
-                CallContextField::CalleeAddress,
-                current_call.address.to_word(),
-            ),
-            (
                 CallContextField::IsStatic,
                 (current_call.is_static as u64).into(),
             ),
             (CallContextField::Depth, current_call.depth.into()),
-        ] {
+            (
+                CallContextField::CalleeAddress,
+                current_call.address.to_word(),
+            ),
+        ];
+        if call.kind == CallKind::DelegateCall {
+            field_values.extend([
+                (
+                    CallContextField::CallerAddress,
+                    current_call.caller_address.to_word(),
+                ),
+                (CallContextField::Value, current_call.value),
+            ]);
+        }
+        for (field, value) in field_values {
             state.call_context_read(&mut exec_step, current_call.call_id, field, value);
         }
 
@@ -74,13 +90,13 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
             (call.is_success as u64).into(),
         )?;
 
-        let is_warm = state.sdb.check_account_in_access_list(&call.address);
+        let is_warm = state.sdb.check_account_in_access_list(&callee_address);
         state.push_op_reversible(
             &mut exec_step,
             RW::WRITE,
             TxAccessListAccountOp {
                 tx_id,
-                address: call.address,
+                address: callee_address,
                 is_warm: true,
                 is_warm_prev: is_warm,
             },
@@ -111,14 +127,6 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
 
         let is_empty_account = callee_account.is_empty();
         let callee_nonce = callee_account.nonce;
-        let mut callee_code_hash = call.code_hash;
-        if callee_code_hash.is_zero() {
-            callee_code_hash = H256::from(*EMPTY_HASH);
-            assert!(callee_code_hash.to_fixed_bytes() == *EMPTY_HASH);
-        }
-        debug_assert!(!callee_code_hash.is_zero());
-
-        // TODO: remove value_prev argument from account_read
         state.account_read(
             &mut exec_step,
             call.address,
@@ -126,18 +134,20 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
             callee_nonce,
             callee_nonce,
         )?;
-        let code_source = match call.code_source {
-            CodeSource::Address(address) => address,
-            _ => unreachable!(),
+        let mut callee_code_hash = call.code_hash;
+        if callee_code_hash.is_zero() {
+            callee_code_hash = H256::from(*EMPTY_HASH);
+            assert!(callee_code_hash.to_fixed_bytes() == *EMPTY_HASH);
         };
-        state.account_write(
+        let callee_code_hash_word = callee_code_hash.to_word();
+        state.account_read(
             &mut exec_step,
-            code_source,
+            callee_address,
             AccountField::CodeHash,
-            callee_code_hash.to_word(),
-            callee_code_hash.to_word(),
+            callee_code_hash_word,
+            callee_code_hash_word,
         )?;
-
+ 
         // Calculate next_memory_word_size and callee_gas_left manually in case
         // there isn't next geth_step (e.g. callee doesn't have code).
         debug_assert_eq!(exec_step.memory_size % 32, 0);

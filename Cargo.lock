@@ -3730,6 +3730,9 @@ dependencies = [
 ]
 
 [[package]]
+ "halo2_proofs 0.2.0",
+ "rand",
+ "rand_chacha",
 name = "textwrap"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
