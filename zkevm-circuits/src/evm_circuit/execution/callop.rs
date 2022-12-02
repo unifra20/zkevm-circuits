@@ -19,7 +19,7 @@ use eth_types::evm_types::{GasCost, GAS_STIPEND_CALL_WITH_VALUE};
 use eth_types::{Field, ToLittleEndian, ToScalar, U256};
 use halo2_proofs::circuit::Value;
 use halo2_proofs::plonk::Error;
-use keccak256::{EMPTY_HASH, EMPTY_HASH_LE};
+use keccak256::EMPTY_HASH_LE;
 
 /// Gadget for call related opcodes. It supports `OpcodeId::CALL`,
 /// `OpcodeId::CALLCODE`, `OpcodeId::DELEGATECALL` and `OpcodeId::STATICCALL`.
@@ -613,18 +613,6 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
             0
         } + memory_expansion_gas_cost;
         let gas_available = step.gas_left - gas_cost;
-
-        if callee_code_hash != U256::from(*EMPTY_HASH) {
-            // non empty
-            let gas_left_value =
-                block.rws[step.rw_indices[22 + is_call_or_callcode as usize]].call_context_value();
-            let real_callee_gas_left =
-                std::cmp::min(gas_available - gas_available / 64, gas.low_u64());
-            debug_assert_eq!(
-                gas_left_value.as_u64(),
-                step.gas_left - gas_cost - real_callee_gas_left
-            );
-        }
         self.gas_cost
             .assign(region, offset, Value::known(F::from(step.gas_cost)))?;
         self.one_64th_gas
