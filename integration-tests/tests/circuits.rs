@@ -1,24 +1,22 @@
 #![cfg(feature = "circuits")]
 
-use bus_mapping::circuit_input_builder::{BuilderClient, CircuitsParams};
+use bus_mapping::circuit_input_builder::{keccak_inputs, BuilderClient, CircuitsParams};
+
+use halo2_proofs::circuit::Value;
 use halo2_proofs::{dev::MockProver, halo2curves::bn256::Fr};
-use halo2_proofs::arithmetic::FieldExt;
 use integration_tests::{get_client, log_init, GenDataOutput};
-use integration_tests::{
-    get_client, log_init, GenDataOutput, CHAIN_ID, END_BLOCK, START_BLOCK, TX_ID,
-};
+use integration_tests::{END_BLOCK, START_BLOCK, TX_ID};
 use lazy_static::lazy_static;
 use paste::paste;
 use zkevm_circuits::bytecode_circuit::dev::test_bytecode_circuit;
 use zkevm_circuits::copy_circuit::dev::test_copy_circuit;
-use zkevm_circuits::evm_circuit::test::TestCircuit;
+use zkevm_circuits::evm_circuit::EvmCircuit;
 use zkevm_circuits::evm_circuit::{test::run_test_circuit, witness::block_convert};
 use zkevm_circuits::keccak_circuit::keccak_packed_multi::multi_keccak;
 use zkevm_circuits::state_circuit::StateCircuit;
 use zkevm_circuits::super_circuit::SuperCircuit;
 use zkevm_circuits::tx_circuit::TxCircuit;
-use zkevm_circuits::util::DEFAULT_RAND;
-use zkevm_circuits::util::SubCircuit;
+use zkevm_circuits::util::{Challenges, SubCircuit};
 
 lazy_static! {
     pub static ref GEN_DATA: GenDataOutput = GenDataOutput::load();
@@ -49,7 +47,7 @@ async fn test_mock_prove_tx() {
         return;
     }
 
-    let block = block_convert(&builder.block, &builder.code_db);
+    let block = block_convert(&builder.block, &builder.code_db).unwrap();
     run_test_circuit(block).unwrap();
     log::info!("prove done");
 }
@@ -80,10 +78,15 @@ async fn test_print_circuits_size() {
             return;
         }
 
-        let block = block_convert(&builder.block, &builder.code_db);
-        let evm_rows = TestCircuit::get_num_rows_required(&block);
-        let keccak_inputs = builder.keccak_inputs().unwrap();
-        let keccak_rows = multi_keccak(&keccak_inputs, Fr::from_u128(DEFAULT_RAND), None)
+        let block = block_convert(&builder.block, &builder.code_db).unwrap();
+        let evm_rows = EvmCircuit::get_num_rows_required(&block);
+        let keccak_inputs = keccak_inputs(&builder.block, &builder.code_db).unwrap();
+
+        let challenges = Challenges::mock(
+            Value::known(block.randomness),
+            Value::known(block.randomness),
+        );
+        let keccak_rows = multi_keccak(&keccak_inputs, challenges, None)
             .unwrap()
             .len();
         log::info!(
@@ -112,7 +115,7 @@ async fn test_evm_circuit_batch() {
         return;
     }
 
-    let block = block_convert(&builder.block, &builder.code_db);
+    let block = block_convert(&builder.block, &builder.code_db).unwrap();
     log::info!("tx num: {}", builder.block.txs.len());
     run_test_circuit(block).unwrap();
     log::info!("prove done");

@@ -232,8 +232,6 @@ fn fn_gen_associated_ops(opcode_id: &OpcodeId) -> FnGenAssociatedOps {
         OpcodeId::LOG4 => Log::gen_associated_ops,
         OpcodeId::CALL | OpcodeId::CALLCODE => CallOpcode::<7>::gen_associated_ops,
         OpcodeId::DELEGATECALL | OpcodeId::STATICCALL => CallOpcode::<6>::gen_associated_ops,
-        OpcodeId::DELEGATECALL => CallOpcode::<6>::gen_associated_ops,
-        OpcodeId::CALLCODE => CallOpcode::<7>::gen_associated_ops,
         OpcodeId::RETURN => Return::gen_associated_ops,
         // REVERT is almost the same as RETURN
         OpcodeId::REVERT => Return::gen_associated_ops,

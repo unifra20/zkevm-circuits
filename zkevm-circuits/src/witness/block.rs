@@ -55,8 +55,6 @@ pub struct Block<F> {
     pub prev_state_root: Word, // TODO: Make this H256
     /// Keccak inputs
     pub keccak_inputs: Vec<Vec<u8>>,
-    /// Original Block from geth
-    pub eth_block: eth_types::Block<eth_types::Transaction>,
 }
 
 /// ...
@@ -69,7 +67,11 @@ pub struct BlockContexts {
 impl BlockContexts {
     /// Get the chain ID for the block.
     pub fn chain_id(&self) -> Word {
-        self.ctxs.iter().next().unwrap().1.chain_id
+        self.first().chain_id
+    }
+    /// ..
+    pub fn first(&self) -> &BlockContext {
+        self.ctxs.iter().next().unwrap().1
     }
 }
 
@@ -92,6 +94,8 @@ pub struct BlockContext {
     pub history_hashes: Vec<Word>,
     /// The chain id
     pub chain_id: Word,
+    /// Original Block from geth
+    pub eth_block: eth_types::Block<eth_types::Transaction>,
 }
 
 impl BlockContext {
@@ -200,6 +204,7 @@ impl From<&circuit_input_builder::Block> for BlockContexts {
                             base_fee: block.base_fee,
                             history_hashes: block.history_hashes.clone(),
                             chain_id: block.chain_id,
+                            eth_block: block.eth_block.clone(),
                         },
                     )
                 })
@@ -221,7 +226,7 @@ pub fn block_convert(
         .next()
         .map(|(k, _)| *k)
         .unwrap_or_default();
-     Ok(Block {
+    Ok(Block {
         randomness: Fr::from_u128(DEFAULT_RAND),
         context: block.into(),
         rws: RwMap::from(&block.container),
@@ -268,6 +273,5 @@ pub fn block_convert(
         exp_circuit_pad_to: <usize>::default(),
         prev_state_root: block.prev_state_root,
         keccak_inputs: circuit_input_builder::keccak_inputs(block, code_db)?,
-        eth_block: block.eth_block.clone(),
     })
 }

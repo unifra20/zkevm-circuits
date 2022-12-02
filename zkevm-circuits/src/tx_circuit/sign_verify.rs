@@ -17,11 +17,11 @@ use halo2_proofs::{
     arithmetic::{CurveAffine, FieldExt},
     circuit::{AssignedCell, Cell, Layouter, Value},
     halo2curves::secp256k1::Secp256k1Affine,
-    plonk::{Advice, Column, ConstraintSystem, Error, Expression, Selector},
     halo2curves::{
         group::{Curve, Group},
         secp256k1,
     },
+    plonk::{Advice, Column, ConstraintSystem, Error, Expression, Selector},
     poly::Rotation,
 };
 use integer::{AssignedInteger, IntegerChip, IntegerConfig, IntegerInstructions, Range};

@@ -1,5 +1,5 @@
 use super::Opcode;
-use crate::circuit_input_builder::{CircuitInputStateRef, CodeSource, ExecStep};
+use crate::circuit_input_builder::{CallKind, CircuitInputStateRef, CodeSource, ExecStep};
 use crate::operation::{AccountField, CallContextField, TxAccessListAccountOp, RW};
 use crate::Error;
 use eth_types::evm_types::gas_utils::{eip150_gas, memory_expansion_gas_cost};
@@ -147,7 +147,7 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
             callee_code_hash_word,
             callee_code_hash_word,
         )?;
- 
+
         // Calculate next_memory_word_size and callee_gas_left manually in case
         // there isn't next geth_step (e.g. callee doesn't have code).
         debug_assert_eq!(exec_step.memory_size % 32, 0);

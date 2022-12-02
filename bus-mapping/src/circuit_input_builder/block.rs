@@ -118,6 +118,7 @@ impl BlockHead {
             timestamp: eth_block.timestamp,
             difficulty: eth_block.difficulty,
             base_fee: eth_block.base_fee_per_gas.unwrap_or_default(),
+            eth_block: eth_block.clone(),
         })
     }
 }
@@ -173,7 +174,7 @@ impl Block {
     pub fn new<TX>(
         chain_id: Word,
         history_hashes: Vec<Word>,
-        eth_block: &eth_types::Block<TX>,
+        eth_block: &eth_types::Block<eth_types::Transaction>,
         circuits_params: CircuitsParams,
     ) -> Result<Self, Error> {
         let mut block = Self {
@@ -189,7 +190,6 @@ impl Block {
             },
             exp_events: Vec::new(),
             circuits_params,
-            eth_block: eth_block.clone(),
             ..Default::default()
         };
         let info = BlockHead::new(chain_id, history_hashes, eth_block)?;

@@ -55,8 +55,8 @@ pub struct Challenges<T = u128> {
 impl Challenges {
     /// Construct `Challenges` by allocating challenges in specific phases.
     pub fn construct<F: FieldExt>(_meta: &mut ConstraintSystem<F>) -> Self {
-        #[cfg(test)]
-        let _dummy_col = meta.advice_column();
+        //#[cfg(test)]
+        //let _dummy_col = meta.advice_column();
 
         Self {
             evm_word: DEFAULT_RAND,
@@ -94,7 +94,8 @@ impl<T: Clone> Challenges<T> {
         self.keccak_input.clone()
     }
 
-    pub(crate) fn mock(evm_word: T, keccak_input: T) -> Self {
+    /// ..
+    pub fn mock(evm_word: T, keccak_input: T) -> Self {
         Self {
             evm_word,
             keccak_input,
