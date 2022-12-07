@@ -49,6 +49,7 @@ mod end_block;
 mod end_inner_block;
 mod end_tx;
 mod error_invalid_jump;
+mod error_oog_call;
 mod error_oog_constant;
 mod error_oog_static_memory;
 mod exp;
@@ -109,6 +110,7 @@ use end_block::EndBlockGadget;
 use end_inner_block::EndInnerBlockGadget;
 use end_tx::EndTxGadget;
 use error_invalid_jump::ErrorInvalidJumpGadget;
+use error_oog_call::ErrorOOGCallGadget;
 use error_oog_constant::ErrorOOGConstantGadget;
 use exp::ExponentiationGadget;
 use extcodehash::ExtcodehashGadget;
@@ -245,6 +247,7 @@ pub(crate) struct ExecutionConfig<F> {
     block_ctx_u160_gadget: BlockCtxU160Gadget<F>,
     block_ctx_u256_gadget: BlockCtxU256Gadget<F>,
     // error gadgets
+    error_oog_call: ErrorOOGCallGadget<F>,
     error_oog_constant: ErrorOOGConstantGadget<F>,
     error_oog_static_memory_gadget:
         DummyGadget<F, 0, 0, { ExecutionState::ErrorOutOfGasStaticMemoryExpansion }>,
@@ -255,7 +258,6 @@ pub(crate) struct ExecutionConfig<F> {
     error_oog_log: DummyGadget<F, 0, 0, { ExecutionState::ErrorOutOfGasLOG }>,
     error_oog_sload: DummyGadget<F, 0, 0, { ExecutionState::ErrorOutOfGasSLOAD }>,
     error_oog_sstore: DummyGadget<F, 0, 0, { ExecutionState::ErrorOutOfGasSSTORE }>,
-    error_oog_call: DummyGadget<F, 0, 0, { ExecutionState::ErrorOutOfGasCALL }>,
     error_oog_memory_copy: DummyGadget<F, 0, 0, { ExecutionState::ErrorOutOfGasMemoryCopy }>,
     error_oog_account_access: DummyGadget<F, 0, 0, { ExecutionState::ErrorOutOfGasAccountAccess }>,
     error_oog_sha3: DummyGadget<F, 0, 0, { ExecutionState::ErrorOutOfGasSHA3 }>,
@@ -1115,6 +1117,9 @@ impl<F: Field> ExecutionConfig<F> {
             ExecutionState::ErrorOutOfGasConstant => {
                 assign_exec_step!(self.error_oog_constant)
             }
+            ExecutionState::ErrorOutOfGasCALL => {
+                assign_exec_step!(self.error_oog_call)
+            }
             ExecutionState::ErrorOutOfGasDynamicMemoryExpansion => {
                 assign_exec_step!(self.error_oog_dynamic_memory_gadget)
             }
@@ -1126,9 +1131,6 @@ impl<F: Field> ExecutionConfig<F> {
             }
             ExecutionState::ErrorOutOfGasSSTORE => {
                 assign_exec_step!(self.error_oog_sstore)
-            }
-            ExecutionState::ErrorOutOfGasCALL => {
-                assign_exec_step!(self.error_oog_call)
             }
             ExecutionState::ErrorOutOfGasMemoryCopy => {
                 assign_exec_step!(self.error_oog_memory_copy)

@@ -2,7 +2,7 @@ use crate::circuit_input_builder::{CircuitInputStateRef, ExecStep};
 use crate::evm::Opcode;
 use crate::operation::{AccountField, AccountOp, CallContextField, TxAccessListAccountOp, RW};
 use crate::Error;
-use eth_types::{evm_types::gas_utils::memory_expansion_gas_cost, GethExecStep, ToWord};
+use eth_types::{evm_types::gas_utils::memory_expansion_gas_cost, GethExecStep, ToWord, Word};
 use keccak256::EMPTY_HASH;
 
 #[derive(Debug, Copy, Clone)]
@@ -45,14 +45,20 @@ impl<const IS_CREATE2: bool> Opcode for DummyCreate<IS_CREATE2> {
             state.create_address()?
         };
 
+        // TODO: rename this to initialization call?
+        let call = state.parse_call(geth_step)?;
         state.stack_write(
             &mut exec_step,
             geth_step.stack.nth_last_filled(n_pop - 1),
-            address.to_word(),
+            if call.is_success {
+                address.to_word()
+            } else {
+                Word::zero()
+            },
         )?;
 
         let tx_id = state.tx_ctx.id();
-        let call = state.parse_call(geth_step)?;
+        let current_call = state.call()?.clone();
         let current_call = state.call()?.clone();
 
         // Quote from [EIP-2929](https://eips.ethereum.org/EIPS/eip-2929)
@@ -160,11 +166,14 @@ impl<const IS_CREATE2: bool> Opcode for DummyCreate<IS_CREATE2> {
                 current_call.address.to_word(),
             ),
             (CallContextField::CalleeAddress, call.address.to_word()),
+            (
+                CallContextField::RwCounterEndOfReversion,
+                call.rw_counter_end_of_reversion.to_word(),
+            ),
+            (CallContextField::IsPersistent, call.is_persistent.to_word()),
         ] {
             state.call_context_write(&mut exec_step, call.call_id, field, value);
         }
-
-        // state.push_call(call.clone());
 
         if call.code_hash.to_fixed_bytes() == *EMPTY_HASH {
             // 1. Create with empty initcode.

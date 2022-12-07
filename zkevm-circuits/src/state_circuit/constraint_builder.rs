@@ -56,6 +56,7 @@ pub struct Queries<F: Field> {
     pub initial_value: Expression<F>,
     pub value_prev_col: Expression<F>,
     pub initial_value_prev: Expression<F>,
+    pub is_non_exist: Expression<F>,
     pub lookups: LookupsQueries<F>,
     pub power_of_randomness: [Expression<F>; N_BYTES_WORD - 1],
     pub first_different_limb: [Expression<F>; 4],
@@ -317,6 +318,8 @@ impl<F: Field> ConstraintBuilder<F> {
         // TODO: cold VS warm
         self.require_zero("field_tag is 0 for AccountStorage", q.field_tag());
 
+        let is_non_exist = q.is_non_exist();
+
         self.condition(q.last_access(), |cb| {
             cb.add_lookup(
                 "mpt_update exists in mpt circuit for AccountStorage last access",
@@ -330,7 +333,8 @@ impl<F: Field> ConstraintBuilder<F> {
                         q.mpt_update_table.storage_key.clone(),
                     ),
                     (
-                        ProofType::StorageChanged.expr(),
+                        is_non_exist.expr() * ProofType::StorageDoesNotExist.expr()
+                            + (1.expr() - is_non_exist) * ProofType::StorageChanged.expr(),
                         q.mpt_update_table.proof_type.clone(),
                     ),
                     (q.state_root(), q.mpt_update_table.new_root.clone()),
@@ -562,6 +566,10 @@ impl<F: Field> Queries<F> {
 
     fn initial_value_prev(&self) -> Expression<F> {
         self.initial_value_prev.clone()
+    }
+
+    fn is_non_exist(&self) -> Expression<F> {
+        self.is_non_exist.clone()
     }
 
     fn tag_matches(&self, tag: RwTableTag) -> Expression<F> {
