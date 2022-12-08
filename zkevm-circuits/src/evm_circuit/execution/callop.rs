@@ -306,6 +306,7 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
                     has_value.clone() * GAS_STIPEND_CALL_WITH_VALUE.expr() - gas_cost.clone(),
                 ),
                 memory_word_size: To(memory_expansion.next_memory_word_size()),
+                // For CALL opcode, `transfer` invocation has two account write.
                 reversible_write_counter: Delta(1.expr() + is_call.expr() * 2.expr()),
                 ..StepStateTransition::default()
             });
@@ -390,6 +391,7 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
                 is_create: To(false.expr()),
                 code_hash: To(callee_code_hash.expr()),
                 gas_left: To(callee_gas_left),
+                // For CALL opcode, `transfer` invocation has two account write.
                 reversible_write_counter: To(is_call.expr() * 2.expr()),
                 ..StepStateTransition::new_context()
             });
@@ -943,6 +945,7 @@ mod test {
                     .from(accs[0].address)
                     .to(accs[1].address)
                     .gas(100000.into())
+                    // Set a non-zero value could test if DELEGATECALL use value of current call.
                     .value(1000.into());
             },
             |block, _tx| block.number(0xcafeu64),
