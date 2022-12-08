@@ -685,12 +685,9 @@ mod test {
     use super::*;
     use crate::evm_circuit::test::run_test_circuit_geth_data;
     use bus_mapping::circuit_input_builder::CircuitsParams;
+    use eth_types::evm_types::OpcodeId;
+    use eth_types::geth_types::{Account, GethData};
     use eth_types::{address, bytecode, Address, ToWord, Word};
-    use eth_types::{
-        bytecode::Bytecode,
-        evm_types::OpcodeId,
-        geth_types::{Account, GethData},
-    };
     use halo2_proofs::halo2curves::bn256::Fr;
     use itertools::Itertools;
     use mock::TestContext;
@@ -775,6 +772,15 @@ mod test {
                 rd_length: 0,
                 ..Default::default()
             },
+            // With memory expansion and value
+            Stack {
+                cd_offset: 64,
+                cd_length: 320,
+                rd_offset: 0,
+                rd_length: 32,
+                value: Word::from(10).pow(18.into()),
+                ..Default::default()
+            },
         ];
         let callees = [callee(bytecode! {}), callee(bytecode! { STOP })];
         for ((opcode, stack), callee) in TEST_CALL_OPCODES
@@ -796,7 +802,7 @@ mod test {
         rd_length: u64,
     }
 
-    fn callee(code: Bytecode) -> Account {
+    fn callee(code: bytecode::Bytecode) -> Account {
         let code = code.to_vec();
         let is_empty = code.is_empty();
         Account {
@@ -936,7 +942,8 @@ mod test {
                 txs[0]
                     .from(accs[0].address)
                     .to(accs[1].address)
-                    .gas(100000.into());
+                    .gas(100000.into())
+                    .value(1000.into());
             },
             |block, _tx| block.number(0xcafeu64),
         )
