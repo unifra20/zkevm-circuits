@@ -257,6 +257,10 @@ impl<'a> CircuitInputBuilder {
             self.set_value_ops_call_context_rwc_eor();
             self.set_end_block();
         }
+        log::info!(
+            "handling block done, total gas {:?}",
+            self.block_ctx.cumulative_gas_used
+        );
         Ok(())
     }
 
@@ -525,7 +529,7 @@ impl<P: JsonRpcClient> BuilderClient<P> {
         let geth_traces = self.cli.trace_block_by_number(block_num.into()).await?;
 
         // fetch up to 256 blocks
-        let mut n_blocks = std::cmp::min(256, block_num as usize);
+        let mut n_blocks = 0; //std::cmp::min(256, block_num as usize);
         let mut next_hash = eth_block.parent_hash;
         let mut prev_state_root: Option<Word> = None;
         let mut history_hashes = vec![Word::default(); n_blocks];
@@ -631,6 +635,11 @@ impl<P: JsonRpcClient> BuilderClient<P> {
             for storage_proof in proof.storage_proof {
                 storage.insert(storage_proof.key, storage_proof.value);
             }
+            log::trace!(
+                "statedb set_account {:?} balance {:?}",
+                proof.address,
+                proof.balance
+            );
             sdb.set_account(
                 &proof.address,
                 state_db::Account {

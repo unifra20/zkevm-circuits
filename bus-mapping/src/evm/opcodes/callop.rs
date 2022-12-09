@@ -5,7 +5,7 @@ use crate::Error;
 use eth_types::evm_types::gas_utils::{eip150_gas, memory_expansion_gas_cost};
 use eth_types::evm_types::GasCost;
 use eth_types::{evm_types::OpcodeId, H256};
-use eth_types::{GethExecStep, ToWord};
+use eth_types::{GethExecStep, ToWord, Word};
 use keccak256::EMPTY_HASH;
 use log::warn;
 
@@ -179,6 +179,13 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
             0
         } + memory_expansion_gas_cost;
         let gas_specified = geth_step.stack.last()?;
+        debug_assert!(
+            geth_step.gas.0 >= gas_cost,
+            "gas {:?} gas_cost {:?} memory_expansion_gas_cost {:?}",
+            geth_step.gas.0,
+            gas_cost,
+            memory_expansion_gas_cost
+        );
         let callee_gas_left = eip150_gas(geth_step.gas.0 - gas_cost, gas_specified);
 
         if geth_steps[0].op == OpcodeId::CALL
@@ -316,7 +323,14 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
                         CallContextField::ReturnDataLength,
                         call.return_data_length.into(),
                     ),
-                    (CallContextField::Value, call.value),
+                    (
+                        CallContextField::Value,
+                        if call.kind == CallKind::DelegateCall {
+                            current_call.value
+                        } else {
+                            call.value
+                        },
+                    ),
                     (CallContextField::IsSuccess, (call.is_success as u64).into()),
                     (CallContextField::IsStatic, (call.is_static as u64).into()),
                     (CallContextField::LastCalleeId, 0.into()),

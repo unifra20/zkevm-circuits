@@ -437,7 +437,11 @@ pub mod test {
         ));
         let k = k.max(log2_ceil(NUM_BLINDING_ROWS + num_rows_required_for_steps));
         let k = k.max(log2_ceil(NUM_BLINDING_ROWS + block.circuits_params.max_rws));
-        log::info!("evm circuit uses k = {}", k);
+        log::info!(
+            "evm circuit uses k = {}, rows {}",
+            k,
+            num_rows_required_for_steps
+        );
         let (active_gate_rows, active_lookup_rows) = EvmCircuit::<F>::get_active_rows(&block);
         let circuit = EvmCircuit::<F>::new_dev(block, fixed_table_tags);
         let prover = MockProver::<F>::run(k, &circuit, vec![]).unwrap();
