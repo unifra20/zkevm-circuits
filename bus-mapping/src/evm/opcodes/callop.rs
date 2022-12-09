@@ -116,6 +116,7 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
         }
 
         let (_, callee_account) = state.sdb.get_account(&call.address);
+        let callee_account = callee_account.clone();
         let is_empty_account = callee_account.is_empty();
         let callee_nonce = callee_account.nonce;
 
@@ -138,8 +139,6 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
                 callee_balance,
             )?;
         }
-
-        let callee_account = callee_account.clone();
 
         state.account_read(
             &mut exec_step,

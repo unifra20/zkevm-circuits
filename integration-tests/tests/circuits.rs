@@ -1,21 +1,13 @@
 #![cfg(feature = "circuits")]
 
 use bus_mapping::circuit_input_builder::{keccak_inputs, BuilderClient, CircuitsParams};
-
 use halo2_proofs::circuit::Value;
-
 use integration_tests::{get_client, log_init};
 use integration_tests::{END_BLOCK, START_BLOCK, TX_ID};
-
-
-
 use zkevm_circuits::evm_circuit::EvmCircuit;
 use zkevm_circuits::evm_circuit::{test::run_test_circuit, witness::block_convert};
 use zkevm_circuits::keccak_circuit::keccak_packed_multi::multi_keccak;
-
-
-
-use zkevm_circuits::util::{Challenges};
+use zkevm_circuits::util::Challenges;
 
 const CIRCUITS_PARAMS: CircuitsParams = CircuitsParams {
     max_rws: 0,
