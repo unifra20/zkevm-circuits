@@ -254,10 +254,15 @@ fn fn_gen_associated_ops(opcode_id: &OpcodeId) -> FnGenAssociatedOps {
     }
 }
 
-fn fn_gen_error_state_associated_ops(error: &ExecError) -> FnGenAssociatedOps {
+fn fn_gen_error_state_associated_ops(geth_step: &GethExecStep, error: &ExecError) -> FnGenAssociatedOps {
     match error {
         ExecError::InvalidJump => ErrorInvalidJump::gen_associated_ops,
         ExecError::OutOfGas(OogError::Call) => OOGCall::gen_associated_ops,
+        ExecError::Depth => {
+            let op = geth_step.op;
+            assert!(op.is_call());
+            fn_gen_associated_ops(&op)
+        },
         // more future errors place here
         _ => {
             warn!("Using dummy gen_associated_ops for error state {:?}", error);
@@ -306,14 +311,8 @@ pub fn gen_associated_ops(
         if exec_step.oog_or_stack_error() && !geth_step.op.is_call_or_create() {
             state.gen_restore_context_ops(&mut exec_step, geth_steps)?;
         } else {
-            if geth_step.op.is_call_or_create() && !exec_step.oog_or_stack_error() {
-                let call = state.parse_call(geth_step)?;
-                // Switch to callee's call context
-                state.push_call(call);
-            } else {
-                let fn_gen_error_associated_ops = fn_gen_error_state_associated_ops(&exec_error);
-                return fn_gen_error_associated_ops(state, geth_steps);
-            }
+            let fn_gen_error_associated_ops = fn_gen_error_state_associated_ops(&geth_step, &exec_error);
+            return fn_gen_error_associated_ops(state, geth_steps);
         }
 
         state.handle_return(geth_step)?;

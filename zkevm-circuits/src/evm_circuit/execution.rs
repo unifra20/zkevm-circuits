@@ -270,7 +270,7 @@ pub(crate) struct ExecutionConfig<F> {
     error_oog_code_store: DummyGadget<F, 0, 0, { ExecutionState::ErrorOutOfGasCodeStore }>,
     error_insufficient_balance: DummyGadget<F, 0, 0, { ExecutionState::ErrorInsufficientBalance }>,
     error_invalid_jump: ErrorInvalidJumpGadget<F>,
-    error_depth: DummyGadget<F, 0, 0, { ExecutionState::ErrorDepth }>,
+    // error_depth: DummyGadget<F, 0, 0, { ExecutionState::ErrorDepth }>,
     error_write_protection: DummyGadget<F, 0, 0, { ExecutionState::ErrorWriteProtection }>,
     error_contract_address_collision:
         DummyGadget<F, 0, 0, { ExecutionState::ErrorContractAddressCollision }>,
@@ -507,7 +507,7 @@ impl<F: Field> ExecutionConfig<F> {
             error_insufficient_balance: configure_gadget!(),
             error_invalid_jump: configure_gadget!(),
             error_write_protection: configure_gadget!(),
-            error_depth: configure_gadget!(),
+            // error_depth: configure_gadget!(),
             error_contract_address_collision: configure_gadget!(),
             error_invalid_creation_code: configure_gadget!(),
             error_return_data_out_of_bound: configure_gadget!(),
@@ -1100,9 +1100,9 @@ impl<F: Field> ExecutionConfig<F> {
             ExecutionState::ErrorWriteProtection => {
                 assign_exec_step!(self.error_write_protection)
             }
-            ExecutionState::ErrorDepth => {
-                assign_exec_step!(self.error_depth)
-            }
+            // ExecutionState::ErrorDepth => {
+            //     assign_exec_step!(self.error_depth)
+            // }
             ExecutionState::ErrorContractAddressCollision => {
                 assign_exec_step!(self.error_contract_address_collision)
             }
