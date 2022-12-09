@@ -422,7 +422,20 @@ impl<'a> CircuitInputStateRef<'a> {
             return Err(Error::AccountNotFound(sender));
         }
         let sender_balance_prev = sender_account.balance;
+        debug_assert!(
+            sender_account.balance >= value + fee,
+            "invalid amount balance {:?} value {:?} fee {:?}",
+            sender_account.balance,
+            value,
+            fee
+        );
         let sender_balance = sender_account.balance - value - fee;
+        log::trace!(
+            "balance update: {:?} {:?}->{:?}",
+            sender,
+            sender_balance_prev,
+            sender_balance
+        );
         self.push_op_reversible(
             step,
             RW::WRITE,
@@ -437,6 +450,12 @@ impl<'a> CircuitInputStateRef<'a> {
         let (_found, receiver_account) = self.sdb.get_account(&receiver);
         let receiver_balance_prev = receiver_account.balance;
         let receiver_balance = receiver_account.balance + value;
+        log::trace!(
+            "balance update: {:?} {:?}->{:?}",
+            receiver,
+            receiver_balance_prev,
+            receiver_balance
+        );
         self.push_op_reversible(
             step,
             RW::WRITE,
@@ -597,7 +616,7 @@ impl<'a> CircuitInputStateRef<'a> {
                 step.stack.nth_last(2)?,
             ),
             CallKind::CallCode => (caller.address, caller.address, step.stack.nth_last(2)?),
-            CallKind::DelegateCall => (caller.caller_address, caller.address, caller.value),
+            CallKind::DelegateCall => (caller.caller_address, caller.address, Word::zero()),
             CallKind::StaticCall => (
                 caller.address,
                 step.stack.nth_last(1)?.to_address(),
@@ -1095,6 +1114,7 @@ impl<'a> CircuitInputStateRef<'a> {
         }
 
         // The *CALL*/CREATE* code was not executed
+
         let next_pc = next_step.map(|s| s.pc.0).unwrap_or(1);
         if matches!(
             step.op,

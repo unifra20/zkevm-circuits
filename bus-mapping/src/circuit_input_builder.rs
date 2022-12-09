@@ -113,12 +113,17 @@ impl<'a> CircuitInputBuilder {
     }
     /// Create a new CircuitInputBuilder from the given `eth_block` and
     /// `constants`.
-    pub fn new_from_headers(sdb: StateDB, code_db: CodeDB, headers: &[BlockHead]) -> Self {
+    pub fn new_from_headers(
+        circuits_params: CircuitsParams,
+        sdb: StateDB,
+        code_db: CodeDB,
+        headers: &[BlockHead],
+    ) -> Self {
         // lispczz@scroll:
         // the `block` here is in fact "batch" for l2.
         // while "headers" in the "block"(usually single tx) for l2.
         // But to reduce the code conflicts with upstream, we still use the name `block`
-        Self::new(sdb, code_db, &Block::from_headers(headers))
+        Self::new(sdb, code_db, &Block::from_headers(headers, circuits_params))
     }
 
     /// Obtain a mutable reference to the state that the `CircuitInputBuilder`
@@ -252,6 +257,10 @@ impl<'a> CircuitInputBuilder {
             self.set_value_ops_call_context_rwc_eor();
             self.set_end_block();
         }
+        log::info!(
+            "handling block done, total gas {:?}",
+            self.block_ctx.cumulative_gas_used
+        );
         Ok(())
     }
 
@@ -520,7 +529,7 @@ impl<P: JsonRpcClient> BuilderClient<P> {
         let geth_traces = self.cli.trace_block_by_number(block_num.into()).await?;
 
         // fetch up to 256 blocks
-        let mut n_blocks = std::cmp::min(256, block_num as usize);
+        let mut n_blocks = 0; //std::cmp::min(256, block_num as usize);
         let mut next_hash = eth_block.parent_hash;
         let mut prev_state_root: Option<Word> = None;
         let mut history_hashes = vec![Word::default(); n_blocks];
@@ -626,6 +635,11 @@ impl<P: JsonRpcClient> BuilderClient<P> {
             for storage_proof in proof.storage_proof {
                 storage.insert(storage_proof.key, storage_proof.value);
             }
+            log::trace!(
+                "statedb set_account {:?} balance {:?}",
+                proof.address,
+                proof.balance
+            );
             sdb.set_account(
                 &proof.address,
                 state_db::Account {
@@ -656,7 +670,12 @@ impl<P: JsonRpcClient> BuilderClient<P> {
         _prev_state_root: Word,
     ) -> Result<CircuitInputBuilder, Error> {
         let block = BlockHead::new(self.chain_id, history_hashes, eth_block)?;
-        let mut builder = CircuitInputBuilder::new_from_headers(sdb, code_db, &[block]);
+        let mut builder = CircuitInputBuilder::new_from_headers(
+            self.circuits_params.clone(),
+            sdb,
+            code_db,
+            &[block],
+        );
 
         builder.handle_block(eth_block, geth_traces)?;
         Ok(builder)
@@ -670,7 +689,12 @@ impl<P: JsonRpcClient> BuilderClient<P> {
         code_db: CodeDB,
         blocks_and_traces: &[(EthBlock, Vec<eth_types::GethExecTrace>)],
     ) -> Result<CircuitInputBuilder, Error> {
-        let mut builder = CircuitInputBuilder::new_from_headers(sdb, code_db, Default::default());
+        let mut builder = CircuitInputBuilder::new_from_headers(
+            self.circuits_params.clone(),
+            sdb,
+            code_db,
+            Default::default(),
+        );
         for (idx, (eth_block, geth_traces)) in blocks_and_traces.iter().enumerate() {
             let is_last = idx == blocks_and_traces.len() - 1;
             let header = BlockHead::new(self.chain_id, Default::default(), eth_block)?;

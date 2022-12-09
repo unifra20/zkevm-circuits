@@ -151,7 +151,7 @@ pub struct Block {
 
 impl Block {
     /// ...
-    pub fn from_headers(headers: &[BlockHead]) -> Self {
+    pub fn from_headers(headers: &[BlockHead], circuits_params: CircuitsParams) -> Self {
         Self {
             block_steps: BlockSteps {
                 end_block_not_last: ExecStep {
@@ -167,6 +167,7 @@ impl Block {
                 .iter()
                 .map(|b| (b.number.as_u64(), b.clone()))
                 .collect::<BTreeMap<_, _>>(),
+            circuits_params,
             ..Default::default()
         }
     }

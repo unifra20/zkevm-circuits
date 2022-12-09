@@ -34,7 +34,15 @@ async fn test_mock_prove_tx() {
         return;
     }
     let cli = get_client();
-    let cli = BuilderClient::new(cli, CIRCUITS_PARAMS).await.unwrap();
+    let params = CircuitsParams {
+        max_rws: 50000,
+        max_txs: 10,
+        max_calldata: 40000,
+        max_bytecode: 40000,
+        keccak_padding: None,
+    };
+
+    let cli = BuilderClient::new(cli, params).await.unwrap();
     let builder = cli.gen_inputs_tx(tx_id).await.unwrap();
 
     if builder.block.txs.is_empty() {
@@ -53,6 +61,31 @@ async fn test_evm_circuit_all_block() {
     let start: usize = *START_BLOCK;
     let end: usize = *END_BLOCK;
     for blk in start..=end {
+        let block_num = blk as u64;
+        log::info!("test evm circuit, block number: {}", block_num);
+        let cli = get_client();
+        let params = CircuitsParams {
+            max_rws: 4_000_000,
+            max_txs: 500,
+            max_calldata: 400000,
+            max_bytecode: 400000,
+            keccak_padding: None,
+        };
+        let cli = BuilderClient::new(cli, params).await.unwrap();
+        let (builder, _) = cli.gen_inputs(block_num).await.unwrap();
+
+        let block = block_convert(&builder.block, &builder.code_db).unwrap();
+        if builder.block.txs.is_empty() {
+            log::info!("skip empty block");
+            return;
+        }
+
+        let result = run_test_circuit(block);
+        log::info!(
+            "test evm circuit, block number: {} result {:?}",
+            block_num,
+            result
+        );
     }
 }
 

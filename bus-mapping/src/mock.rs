@@ -32,12 +32,13 @@ impl BlockData {
     /// Generate a new CircuitInputBuilder initialized with the context of the
     /// BlockData.
     pub fn new_circuit_input_builder(&self) -> CircuitInputBuilder {
-        let mut block = Block::from_headers(&[BlockHead::new(
-            self.chain_id,
-            self.history_hashes.clone(),
-            &self.eth_block,
-        )
-        .unwrap()]);
+        let mut block = Block::from_headers(
+            &[
+                BlockHead::new(self.chain_id, self.history_hashes.clone(), &self.eth_block)
+                    .unwrap(),
+            ],
+            Default::default(),
+        );
         block.circuits_params = self.circuits_params.clone();
         CircuitInputBuilder::new(self.sdb.clone(), self.code_db.clone(), &block)
     }
