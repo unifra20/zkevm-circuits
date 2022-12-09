@@ -5,7 +5,7 @@ use crate::Error;
 use eth_types::evm_types::gas_utils::{eip150_gas, memory_expansion_gas_cost};
 use eth_types::evm_types::GasCost;
 use eth_types::{evm_types::OpcodeId, H256};
-use eth_types::{GethExecStep, ToWord, Word};
+use eth_types::{GethExecStep, ToWord};
 use keccak256::EMPTY_HASH;
 use log::warn;
 

@@ -3,19 +3,19 @@
 use bus_mapping::circuit_input_builder::{keccak_inputs, BuilderClient, CircuitsParams};
 
 use halo2_proofs::circuit::Value;
-use halo2_proofs::{dev::MockProver, halo2curves::bn256::Fr};
-use integration_tests::{get_client, log_init, GenDataOutput};
+
+use integration_tests::{get_client, log_init};
 use integration_tests::{END_BLOCK, START_BLOCK, TX_ID};
-use lazy_static::lazy_static;
-use paste::paste;
-use zkevm_circuits::copy_circuit::dev::test_copy_circuit;
+
+
+
 use zkevm_circuits::evm_circuit::EvmCircuit;
 use zkevm_circuits::evm_circuit::{test::run_test_circuit, witness::block_convert};
 use zkevm_circuits::keccak_circuit::keccak_packed_multi::multi_keccak;
-use zkevm_circuits::state_circuit::StateCircuit;
-use zkevm_circuits::super_circuit::SuperCircuit;
-use zkevm_circuits::tx_circuit::TxCircuit;
-use zkevm_circuits::util::{Challenges, SubCircuit};
+
+
+
+use zkevm_circuits::util::{Challenges};
 
 const CIRCUITS_PARAMS: CircuitsParams = CircuitsParams {
     max_rws: 0,
