@@ -347,7 +347,7 @@ pub mod test {
                 &mut layouter,
                 &block.txs,
                 block.circuits_params.max_txs,
-                block.randomness,
+                &challenges,
             )?;
             block.rws.check_rw_counter_sanity();
             config.rw_table.load(
@@ -362,9 +362,7 @@ pub mod test {
             config
                 .block_table
                 .load(&mut layouter, &block.context, &block.txs, block.randomness)?;
-            config
-                .copy_table
-                .load(&mut layouter, block, block.randomness)?;
+            config.copy_table.load(&mut layouter, block, &challenges)?;
             config
                 .keccak_table
                 .dev_load(&mut layouter, &block.sha3_inputs, &challenges)?;
@@ -414,12 +412,14 @@ pub mod test {
         run_test_circuit(block)
     }
 
-    pub fn run_test_circuit<F: Field>(block: Block<F>) -> Result<(), Vec<VerifyFailure>> {
-        let fixed_table_tags = detect_fixed_table_tags(&block);
+    pub fn get_test_degree<F: Field>(block: &Block<F>) -> u32 {
         let log2_ceil = |n| u32::BITS - (n as u32).leading_zeros() - (n & (n - 1) == 0) as u32;
 
-        let num_rows_required_for_steps = EvmCircuit::<F>::get_num_rows_required(&block);
+        let num_rows_required_for_steps = EvmCircuit::<F>::get_num_rows_required(block);
         const NUM_BLINDING_ROWS: usize = 64;
+
+        let fixed_table_tags = detect_fixed_table_tags(block);
+
         let k = log2_ceil(
             NUM_BLINDING_ROWS
                 + fixed_table_tags
@@ -438,8 +438,25 @@ pub mod test {
         let k = k.max(log2_ceil(NUM_BLINDING_ROWS + num_rows_required_for_steps));
         let k = k.max(log2_ceil(NUM_BLINDING_ROWS + block.circuits_params.max_rws));
         log::info!("evm circuit uses k = {}", k);
+        k
+    }
+
+    pub fn get_test_cicuit_from_block<F: Field>(block: Block<F>) -> EvmCircuit<F> {
+        let fixed_table_tags = detect_fixed_table_tags(&block);
+        EvmCircuit::<F>::new_dev(block, fixed_table_tags)
+    }
+
+    pub fn get_test_instance<F: Field>(block: &Block<F>) -> Vec<Vec<F>> {
+        let k = get_test_degree(block);
+        (1..32)
+            .map(|exp| vec![block.randomness.pow(&[exp, 0, 0, 0]); (1 << k) - 64])
+            .collect()
+    }
+
+    pub fn run_test_circuit<F: Field>(block: Block<F>) -> Result<(), Vec<VerifyFailure>> {
+        let k = get_test_degree(&block);
         let (active_gate_rows, active_lookup_rows) = EvmCircuit::<F>::get_active_rows(&block);
-        let circuit = EvmCircuit::<F>::new_dev(block, fixed_table_tags);
+        let circuit = get_test_cicuit_from_block(block);
         let prover = MockProver::<F>::run(k, &circuit, vec![]).unwrap();
         prover.verify_at_rows_par(active_gate_rows.into_iter(), active_lookup_rows.into_iter())
     }
