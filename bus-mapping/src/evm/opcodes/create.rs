@@ -58,7 +58,6 @@ impl<const IS_CREATE2: bool> Opcode for DummyCreate<IS_CREATE2> {
         )?;
 
         let tx_id = state.tx_ctx.id();
-        let _current_call = state.call()?.clone();
         let current_call = state.call()?.clone();
 
         // Quote from [EIP-2929](https://eips.ethereum.org/EIPS/eip-2929)

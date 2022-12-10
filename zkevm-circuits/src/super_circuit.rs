@@ -377,8 +377,6 @@ impl<const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: usize>
         let copy_circuit = CopyCircuit::new_from_block(&block);
         let exp_circuit = ExpCircuit::new_from_block(&block);
         let keccak_circuit = KeccakCircuit::new_from_block(&block);
-        // TODO: fixme
-        let _context = block.context.ctxs.iter().next().unwrap().1;
 
         let circuit = SuperCircuit::<_, MAX_TXS, MAX_CALLDATA, MAX_RWS> {
             evm_circuit,
