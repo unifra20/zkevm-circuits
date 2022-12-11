@@ -116,7 +116,15 @@ impl BlockHead {
                 .low_u64()
                 .into(),
             timestamp: eth_block.timestamp,
-            difficulty: eth_block.difficulty,
+            difficulty: if eth_block.difficulty.is_zero() {
+                eth_block
+                    .mix_hash
+                    .unwrap_or_default()
+                    .to_fixed_bytes()
+                    .into()
+            } else {
+                eth_block.difficulty
+            },
             base_fee: eth_block.base_fee_per_gas.unwrap_or_default(),
             eth_block: eth_block.clone(),
         })
