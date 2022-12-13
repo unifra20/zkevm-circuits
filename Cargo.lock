@@ -1058,7 +1058,7 @@ dependencies = [
 [[package]]
 name = "ecc"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/halo2wrong?branch=sync-halo2-ecc-1013#5c481a2f32658f1e283c9ab69616a8e5d5bd7fee"
+source = "git+https://github.com/scroll-tech/halo2wrong?branch=sync-halo2-ecc-11-28#d7fd77c156bfe6fb763c0337cfb77ea8703c0a66"
 dependencies = [
  "group",
  "integer",
@@ -1072,7 +1072,7 @@ dependencies = [
 [[package]]
 name = "ecdsa"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/halo2wrong?branch=sync-halo2-ecc-1013#5c481a2f32658f1e283c9ab69616a8e5d5bd7fee"
+source = "git+https://github.com/scroll-tech/halo2wrong?branch=sync-halo2-ecc-11-28#d7fd77c156bfe6fb763c0337cfb77ea8703c0a66"
 dependencies = [
  "ecc",
  "group",
@@ -1851,13 +1851,15 @@ checksum = "eabb4a44450da02c90444cf74558da904edde8fb4e9035a9a6a4e15445af0bd7"
 [[package]]
 name = "halo2_proofs"
 version = "0.2.0"
-source = "git+https://github.com/scroll-tech/halo2.git?branch=sync-halo2-ecc-1013#f6fe0ced4264c0efb980f95c597070ec4b02d166"
+source = "git+https://github.com/scroll-tech/halo2.git?branch=sync-halo2-ecc-11-28#0baac5bbd2572b1fc2d9882f36ba8ecf4c0a2eea"
 dependencies = [
+ "ark-std",
  "blake2b_simd",
  "cfg-if 0.1.10",
  "ff",
  "group",
- "halo2curves",
+ "halo2curves 0.2.1 (git+https://github.com/privacy-scaling-explorations/halo2curves)",
+ "log",
  "num-bigint",
  "num-integer",
  "plotters",
@@ -1872,7 +1874,24 @@ dependencies = [
 [[package]]
 name = "halo2curves"
 version = "0.2.1"
-source = "git+https://github.com/scroll-tech/halo2curves/?branch=sync-halo2-ecc-1013#bfc1a9a7d6b949ee3a717614e6dbdc38394be605"
+source = "git+https://github.com/privacy-scaling-explorations/halo2curves?tag=0.3.0#83c72d49762343ffc9576ca11a2aa615efe1029b"
+dependencies = [
+ "ff",
+ "group",
+ "lazy_static",
+ "num-bigint",
+ "num-traits",
+ "pasta_curves",
+ "rand",
+ "rand_core",
+ "static_assertions",
+ "subtle",
+]
+
+[[package]]
+name = "halo2curves"
+version = "0.2.1"
+source = "git+https://github.com/privacy-scaling-explorations/halo2curves#701c27e165f676197d453b58662fcc75b7f2b1a0"
 dependencies = [
  "ff",
  "group",
@@ -1889,7 +1908,7 @@ dependencies = [
 [[package]]
 name = "halo2wrong"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/halo2wrong?branch=sync-halo2-ecc-1013#5c481a2f32658f1e283c9ab69616a8e5d5bd7fee"
+source = "git+https://github.com/scroll-tech/halo2wrong?branch=sync-halo2-ecc-11-28#d7fd77c156bfe6fb763c0337cfb77ea8703c0a66"
 dependencies = [
  "group",
  "halo2_proofs",
@@ -2168,7 +2187,7 @@ dependencies = [
 [[package]]
 name = "integer"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/halo2wrong?branch=sync-halo2-ecc-1013#5c481a2f32658f1e283c9ab69616a8e5d5bd7fee"
+source = "git+https://github.com/scroll-tech/halo2wrong?branch=sync-halo2-ecc-11-28#d7fd77c156bfe6fb763c0337cfb77ea8703c0a66"
 dependencies = [
  "group",
  "maingate",
@@ -2411,7 +2430,7 @@ dependencies = [
 [[package]]
 name = "maingate"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/halo2wrong?branch=sync-halo2-ecc-1013#5c481a2f32658f1e283c9ab69616a8e5d5bd7fee"
+source = "git+https://github.com/scroll-tech/halo2wrong?branch=sync-halo2-ecc-11-28#d7fd77c156bfe6fb763c0337cfb77ea8703c0a66"
 dependencies = [
  "group",
  "halo2wrong",
@@ -2971,10 +2990,10 @@ dependencies = [
 [[package]]
 name = "poseidon"
 version = "0.2.0"
-source = "git+https://github.com/scroll-tech/poseidon.git?branch=sync-halo2-ecc-1013#b4e4d74a9919260dc60a0ea61d2a5eead139fd19"
+source = "git+https://github.com/privacy-scaling-explorations/poseidon.git#5d29df01a95e3df6334080d28e983407f56b5da3"
 dependencies = [
  "group",
- "halo2curves",
+ "halo2curves 0.2.1 (git+https://github.com/privacy-scaling-explorations/halo2curves?tag=0.3.0)",
  "subtle",
 ]
 
