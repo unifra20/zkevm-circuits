@@ -118,7 +118,7 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
         let (_, callee_account) = state.sdb.get_account(&call.address);
         let is_empty_account = callee_account.is_empty();
         let callee_nonce = callee_account.nonce;
-        if geth_step.depth < 1025 {
+        if call.kind == CallKind::Call && geth_step.depth < 1025 {
             state.transfer(
                 &mut exec_step,
                 call.caller_address,
@@ -126,6 +126,8 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
                 call.value,
             )?;
         } else {
+            // Get callee balance for CALLCODE, DELEGATECALL, STATICCALL opcodes and
+            // ErrorDepth.
             let callee_balance = callee_account.balance;
             state.account_read(
                 &mut exec_step,
@@ -135,6 +137,7 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
                 callee_balance,
             )?;
         }
+
         state.account_read(
             &mut exec_step,
             call.address,
@@ -256,7 +259,14 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
                         CallContextField::ReturnDataLength,
                         call.return_data_length.into(),
                     ),
-                    (CallContextField::Value, call.value),
+                    (
+                        CallContextField::Value,
+                        if call.kind == CallKind::DelegateCall {
+                            current_call.value
+                        } else {
+                            call.value
+                        },
+                    ),
                     (CallContextField::IsSuccess, (call.is_success as u64).into()),
                     (CallContextField::IsStatic, (call.is_static as u64).into()),
                     (CallContextField::LastCalleeId, 0.into()),
