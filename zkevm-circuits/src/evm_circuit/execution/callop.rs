@@ -215,7 +215,7 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
             )
         });
 
-        let callee_balance = cb.condition(1.expr() - is_call.expr(), |cb| {
+        let callee_balance = cb.condition(1.expr() - is_call.expr() * is_depth_ok.expr(), |cb| {
             let callee_balance = cb.query_cell();
             cb.account_read(
                 callee_address.expr(),
