@@ -808,27 +808,11 @@ impl<F: Field> ExecutionConfig<F> {
                 };
 
                 let mut next = get_next(ExecutionState::BeginTx, &offset)?;
-                while let Some((transaction, call, step)) = next {
-                    next = get_next(step.execution_state, &offset)?;
-                    let height = self.get_step_height(step.execution_state);
 
-                    // Assign the step witness
-                    self.assign_exec_step(
-                        &mut region,
-                        offset,
-                        block,
-                        transaction,
-                        call,
-                        step,
-                        height,
-                        next,
-                        power_of_randomness,
-                    )?;
-
-                    // q_step logic
+                let assign_q_step = |region: &mut Region<'_, F>, offset, height| -> Result<(), Error> {
                     for idx in 0..height {
                         let offset = offset + idx;
-                        self.q_usable.enable(&mut region, offset)?;
+                        self.q_usable.enable(region, offset)?;
                         region.assign_advice(
                             || "step selector",
                             self.q_step,
@@ -853,6 +837,29 @@ impl<F: Field> ExecutionConfig<F> {
                             || Value::known(value.invert().unwrap_or(F::zero())),
                         )?;
                     }
+                    Ok(())
+                };
+
+                while let Some((transaction, call, step)) = next {
+                    next = get_next(step.execution_state, &offset)?;
+                    let height = self.get_step_height(step.execution_state);
+
+                    // Assign the step witness
+                    self.assign_exec_step(
+                        &mut region,
+                        offset,
+                        block,
+                        transaction,
+                        call,
+                        step,
+                        height,
+                        next,
+                        power_of_randomness,
+                    )?;
+
+                    // q_step logic
+                    assign_q_step(&mut region, offset, height)?;
+                    
                     offset += height;
 
                     if !exact && offset > evm_rows {
@@ -894,6 +901,41 @@ impl<F: Field> ExecutionConfig<F> {
     }
 
     #[allow(clippy::too_many_arguments)]
+    fn assign_same_exec_step_in_range(
+        &self,
+        region: &mut Region<'_, F>,
+        offset_begin: usize,
+        offset_end: usize,
+        block: &Block<F>,
+        transaction: &Transaction,
+        call: &Call,
+        step: &ExecStep,
+        height: usize,
+        power_of_randomness: [F; 31],
+    ) -> Result<(), Error> {
+        if offset_end <= offset_begin {
+            return Ok(());
+        }
+        assert_eq!(height, 1);
+        assert!(step.rw_indices.is_empty());
+        assert!(matches!(step.execution_state, ExecutionState::EndBlock));
+
+        // Disable access to next step deliberately for "repeatable" step
+        let region = &mut CachedRegion::<'_, '_, F>::new(
+            region,
+            power_of_randomness,
+            self.advices.to_vec(),
+            1,
+            offset_begin,
+        );
+        self.assign_exec_step_int(region, offset_begin, block, transaction, call, step)?;
+
+        region.replicate_assignment_for_range(|| format!("repeat {:?} rows", step.execution_state), offset_begin + 1, offset_end)?;
+
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn assign_exec_step(
         &self,
         region: &mut Region<'_, F>,
@@ -921,9 +963,8 @@ impl<F: Field> ExecutionConfig<F> {
         let region = &mut CachedRegion::<'_, '_, F>::new(
             region,
             power_of_randomness,
-            STEP_WIDTH,
+        self.advices.to_vec(),
             MAX_STEP_HEIGHT * 3,
-            self.advices[0].index(),
             offset,
         );
 
