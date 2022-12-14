@@ -145,6 +145,11 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
             config.evm_circuit.get_num_rows_required(block)
         };
         let num_rows_tx_circuit = TxCircuitConfig::<F>::get_num_rows_required(MAX_TXS);
+        log::debug!(
+            "num_rows_evm_circuit {}, num_rows_tx_circuit {}",
+            num_rows_evm_circuit,
+            num_rows_tx_circuit
+        );
         num_rows_evm_circuit.max(num_rows_tx_circuit)
     }
 }
@@ -301,7 +306,6 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
             .synthesize_sub(&config.evm_circuit, &challenges, &mut layouter)?;
         self.pi_circuit
             .synthesize_sub(&config.pi_circuit, &challenges, &mut layouter)?;
-        self.evm_circuit.synthesize(config.evm_circuit, layouter)?;
         Ok(())
     }
 }
@@ -365,6 +369,7 @@ impl<const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: usize>
             .iter()
             .map(|(_, bytecode)| bytecode.bytes.len())
             .sum::<usize>();
+        log::debug!("bytecodes len {}", bytecodes_len);
         let k = k.max(log2_ceil(64 + bytecodes_len));
         let k = k.max(log2_ceil(64 + num_rows_required));
         log::debug!("super circuit uses k = {}", k);

@@ -10,7 +10,8 @@ use zkevm_circuits::evm_circuit::EvmCircuit;
 use zkevm_circuits::evm_circuit::{test::run_test_circuit, witness::block_convert};
 use zkevm_circuits::keccak_circuit::keccak_packed_multi::multi_keccak;
 use zkevm_circuits::super_circuit::SuperCircuit;
-use zkevm_circuits::util::Challenges;
+use zkevm_circuits::tx_circuit::TxCircuit;
+use zkevm_circuits::util::{Challenges, SubCircuit};
 
 const CIRCUITS_PARAMS: CircuitsParams = CircuitsParams {
     max_rws: 0,
@@ -60,10 +61,10 @@ async fn test_super_circuit_all_block() {
         log::info!("test super circuit, block number: {}", block_num);
         let cli = get_client();
         let params = CircuitsParams {
-            max_rws: 4_000_000,
-            max_txs: 500,
-            max_calldata: 400000,
-            max_bytecode: 400000,
+            max_rws: 2_000_000,
+            max_txs: 14, // so max_txs * num_rows_per_tx < 2**21
+            max_calldata: 400_000,
+            max_bytecode: 400_000,
             keccak_padding: None,
         };
         let cli = BuilderClient::new(cli, params).await.unwrap();
@@ -75,12 +76,49 @@ async fn test_super_circuit_all_block() {
         }
 
         let (k, circuit, instance) =
-            SuperCircuit::<Fr, 500, 400000, 400000>::build_from_circuit_input_builder(&builder)
+            SuperCircuit::<Fr, 14, 400_000, 400_000>::build_from_circuit_input_builder(&builder)
                 .unwrap();
         let prover = MockProver::<Fr>::run(k, &circuit, instance).unwrap();
         let result = prover.verify_par();
         log::info!(
             "test super circuit, block number: {} result {:?}",
+            block_num,
+            result
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_tx_circuit_all_block() {
+    log_init();
+    let start: usize = *START_BLOCK;
+    let end: usize = *END_BLOCK;
+    for blk in start..=end {
+        let block_num = blk as u64;
+        log::info!("test tx circuit, block number: {}", block_num);
+        let cli = get_client();
+        let params = CircuitsParams {
+            max_rws: 2_000_000,
+            max_txs: 14, // so max_txs * num_rows_per_tx < 2**21
+            max_calldata: 400_000,
+            max_bytecode: 400_000,
+            keccak_padding: None,
+        };
+        let cli = BuilderClient::new(cli, params).await.unwrap();
+        let (builder, _) = cli.gen_inputs(block_num).await.unwrap();
+
+        if builder.block.txs.is_empty() {
+            log::info!("skip empty block");
+            return;
+        }
+
+        let block = block_convert(&builder.block, &builder.code_db).unwrap();
+        let circuit = TxCircuit::<Fr>::new_from_block(&block);
+        let k = 21;
+        let prover = MockProver::<Fr>::run(k, &circuit, vec![vec![]]).unwrap();
+        let result = prover.verify_par();
+        log::info!(
+            "test tx circuit, block number: {} result {:?}",
             block_num,
             result
         );

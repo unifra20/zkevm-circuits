@@ -716,11 +716,23 @@ impl<P: JsonRpcClient> BuilderClient<P> {
         ),
         Error,
     > {
-        let (eth_block, geth_traces, history_hashes, prev_state_root) =
+        let (mut eth_block, mut geth_traces, history_hashes, prev_state_root) =
             self.get_block(block_num).await?;
         let access_set = self.get_state_accesses(&eth_block, &geth_traces)?;
         let (proofs, codes) = self.get_state(block_num, access_set.into()).await?;
         let (state_db, code_db) = self.build_state_code_db(proofs, codes);
+        if eth_block.transactions.len() > self.circuits_params.max_txs {
+            log::error!(
+                "max_txs too small: {} < {} for block {}",
+                self.circuits_params.max_txs,
+                eth_block.transactions.len(),
+                eth_block.number.unwrap_or_default()
+            );
+            eth_block
+                .transactions
+                .truncate(self.circuits_params.max_txs);
+            geth_traces.truncate(self.circuits_params.max_txs);
+        }
         let builder = self.gen_inputs_from_state(
             state_db,
             code_db,
