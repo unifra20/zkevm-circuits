@@ -418,12 +418,24 @@ pub fn keccak_inputs(block: &Block, code_db: &CodeDB) -> Result<Vec<Vec<u8>>, Er
     // Tx Circuit
     let txs: Vec<geth_types::Transaction> = block.txs.iter().map(|tx| tx.into()).collect();
     keccak_inputs.extend_from_slice(&keccak_inputs_tx_circuit(&txs, block.chain_id().as_u64())?);
+    log::debug!(
+        "keccak total len after txs: {}",
+        keccak_inputs.iter().map(|i| i.len()).sum::<usize>()
+    );
     // Bytecode Circuit
-    for bytecode in code_db.0.values() {
-        keccak_inputs.push(bytecode.clone());
+    for _bytecode in code_db.0.values() {
+        //keccak_inputs.push(bytecode.clone());
     }
+    log::debug!(
+        "keccak total len after bytecodes: {}",
+        keccak_inputs.iter().map(|i| i.len()).sum::<usize>()
+    );
     // EVM Circuit
     keccak_inputs.extend_from_slice(&block.sha3_inputs);
+    log::debug!(
+        "keccak total len after opcodes: {}",
+        keccak_inputs.iter().map(|i| i.len()).sum::<usize>()
+    );
     // MPT Circuit
     // TODO https://github.com/privacy-scaling-explorations/zkevm-circuits/issues/696
     Ok(keccak_inputs)

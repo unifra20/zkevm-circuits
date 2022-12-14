@@ -2101,7 +2101,11 @@ pub fn multi_keccak<F: Field>(
         });
     }
     // Actual keccaks
-    for bytes in bytes {
+    for (idx, bytes) in bytes.iter().enumerate() {
+        debug!("{}th keccak is of len {}", idx, bytes.len());
+    }
+    for (idx, bytes) in bytes.iter().enumerate() {
+        debug!("assigning {}th keccak, len {}", idx, bytes.len());
         keccak(&mut rows, bytes, challenges);
     }
     if let Some(capacity) = capacity {

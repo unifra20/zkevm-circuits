@@ -2,7 +2,7 @@ use crate::{
     evm_circuit::util::{
         and, constraint_builder::BaseConstraintBuilder, not, or, select, RandomLinearCombination,
     },
-    table::{BytecodeFieldTag, BytecodeTable, DynamicTableColumns, KeccakTable},
+    table::{BytecodeFieldTag, BytecodeTable, KeccakTable},
     util::{Challenges, Expr, SubCircuit, SubCircuitConfig},
     witness,
 };
@@ -354,6 +354,7 @@ impl<F: Field> SubCircuitConfig<F> for BytecodeCircuitConfig<F> {
             constraints
         });
 
+        /*
         // keccak lookup
         meta.lookup_any("keccak", |meta| {
             // Conditions:
@@ -376,6 +377,7 @@ impl<F: Field> SubCircuitConfig<F> for BytecodeCircuitConfig<F> {
             }
             constraints
         });
+        */
 
         BytecodeCircuitConfig {
             minimum_rows: meta.minimum_rows(),
@@ -452,6 +454,14 @@ impl<F: Field> BytecodeCircuitConfig<F> {
                                 challenge,
                             )
                         });
+                        if idx == bytecode.rows.len() - 1 {
+                            log::trace!("bytecode len {}", bytecode.rows.len());
+                            log::trace!(
+                                "assign bytecode circuit: codehash {:?}, rlc {:?}",
+                                row.code_hash.to_le_bytes(),
+                                code_hash
+                            );
+                        }
 
                         // Track which byte is an opcode and which is push
                         // data
@@ -468,6 +478,10 @@ impl<F: Field> BytecodeCircuitConfig<F> {
                                     *hash_input_rlc = *hash_input_rlc * challenge + row.value
                                 },
                             );
+                        }
+
+                        if idx == bytecode.rows.len() - 1 {
+                            log::trace!("assign bytecode circuit: input rlc {:?}", hash_input_rlc);
                         }
 
                         // Set the data for this row

@@ -61,10 +61,10 @@ async fn test_super_circuit_all_block() {
         log::info!("test super circuit, block number: {}", block_num);
         let cli = get_client();
         let params = CircuitsParams {
-            max_rws: 2_000_000,
-            max_txs: 14, // so max_txs * num_rows_per_tx < 2**21
-            max_calldata: 400_000,
-            max_bytecode: 400_000,
+            max_rws: 500_000,
+            max_txs: 20,
+            max_calldata: 500_000,
+            max_bytecode: 500_000,
             keccak_padding: None,
         };
         let cli = BuilderClient::new(cli, params).await.unwrap();
@@ -76,7 +76,7 @@ async fn test_super_circuit_all_block() {
         }
 
         let (k, circuit, instance) =
-            SuperCircuit::<Fr, 14, 400_000, 400_000>::build_from_circuit_input_builder(&builder)
+            SuperCircuit::<Fr, 20, 200_000, 200_000>::build_from_circuit_input_builder(&builder)
                 .unwrap();
         let prover = MockProver::<Fr>::run(k, &circuit, instance).unwrap();
         let result = prover.verify_par();
@@ -85,6 +85,11 @@ async fn test_super_circuit_all_block() {
             block_num,
             result
         );
+        if let Err(errs) = result {
+            for err in errs {
+                log::error!("circuit err: {}", err);
+            }
+        }
     }
 }
 
@@ -98,10 +103,10 @@ async fn test_tx_circuit_all_block() {
         log::info!("test tx circuit, block number: {}", block_num);
         let cli = get_client();
         let params = CircuitsParams {
-            max_rws: 2_000_000,
+            max_rws: 200_000,
             max_txs: 14, // so max_txs * num_rows_per_tx < 2**21
-            max_calldata: 400_000,
-            max_bytecode: 400_000,
+            max_calldata: 200_000,
+            max_bytecode: 200_000,
             keccak_padding: None,
         };
         let cli = BuilderClient::new(cli, params).await.unwrap();

@@ -67,7 +67,7 @@ use crate::state_circuit::{StateCircuit, StateCircuitConfig, StateCircuitConfigA
 use crate::table::{
     BlockTable, BytecodeTable, CopyTable, ExpTable, KeccakTable, MptTable, RwTable, TxTable,
 };
-use crate::tx_circuit::{TxCircuit, TxCircuitConfig, TxCircuitConfigArgs};
+
 use crate::util::{Challenges, SubCircuit, SubCircuitConfig};
 use crate::witness::{block_convert, Block, MptUpdates};
 use bus_mapping::circuit_input_builder::{CircuitInputBuilder, CircuitsParams};
@@ -98,9 +98,10 @@ pub struct SuperCircuitConfig<
 > {
     block_table: BlockTable,
     mpt_table: MptTable,
+    tx_table: TxTable,
     evm_circuit: EvmCircuitConfig<F>,
     state_circuit: StateCircuitConfig<F>,
-    tx_circuit: TxCircuitConfig<F>,
+    //tx_circuit: TxCircuitConfig<F>,
     bytecode_circuit: BytecodeCircuitConfig<F>,
     copy_circuit: CopyCircuitConfig<F>,
     keccak_circuit: KeccakCircuitConfig<F>,
@@ -121,7 +122,7 @@ pub struct SuperCircuit<
     /// State Circuit
     pub state_circuit: StateCircuit<F>,
     /// The transaction circuit that will be used in the `synthesize` step.
-    pub tx_circuit: TxCircuit<F>,
+    //pub tx_circuit: TxCircuit<F>,
     /// Public Input Circuit
     pub pi_circuit: PiCircuit<F>,
     /// Bytecode Circuit
@@ -144,7 +145,7 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
             let config = Self::configure(&mut cs);
             config.evm_circuit.get_num_rows_required(block)
         };
-        let num_rows_tx_circuit = TxCircuitConfig::<F>::get_num_rows_required(MAX_TXS);
+        let num_rows_tx_circuit = 0; //TxCircuitConfig::<F>::get_num_rows_required(MAX_TXS);
         log::debug!(
             "num_rows_evm_circuit {}, num_rows_tx_circuit {}",
             num_rows_evm_circuit,
@@ -201,6 +202,7 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
                 tx_table: tx_table.clone(),
             },
         );
+        /*
         let tx_circuit = TxCircuitConfig::new(
             meta,
             TxCircuitConfigArgs {
@@ -209,6 +211,7 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
                 challenges: challenges.clone(),
             },
         );
+        */
         let bytecode_circuit = BytecodeCircuitConfig::new(
             meta,
             BytecodeCircuitConfigArgs {
@@ -241,7 +244,7 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
             meta,
             EvmCircuitConfigArgs {
                 power_of_randomness,
-                tx_table,
+                tx_table: tx_table.clone(),
                 rw_table,
                 bytecode_table,
                 block_table: block_table.clone(),
@@ -254,10 +257,10 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
         Self::Config {
             block_table,
             mpt_table,
+            tx_table,
             evm_circuit,
             state_circuit,
             copy_circuit,
-            tx_circuit,
             bytecode_circuit,
             keccak_circuit,
             pi_circuit,
@@ -287,6 +290,13 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
             Value::known(block.randomness),
         )?;
 
+        config.tx_table.load(
+            &mut layouter,
+            &block.txs,
+            block.circuits_params.max_txs,
+            &challenges,
+        )?;
+
         self.keccak_circuit
             .synthesize_sub(&config.keccak_circuit, &challenges, &mut layouter)?;
         self.bytecode_circuit.synthesize_sub(
@@ -294,8 +304,6 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
             &challenges,
             &mut layouter,
         )?;
-        self.tx_circuit
-            .synthesize_sub(&config.tx_circuit, &challenges, &mut layouter)?;
         self.state_circuit
             .synthesize_sub(&config.state_circuit, &challenges, &mut layouter)?;
         self.copy_circuit
@@ -370,13 +378,14 @@ impl<const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: usize>
             .map(|(_, bytecode)| bytecode.bytes.len())
             .sum::<usize>();
         log::debug!("bytecodes len {}", bytecodes_len);
+        let bytecodes_len = std::cmp::max(block.circuits_params.max_bytecode, bytecodes_len);
         let k = k.max(log2_ceil(64 + bytecodes_len));
         let k = k.max(log2_ceil(64 + num_rows_required));
         log::debug!("super circuit uses k = {}", k);
 
         let evm_circuit = EvmCircuit::new_from_block(&block);
         let state_circuit = StateCircuit::new_from_block(&block);
-        let tx_circuit = TxCircuit::new_from_block(&block);
+        //let tx_circuit = TxCircuit::new_from_block(&block);
         let pi_circuit = PiCircuit::new_from_block(&block);
         let bytecode_circuit = BytecodeCircuit::new_from_block(&block);
         let copy_circuit = CopyCircuit::new_from_block(&block);
@@ -386,7 +395,7 @@ impl<const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: usize>
         let circuit = SuperCircuit::<_, MAX_TXS, MAX_CALLDATA, MAX_RWS> {
             evm_circuit,
             state_circuit,
-            tx_circuit,
+            //tx_circuit,
             pi_circuit,
             bytecode_circuit,
             copy_circuit,
@@ -402,7 +411,8 @@ impl<const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: usize>
     pub fn instance(&self) -> Vec<Vec<Fr>> {
         // SignVerifyChip -> ECDSAChip -> MainGate instance column
         let pi_instance = self.pi_circuit.instance();
-        let instance = vec![pi_instance[0].clone(), vec![]];
+        // FIXME: why two columns??
+        let instance = vec![pi_instance[0].clone()];
 
         instance
     }
