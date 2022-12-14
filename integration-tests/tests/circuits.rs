@@ -97,7 +97,7 @@ async fn test_evm_circuit_all_block() {
         log::info!("test evm circuit, block number: {}", block_num);
         let cli = get_client();
         let params = CircuitsParams {
-            max_rws: 4_000_000,
+            max_rws: 5_000_000,
             max_txs: 500,
             max_calldata: 400000,
             max_bytecode: 400000,

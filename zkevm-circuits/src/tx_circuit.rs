@@ -16,7 +16,7 @@ use eth_types::{
 };
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Region, SimpleFloorPlanner, Value},
-    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Expression, Fixed},
+    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Expression},
 };
 use itertools::Itertools;
 use log::error;
