@@ -965,7 +965,7 @@ impl<F: Field> ExecutionConfig<F> {
                 self.q_step_last
                     .enable(&mut region, offset - END_BLOCK_HEIGHT)?;
 
-                log::debug!("assign for region done");
+                log::debug!("assign for region done at offset {}", offset);
                 Ok(())
             },
         )?;
@@ -986,7 +986,7 @@ impl<F: Field> ExecutionConfig<F> {
         next: Option<(&Transaction, &Call, &ExecStep)>,
         power_of_randomness: [F; 31],
     ) -> Result<(), Error> {
-        if !matches!(step.execution_state, ExecutionState::EndBlock) {
+        if !(matches!(step.execution_state, ExecutionState::EndBlock) && step.rw_indices.is_empty()) {
             log::trace!(
                 "assign_exec_step offset: {} state {:?} step: {:?} call: {:?}",
                 offset,
@@ -1205,7 +1205,7 @@ impl<F: Field> ExecutionConfig<F> {
         let assigned_stored_expressions = self.assign_stored_expressions(region, offset, step)?;
 
         // enable with `RUST_LOG=debug`
-        if log::log_enabled!(log::Level::Debug) {
+        if log::log_enabled!(log::Level::Debug) && !(step.execution_state == ExecutionState::EndBlock && step.rw_indices.is_empty()) {
             // expensive function call
             Self::check_rw_lookup(
                 &assigned_stored_expressions,

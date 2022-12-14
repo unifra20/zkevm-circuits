@@ -264,7 +264,8 @@ impl<'a> CircuitInputBuilder {
         Ok(())
     }
 
-    fn set_end_block(&mut self) {
+    /// ..
+    pub fn set_end_block(&mut self) {
         let max_rws = self.block.circuits_params.max_rws;
         let mut end_block_not_last = self.block.block_steps.end_block_not_last.clone();
         let mut end_block_last = self.block.block_steps.end_block_last.clone();

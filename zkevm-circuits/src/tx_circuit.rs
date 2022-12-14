@@ -36,7 +36,7 @@ pub use halo2_proofs::halo2curves::{
 #[derive(Clone, Debug)]
 pub struct TxCircuitConfig<F: Field> {
     tx_id: Column<Advice>,
-    tag: Column<Fixed>,
+    tag: Column<Advice>,
     index: Column<Advice>,
     value: Column<Advice>,
     sign_verify: SignVerifyConfig,
@@ -110,7 +110,7 @@ impl<F: Field> TxCircuitConfig<F> {
             offset,
             || Value::known(F::from(tx_id as u64)),
         )?;
-        region.assign_fixed(
+        region.assign_advice(
             || "tag",
             self.tag,
             offset,

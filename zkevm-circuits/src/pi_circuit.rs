@@ -472,7 +472,7 @@ impl<F: Field> SubCircuitConfig<F> for PiCircuitConfig<F> {
         let tx_tag_is_cdl_config = IsZeroChip::configure(
             meta,
             |meta| meta.query_selector(q_tx_table),
-            |meta| meta.query_fixed(tag, Rotation::cur()) - TxFieldTag::CallDataLength.expr(),
+            |meta| meta.query_advice(tag, Rotation::cur()) - TxFieldTag::CallDataLength.expr(),
             tx_id_inv,
         );
 
@@ -566,7 +566,7 @@ impl<F: Field> PiCircuitConfig<F> {
             offset,
             || Value::known(F::zero()),
         )?;
-        region.assign_fixed(
+        region.assign_advice(
             || "tag",
             self.tx_table.tag,
             offset,
@@ -639,7 +639,7 @@ impl<F: Field> PiCircuitConfig<F> {
             offset,
             || Value::known(tx_id),
         )?;
-        region.assign_fixed(|| "tag", self.tx_table.tag, offset, || Value::known(tag))?;
+        region.assign_advice(|| "tag", self.tx_table.tag, offset, || Value::known(tag))?;
         region.assign_advice(
             || "index",
             self.tx_table.index,
@@ -744,7 +744,7 @@ impl<F: Field> PiCircuitConfig<F> {
             calldata_offset,
             || Value::known(tx_id_inv),
         )?;
-        region.assign_fixed(
+        region.assign_advice(
             || "tag",
             self.tx_table.tag,
             calldata_offset,
