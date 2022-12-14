@@ -2,11 +2,14 @@
 
 use bus_mapping::circuit_input_builder::{keccak_inputs, BuilderClient, CircuitsParams};
 use halo2_proofs::circuit::Value;
+use halo2_proofs::dev::MockProver;
+use halo2_proofs::halo2curves::bn256::Fr;
 use integration_tests::{get_client, log_init};
 use integration_tests::{END_BLOCK, START_BLOCK, TX_ID};
 use zkevm_circuits::evm_circuit::EvmCircuit;
 use zkevm_circuits::evm_circuit::{test::run_test_circuit, witness::block_convert};
 use zkevm_circuits::keccak_circuit::keccak_packed_multi::multi_keccak;
+use zkevm_circuits::super_circuit::SuperCircuit;
 use zkevm_circuits::util::Challenges;
 
 const CIRCUITS_PARAMS: CircuitsParams = CircuitsParams {
@@ -45,6 +48,43 @@ async fn test_mock_prove_tx() {
     let block = block_convert(&builder.block, &builder.code_db).unwrap();
     run_test_circuit(block).unwrap();
     log::info!("prove done");
+}
+
+#[tokio::test]
+async fn test_super_circuit_all_block() {
+    log_init();
+    let start: usize = *START_BLOCK;
+    let end: usize = *END_BLOCK;
+    for blk in start..=end {
+        let block_num = blk as u64;
+        log::info!("test super circuit, block number: {}", block_num);
+        let cli = get_client();
+        let params = CircuitsParams {
+            max_rws: 4_000_000,
+            max_txs: 500,
+            max_calldata: 400000,
+            max_bytecode: 400000,
+            keccak_padding: None,
+        };
+        let cli = BuilderClient::new(cli, params).await.unwrap();
+        let (builder, _) = cli.gen_inputs(block_num).await.unwrap();
+
+        if builder.block.txs.is_empty() {
+            log::info!("skip empty block");
+            return;
+        }
+
+        let (k, circuit, instance) =
+            SuperCircuit::<Fr, 500, 400000, 400000>::build_from_circuit_input_builder(&builder)
+                .unwrap();
+        let prover = MockProver::<Fr>::run(k, &circuit, instance).unwrap();
+        let result = prover.verify_par();
+        log::info!(
+            "test super circuit, block number: {} result {:?}",
+            block_num,
+            result
+        );
+    }
 }
 
 #[tokio::test]
