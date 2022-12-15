@@ -60,9 +60,10 @@ async fn test_super_circuit_all_block() {
         let block_num = blk as u64;
         log::info!("test super circuit, block number: {}", block_num);
         let cli = get_client();
+        // target k = 19
         let params = CircuitsParams {
             max_rws: 500_000,
-            max_txs: 20,
+            max_txs: 15,
             max_calldata: 500_000,
             max_bytecode: 500_000,
             keccak_padding: None,
@@ -76,7 +77,7 @@ async fn test_super_circuit_all_block() {
         }
 
         let (k, circuit, instance) =
-            SuperCircuit::<Fr, 20, 200_000, 200_000>::build_from_circuit_input_builder(&builder)
+            SuperCircuit::<Fr, 15, 500_000, 500_000>::build_from_circuit_input_builder(&builder)
                 .unwrap();
         let prover = MockProver::<Fr>::run(k, &circuit, instance).unwrap();
         let result = prover.verify_par();
