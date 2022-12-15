@@ -8,19 +8,21 @@ use gadgets::{
     less_than::{LtChip, LtConfig, LtInstruction},
     util::sum,
 };
+use halo2_proofs::plonk::SecondPhase;
 use halo2_proofs::{
     circuit::{Layouter, Region, SimpleFloorPlanner, Value},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Expression, Fixed, VirtualCells},
     poly::Rotation,
 };
 
+use crate::util::Challenges;
 use crate::{
     evm_circuit::{
         util::{and, constraint_builder::BaseConstraintBuilder, not, or},
         witness::{RlpTxTag, RlpWitnessGen, N_TX_TAGS},
     },
     table::RlpTable,
-    util::{power_of_randomness_from_instance, Expr},
+    util::Expr,
     witness::{RlpDataType, SignedTransaction},
 };
 
@@ -44,7 +46,7 @@ pub struct RlpCircuitConfig<F> {
     /// Denotes the byte value at this row index from the RLP-encoded data.
     byte_value: Column<Advice>,
     /// Denotes the RLC accumulator value used for call data bytes.
-    value_acc_rlc: Column<Advice>,
+    calldata_bytes_rlc_acc: Column<Advice>,
     /// List of columns that are assigned:
     /// val := (tag - RlpTxTag::{Variant}).inv()
     tx_tags: [Column<Advice>; N_TX_TAGS],
@@ -53,8 +55,8 @@ pub struct RlpCircuitConfig<F> {
     /// Denotes an accumulator for the length of data, in the case where len >
     /// 55 and the length is represented in its big-endian form.
     length_acc: Column<Advice>,
-    /// Denotes an accumulator for the value field over all rows (bytes).
-    value_rlc: Column<Advice>,
+    /// Denotes an accumulator for the byte value field over all rows (bytes).
+    all_bytes_rlc_acc: Column<Advice>,
     /// Comparison chip to check: 1 <= tag_index.
     tag_index_cmp_1: ComparatorConfig<F, 1>,
     /// Comparison chip to check: tag_index <= tag_length.
@@ -88,19 +90,24 @@ pub struct RlpCircuitConfig<F> {
 }
 
 impl<F: Field> RlpCircuitConfig<F> {
-    pub(crate) fn configure(meta: &mut ConstraintSystem<F>, r: Expression<F>) -> Self {
+    pub(crate) fn configure(
+        meta: &mut ConstraintSystem<F>,
+        rlp_table: &RlpTable,
+        challenges: &Challenges<Expression<F>>,
+    ) -> Self {
         let q_usable = meta.fixed_column();
         let is_first = meta.advice_column();
         let is_last = meta.advice_column();
-        let rlp_table = RlpTable::construct(meta);
         let index = meta.advice_column();
         let rindex = meta.advice_column();
         let byte_value = meta.advice_column();
-        let value_acc_rlc = meta.advice_column();
+        let calldata_bytes_rlc_acc = meta.advice_column_in(SecondPhase);
         let tx_tags = array_init::array_init(|_| meta.advice_column());
         let tag_length = meta.advice_column();
         let length_acc = meta.advice_column();
-        let value_rlc = meta.advice_column();
+        let all_bytes_rlc_acc = meta.advice_column_in(SecondPhase);
+        let evm_word_rand = challenges.evm_word();
+        let keccak_input_rand = challenges.keccak_input();
 
         // Enable the comparator and lt chips if the current row is enabled.
         let cmp_lt_enabled =
@@ -110,12 +117,12 @@ impl<F: Field> RlpCircuitConfig<F> {
             meta,
             cmp_lt_enabled,
             |_meta| 1.expr(),
-            |meta| meta.query_advice(rlp_table.tag_index, Rotation::cur()),
+            |meta| meta.query_advice(rlp_table.tag_rindex, Rotation::cur()),
         );
         let tag_index_length_cmp = ComparatorChip::configure(
             meta,
             cmp_lt_enabled,
-            |meta| meta.query_advice(rlp_table.tag_index, Rotation::cur()),
+            |meta| meta.query_advice(rlp_table.tag_rindex, Rotation::cur()),
             |meta| meta.query_advice(tag_length, Rotation::cur()),
         );
         let tag_length_cmp_1 = ComparatorChip::configure(
@@ -127,13 +134,13 @@ impl<F: Field> RlpCircuitConfig<F> {
         let tag_index_lt_10 = LtChip::configure(
             meta,
             cmp_lt_enabled,
-            |meta| meta.query_advice(rlp_table.tag_index, Rotation::cur()),
+            |meta| meta.query_advice(rlp_table.tag_rindex, Rotation::cur()),
             |_meta| 10.expr(),
         );
         let tag_index_lt_34 = LtChip::configure(
             meta,
             cmp_lt_enabled,
-            |meta| meta.query_advice(rlp_table.tag_index, Rotation::cur()),
+            |meta| meta.query_advice(rlp_table.tag_rindex, Rotation::cur()),
             |_meta| 34.expr(),
         );
         let value_gt_127 = LtChip::configure(
@@ -262,8 +269,8 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index::next == tag_index - 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()) - 1.expr(),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::cur()) - 1.expr(),
                 );
                 cb.require_equal(
                     "tag_length::next == tag_length",
@@ -281,7 +288,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index::next == tag_length::next",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                     meta.query_advice(tag_length, Rotation::next()),
                 );
                 // we add +1 to account for the 2 additional rows for RlpLength and Rlp.
@@ -300,7 +307,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                     cb.require_equal("value < 256", value_lt_256.is_lt(meta, None), 1.expr());
                     cb.require_equal(
                         "tag_index::next == value - 0xf7",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                        meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                         meta.query_advice(byte_value, Rotation::cur()) - 247.expr(),
                     );
                     cb.require_zero(
@@ -381,7 +388,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                     );
                     cb.require_equal(
                         "tag_index::next == length_acc",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                        meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                         meta.query_advice(length_acc, Rotation::cur()),
                     );
                     cb.require_equal(
@@ -414,8 +421,8 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index::next == tag_index - 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()) - 1.expr(),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::cur()) - 1.expr(),
                 );
                 cb.require_equal(
                     "tag_length::next == tag_length",
@@ -433,7 +440,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index::next == tag_length::next",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                     meta.query_advice(tag_length, Rotation::next()),
                 );
             });
@@ -482,7 +489,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                     );
                     cb.require_equal(
                         "tag_index::next == length_acc",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                        meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                         meta.query_advice(length_acc, Rotation::cur()),
                     );
                     cb.require_equal(
@@ -500,7 +507,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                     cb.require_equal(
                         "[gasprice] value_acc::next == value_acc::cur * randomness + value::next",
                         meta.query_advice(rlp_table.value_acc, Rotation::next()),
-                        meta.query_advice(rlp_table.value_acc, Rotation::cur()) * r.clone() +
+                        meta.query_advice(rlp_table.value_acc, Rotation::cur()) * evm_word_rand.clone() +
                             meta.query_advice(byte_value, Rotation::next()),
                     );
                 },
@@ -515,8 +522,8 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index::next == tag_index - 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()) - 1.expr(),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::cur()) - 1.expr(),
                 );
                 cb.require_equal(
                     "tag_length::next == tag_length",
@@ -534,7 +541,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index::next == tag_length::next",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                     meta.query_advice(tag_length, Rotation::next()),
                 );
             });
@@ -583,7 +590,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                     );
                     cb.require_equal(
                         "tag_index::next == length_acc",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                        meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                         meta.query_advice(length_acc, Rotation::cur()),
                     );
                 },
@@ -611,8 +618,8 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index::next == tag_index - 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()) - 1.expr(),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::cur()) - 1.expr(),
                 );
                 cb.require_equal(
                     "tag_length::next == tag_length",
@@ -636,7 +643,7 @@ impl<F: Field> RlpCircuitConfig<F> {
             cb.condition(is_to_prefix(meta), |cb| {
                 cb.require_equal(
                     "tag_index == 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::cur()),
                     1.expr(),
                 );
                 cb.require_equal(
@@ -656,7 +663,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index::next == 20",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                     20.expr(),
                 );
                 cb.require_equal(
@@ -683,8 +690,8 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index::next == tag_index - 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()) - 1.expr(),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::cur()) - 1.expr(),
                 );
                 cb.require_equal(
                     "tag_length::next == tag_length",
@@ -708,7 +715,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index:next == tag_length::next",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                     meta.query_advice(tag_length, Rotation::next()),
                 );
             });
@@ -757,7 +764,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                     );
                     cb.require_equal(
                         "tag_index::next == length_acc",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                        meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                         meta.query_advice(length_acc, Rotation::cur()),
                     );
                     cb.require_equal(
@@ -775,7 +782,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                     cb.require_equal(
                         "[value] value_acc::next == value_acc::cur * randomness + value::next",
                         meta.query_advice(rlp_table.value_acc, Rotation::next()),
-                        meta.query_advice(rlp_table.value_acc, Rotation::cur()) * r.clone() +
+                        meta.query_advice(rlp_table.value_acc, Rotation::cur()) * evm_word_rand.clone() +
                             meta.query_advice(byte_value, Rotation::next()),
                     );
                 },
@@ -790,8 +797,8 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index::next == tag_index - 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()) - 1.expr(),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::cur()) - 1.expr(),
                 );
                 cb.require_equal(
                     "tag_length::next == tag_length",
@@ -836,8 +843,8 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index::next == tag_index - 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()) - 1.expr(),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::cur()) - 1.expr(),
                 );
                 cb.require_equal(
                     "tag_length::next == tag_length",
@@ -857,7 +864,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                     );
                     cb.require_equal(
                         "tag_index::next == tag_length::next",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                        meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                         meta.query_advice(tag_length, Rotation::next()),
                     );
                 },
@@ -874,7 +881,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                     );
                     cb.require_equal(
                         "tag_index::next == tag_length::next",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                        meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                         meta.query_advice(tag_length, Rotation::next()),
                     );
                     cb.require_equal(
@@ -893,7 +900,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                     cb.require_equal("value < 192", value_lt_192.is_lt(meta, None), 1.expr());
                     cb.require_equal(
                         "tag_index == (value - 0xb7) + 1",
-                        meta.query_advice(rlp_table.tag_index, Rotation::cur()),
+                        meta.query_advice(rlp_table.tag_rindex, Rotation::cur()),
                         meta.query_advice(byte_value, Rotation::cur()) - 182.expr(),
                     );
                     cb.require_zero(
@@ -950,8 +957,8 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index::next == tag_index - 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()) - 1.expr(),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::cur()) - 1.expr(),
                 );
                 cb.require_equal(
                     "tag_length::next == tag_length",
@@ -960,8 +967,8 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "value_acc_rlc::next == value_acc_rlc::cur * randomness + value::next",
-                    meta.query_advice(value_acc_rlc, Rotation::next()),
-                    meta.query_advice(value_acc_rlc, Rotation::cur()) * r.clone()
+                    meta.query_advice(calldata_bytes_rlc_acc, Rotation::next()),
+                    meta.query_advice(calldata_bytes_rlc_acc, Rotation::cur()) * keccak_input_rand.clone()
                         + meta.query_advice(byte_value, Rotation::next()),
                 );
                 cb.require_equal(
@@ -986,7 +993,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                     );
                     cb.require_equal(
                         "tag_index::next == tag_length::next",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                        meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                         meta.query_advice(tag_length, Rotation::next()),
                     );
                 }
@@ -1007,7 +1014,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                     );
                     cb.require_equal(
                         "tag_index::next == tag_length::next",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                        meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                         meta.query_advice(tag_length, Rotation::next()),
                     );
                 }
@@ -1066,7 +1073,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                     );
                     cb.require_equal(
                         "tag_index::next == length_acc",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                        meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                         meta.query_advice(length_acc, Rotation::cur()),
                     );
                     cb.require_equal(
@@ -1099,8 +1106,8 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index::next == tag_index - 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()) - 1.expr(),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::cur()) - 1.expr(),
                 );
                 cb.require_equal(
                     "tag_length::next == tag_length",
@@ -1119,12 +1126,12 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index::next == tag_length::next",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                     meta.query_advice(tag_length, Rotation::next()),
                 );
                 cb.require_equal(
                     "next tag is Zero => tag_index::next == 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                     1.expr(),
                 );
                 cb.require_equal(
@@ -1146,12 +1153,12 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index::Rotation(2) == tag_length::Rotation(2)",
-                    meta.query_advice(rlp_table.tag_index, Rotation(2)),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation(2)),
                     meta.query_advice(tag_length, Rotation(2)),
                 );
                 cb.require_equal(
                     "next-to-next tag is Zero => tag_index::Rotation(2) == 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation(2)),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation(2)),
                     1.expr(),
                 );
                 cb.require_equal(
@@ -1173,12 +1180,12 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index::Rotation(3) == tag_length::Rotation(3)",
-                    meta.query_advice(rlp_table.tag_index, Rotation(3)),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation(3)),
                     meta.query_advice(tag_length, Rotation(3)),
                 );
                 cb.require_equal(
                     "tag_index::Rotation(3) == 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation(3)),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation(3)),
                     1.expr(),
                 );
                 cb.require_equal(
@@ -1195,23 +1202,23 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index::Rotation(4) == tag_length::Rotation(4)",
-                    meta.query_advice(rlp_table.tag_index, Rotation(4)),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation(4)),
                     meta.query_advice(tag_length, Rotation(4)),
                 );
                 cb.require_equal(
                     "tag_index::Rotation(4) == 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation(4)),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation(4)),
                     1.expr(),
                 );
                 cb.require_equal(
                     "last tag is Rlp => value_acc::Rotation(4) == value_rlc::Rotation(4)",
                     meta.query_advice(rlp_table.value_acc, Rotation(4)),
-                    meta.query_advice(value_rlc, Rotation(4)),
+                    meta.query_advice(all_bytes_rlc_acc, Rotation(4)),
                 );
                 cb.require_equal(
                     "last tag is Rlp => value_rlc::Rotation(4) == value_rlc::Rotation(2)",
-                    meta.query_advice(value_rlc, Rotation(4)),
-                    meta.query_advice(value_rlc, Rotation(2)),
+                    meta.query_advice(all_bytes_rlc_acc, Rotation(4)),
+                    meta.query_advice(all_bytes_rlc_acc, Rotation(2)),
                 );
                 cb.require_equal(
                     "last tag is Rlp => is_last::Rotation(4) == 1",
@@ -1276,7 +1283,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                     );
                     cb.require_equal(
                         "tag_index::next == length_acc",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                        meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                         meta.query_advice(length_acc, Rotation::cur()),
                     );
                     cb.require_equal(
@@ -1309,8 +1316,8 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index::next == tag_index - 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()) - 1.expr(),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::cur()) - 1.expr(),
                 );
                 cb.require_equal(
                     "tag_length::next == tag_length",
@@ -1328,7 +1335,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index::next == tag_length::next",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                     meta.query_advice(tag_length, Rotation::next()),
                 );
             });
@@ -1376,7 +1383,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                     );
                     cb.require_equal(
                         "tag_index::next == length_acc",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                        meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                         meta.query_advice(length_acc, Rotation::cur()),
                     );
                     cb.require_equal(
@@ -1394,7 +1401,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                     cb.require_equal(
                         "[sig_r] value_acc::next == value_acc::cur * randomness + value::next",
                         meta.query_advice(rlp_table.value_acc, Rotation::next()),
-                        meta.query_advice(rlp_table.value_acc, Rotation::cur()) * r.clone() +
+                        meta.query_advice(rlp_table.value_acc, Rotation::cur()) * evm_word_rand.clone() +
                             meta.query_advice(byte_value, Rotation::next()),
                     );
                 },
@@ -1409,8 +1416,8 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index::next == tag_index - 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()) - 1.expr(),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::cur()) - 1.expr(),
                 );
                 cb.require_equal(
                     "tag_length::next == tag_length",
@@ -1471,7 +1478,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                     );
                     cb.require_equal(
                         "tag_index::next == length_acc",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                        meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                         meta.query_advice(length_acc, Rotation::cur()),
                     );
                     cb.require_equal(
@@ -1489,7 +1496,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                     cb.require_equal(
                         "[sig_s] value_acc::next == value_acc::cur * randomness + value::next",
                         meta.query_advice(rlp_table.value_acc, Rotation::next()),
-                        meta.query_advice(rlp_table.value_acc, Rotation::cur()) * r.clone() +
+                        meta.query_advice(rlp_table.value_acc, Rotation::cur()) * evm_word_rand.clone() +
                             meta.query_advice(byte_value, Rotation::next()),
                     );
                 },
@@ -1504,8 +1511,8 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index::next == tag_index - 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()) - 1.expr(),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::cur()) - 1.expr(),
                 );
                 cb.require_equal(
                     "tag_length::next == tag_length",
@@ -1524,12 +1531,12 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index::next == tag_length::next",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                     meta.query_advice(tag_length, Rotation::next()),
                 );
                 cb.require_equal(
                     "tag_index::next == 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                     1.expr(),
                 );
                 cb.require_equal(
@@ -1546,13 +1553,13 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "last tag is Rlp => value_rlc::Rotation(2) == value_rlc::cur",
-                    meta.query_advice(value_rlc, Rotation(2)),
-                    meta.query_advice(value_rlc, Rotation::cur()),
+                    meta.query_advice(all_bytes_rlc_acc, Rotation(2)),
+                    meta.query_advice(all_bytes_rlc_acc, Rotation::cur()),
                 );
                 cb.require_equal(
                     "last tag is Rlp => value_acc::Rotation(2) == value_rlc::Rotation(2)",
                     meta.query_advice(rlp_table.value_acc, Rotation(2)),
-                    meta.query_advice(value_rlc, Rotation(2)),
+                    meta.query_advice(all_bytes_rlc_acc, Rotation(2)),
                 );
                 cb.require_equal(
                     "is_last::Rotation(2) == 1",
@@ -1615,7 +1622,7 @@ impl<F: Field> RlpCircuitConfig<F> {
 
             cb.require_equal(
                 "value_rlc == value",
-                meta.query_advice(value_rlc, Rotation::cur()),
+                meta.query_advice(all_bytes_rlc_acc, Rotation::cur()),
                 meta.query_advice(byte_value, Rotation::cur()),
             );
             cb.require_equal(
@@ -1651,8 +1658,8 @@ impl<F: Field> RlpCircuitConfig<F> {
             );
             cb.require_equal(
                 "value_rlc == (value_rlc_prev * r) + value",
-                meta.query_advice(value_rlc, Rotation::cur()),
-                meta.query_advice(value_rlc, Rotation::prev()) * r
+                meta.query_advice(all_bytes_rlc_acc, Rotation::cur()),
+                meta.query_advice(all_bytes_rlc_acc, Rotation::prev()) * keccak_input_rand
                     + meta.query_advice(byte_value, Rotation::cur()),
             );
 
@@ -1670,7 +1677,7 @@ impl<F: Field> RlpCircuitConfig<F> {
             cb.require_equal(
                 "is_last == 1 then value_acc == value_rlc",
                 meta.query_advice(rlp_table.value_acc, Rotation::cur()),
-                meta.query_advice(value_rlc, Rotation::cur()),
+                meta.query_advice(all_bytes_rlc_acc, Rotation::cur()),
             );
             cb.require_equal(
                 "is_last == 1 then tag == RlpTxTag::Rlp",
@@ -1739,15 +1746,15 @@ impl<F: Field> RlpCircuitConfig<F> {
             q_usable,
             is_first,
             is_last,
-            rlp_table,
+            rlp_table: *rlp_table,
             index,
             rindex,
             byte_value,
-            value_acc_rlc,
+            calldata_bytes_rlc_acc,
             tx_tags,
             tag_length,
             length_acc,
-            value_rlc,
+            all_bytes_rlc_acc,
             tag_index_cmp_1,
             tag_index_length_cmp,
             tag_length_cmp_1,
@@ -1770,8 +1777,9 @@ impl<F: Field> RlpCircuitConfig<F> {
         &self,
         mut layouter: impl Layouter<F>,
         signed_txs: &[SignedTransaction],
-        randomness: F,
+        challenges: &Challenges<Value<F>>,
     ) -> Result<(), Error> {
+        let keccak_input_rand = challenges.keccak_input();
         let tag_index_cmp_1_chip = ComparatorChip::construct(self.tag_index_cmp_1.clone());
         let tag_index_length_cmp_chip =
             ComparatorChip::construct(self.tag_index_length_cmp.clone());
@@ -1800,21 +1808,23 @@ impl<F: Field> RlpCircuitConfig<F> {
 
                 for signed_tx in signed_txs.iter() {
                     // tx hash (signed tx)
-                    let mut value_rlc = F::zero();
-                    let tx_hash_rows = signed_tx.gen_witness(randomness);
+                    let mut all_bytes_rlc_acc = Value::known(F::zero());
+                    let tx_hash_rows = signed_tx.gen_witness(challenges);
                     let n_rows = tx_hash_rows.len();
                     for (idx, row) in tx_hash_rows
                         .iter()
-                        .chain(signed_tx.rlp_rows(randomness).iter())
+                        .chain(signed_tx.rlp_rows(keccak_input_rand).iter())
                         .enumerate()
                     {
                         offset += 1;
 
                         // update value accumulator over the entire RLP encoding.
-                        value_rlc = if row.tag == RlpTxTag::Rlp as u8 {
+                        all_bytes_rlc_acc = if row.tag == RlpTxTag::Rlp as u8 {
                             row.value_acc
                         } else {
-                            value_rlc * randomness + F::from(row.value as u64)
+                            all_bytes_rlc_acc
+                                .zip(keccak_input_rand)
+                                .map(|(acc, rand)| acc * rand + F::from(row.value as u64))
                         };
 
                         // q_usable
@@ -1838,7 +1848,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                             (
                                 "rlp_table::tx_id",
                                 self.rlp_table.tx_id,
-                                F::from(row.id as u64),
+                                F::from(row.tx_id as u64),
                             ),
                             (
                                 "rlp_table::tag",
@@ -1847,13 +1857,8 @@ impl<F: Field> RlpCircuitConfig<F> {
                             ),
                             (
                                 "rlp_table::tag_index",
-                                self.rlp_table.tag_index,
-                                F::from(row.tag_index as u64),
-                            ),
-                            (
-                                "rlp_table::value_acc",
-                                self.rlp_table.value_acc,
-                                row.value_acc,
+                                self.rlp_table.tag_rindex,
+                                F::from(row.tag_rindex as u64),
                             ),
                             (
                                 "rlp_table::data_type",
@@ -1863,20 +1868,38 @@ impl<F: Field> RlpCircuitConfig<F> {
                             ("index", self.index, F::from(row.index as u64)),
                             ("rindex", self.rindex, F::from(rindex)),
                             ("value", self.byte_value, F::from(row.value as u64)),
-                            ("value_acc_rlc", self.value_acc_rlc, row.value_acc_rlc),
                             (
                                 "tag_length",
                                 self.tag_length,
                                 F::from(row.tag_length as u64),
                             ),
                             ("length_acc", self.length_acc, F::from(row.length_acc)),
-                            ("value_rlc", self.value_rlc, value_rlc),
                         ] {
                             region.assign_advice(
                                 || format!("assign {} {}", name, offset),
                                 column,
                                 offset,
                                 || Value::known(value),
+                            )?;
+                        }
+                        for (name, column, value) in [
+                            (
+                                "rlp_table::value_acc",
+                                self.rlp_table.value_acc,
+                                row.value_acc,
+                            ),
+                            (
+                                "value_acc_rlc",
+                                self.calldata_bytes_rlc_acc,
+                                row.value_rlc_acc,
+                            ),
+                            ("value_rlc", self.all_bytes_rlc_acc, all_bytes_rlc_acc),
+                        ] {
+                            region.assign_advice(
+                                || format!("assign {} {}", name, offset),
+                                column,
+                                offset,
+                                || value,
                             )?;
                         }
 
@@ -1893,12 +1916,12 @@ impl<F: Field> RlpCircuitConfig<F> {
                             &mut region,
                             offset,
                             F::one(),
-                            F::from(row.tag_index as u64),
+                            F::from(row.tag_rindex as u64),
                         )?;
                         tag_index_length_cmp_chip.assign(
                             &mut region,
                             offset,
-                            F::from(row.tag_index as u64),
+                            F::from(row.tag_rindex as u64),
                             F::from(row.tag_length as u64),
                         )?;
                         tag_length_cmp_1_chip.assign(
@@ -1910,13 +1933,13 @@ impl<F: Field> RlpCircuitConfig<F> {
                         tag_index_lt_10_chip.assign(
                             &mut region,
                             offset,
-                            F::from(row.tag_index as u64),
+                            F::from(row.tag_rindex as u64),
                             F::from(10u64),
                         )?;
                         tag_index_lt_34_chip.assign(
                             &mut region,
                             offset,
-                            F::from(row.tag_index as u64),
+                            F::from(row.tag_rindex as u64),
                             F::from(34u64),
                         )?;
                         value_gt_127_chip.assign(
@@ -1982,21 +2005,23 @@ impl<F: Field> RlpCircuitConfig<F> {
                     }
 
                     // tx sign (unsigned tx)
-                    let mut value_rlc = F::zero();
-                    let tx_sign_rows = signed_tx.tx.gen_witness(randomness);
+                    let mut all_bytes_rlc_acc = Value::known(F::zero());
+                    let tx_sign_rows = signed_tx.tx.gen_witness(challenges);
                     let n_rows = tx_sign_rows.len();
                     for (idx, row) in tx_sign_rows
                         .iter()
-                        .chain(signed_tx.tx.rlp_rows(randomness).iter())
+                        .chain(signed_tx.tx.rlp_rows(challenges.keccak_input()).iter())
                         .enumerate()
                     {
                         offset += 1;
 
                         // update value accumulator over the entire RLP encoding.
-                        value_rlc = if row.tag == RlpTxTag::Rlp as u8 {
+                        all_bytes_rlc_acc = if row.tag == RlpTxTag::Rlp as u8 {
                             row.value_acc
                         } else {
-                            value_rlc * randomness + F::from(row.value as u64)
+                            all_bytes_rlc_acc
+                                .zip(keccak_input_rand)
+                                .map(|(acc, rand)| acc * rand + F::from(row.value as u64))
                         };
 
                         // q_usable
@@ -2020,7 +2045,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                             (
                                 "rlp_table::tx_id",
                                 self.rlp_table.tx_id,
-                                F::from(row.id as u64),
+                                F::from(row.tx_id as u64),
                             ),
                             (
                                 "rlp_table::tag",
@@ -2029,13 +2054,8 @@ impl<F: Field> RlpCircuitConfig<F> {
                             ),
                             (
                                 "rlp_table::tag_index",
-                                self.rlp_table.tag_index,
-                                F::from(row.tag_index as u64),
-                            ),
-                            (
-                                "rlp_table::value_acc",
-                                self.rlp_table.value_acc,
-                                row.value_acc,
+                                self.rlp_table.tag_rindex,
+                                F::from(row.tag_rindex as u64),
                             ),
                             (
                                 "rlp_table::data_type",
@@ -2045,20 +2065,42 @@ impl<F: Field> RlpCircuitConfig<F> {
                             ("index", self.index, F::from(row.index as u64)),
                             ("rindex", self.rindex, F::from(rindex)),
                             ("byte value", self.byte_value, F::from(row.value as u64)),
-                            ("value_acc_rlc", self.value_acc_rlc, row.value_acc_rlc),
                             (
                                 "tag_length",
                                 self.tag_length,
                                 F::from(row.tag_length as u64),
                             ),
                             ("length_acc", self.length_acc, F::from(row.length_acc)),
-                            ("value_rlc", self.value_rlc, value_rlc),
                         ] {
                             region.assign_advice(
                                 || format!("assign {} {}", name, offset),
                                 column,
                                 offset,
                                 || Value::known(value),
+                            )?;
+                        }
+                        for (name, column, value) in [
+                            (
+                                "rlp_table::value_acc",
+                                self.rlp_table.value_acc,
+                                row.value_acc,
+                            ),
+                            (
+                                "calldata_bytes_rlc_acc",
+                                self.calldata_bytes_rlc_acc,
+                                row.value_rlc_acc,
+                            ),
+                            (
+                                "all_bytes_rlc_acc",
+                                self.all_bytes_rlc_acc,
+                                all_bytes_rlc_acc,
+                            ),
+                        ] {
+                            region.assign_advice(
+                                || format!("assign {} {}", name, offset),
+                                column,
+                                offset,
+                                || value,
                             )?;
                         }
 
@@ -2075,12 +2117,12 @@ impl<F: Field> RlpCircuitConfig<F> {
                             &mut region,
                             offset,
                             F::one(),
-                            F::from(row.tag_index as u64),
+                            F::from(row.tag_rindex as u64),
                         )?;
                         tag_index_length_cmp_chip.assign(
                             &mut region,
                             offset,
-                            F::from(row.tag_index as u64),
+                            F::from(row.tag_rindex as u64),
                             F::from(row.tag_length as u64),
                         )?;
                         tag_length_cmp_1_chip.assign(
@@ -2092,13 +2134,13 @@ impl<F: Field> RlpCircuitConfig<F> {
                         tag_index_lt_10_chip.assign(
                             &mut region,
                             offset,
-                            F::from(row.tag_index as u64),
+                            F::from(row.tag_rindex as u64),
                             F::from(10u64),
                         )?;
                         tag_index_lt_34_chip.assign(
                             &mut region,
                             offset,
-                            F::from(row.tag_index as u64),
+                            F::from(row.tag_rindex as u64),
                             F::from(34u64),
                         )?;
                         value_gt_127_chip.assign(
@@ -2180,7 +2222,7 @@ impl<F: Field> RlpCircuitConfig<F> {
             self.is_last,
             self.rlp_table.tx_id,
             self.rlp_table.tag,
-            self.rlp_table.tag_index,
+            self.rlp_table.tag_rindex,
             self.rlp_table.value_acc,
             self.rlp_table.data_type,
             self.index,
@@ -2188,8 +2230,8 @@ impl<F: Field> RlpCircuitConfig<F> {
             self.length_acc,
             self.rindex,
             self.byte_value,
-            self.value_acc_rlc,
-            self.value_rlc,
+            self.calldata_bytes_rlc_acc,
+            self.all_bytes_rlc_acc,
         ]
         .into_iter()
         .chain(self.tx_tags.into_iter())
@@ -2284,7 +2326,7 @@ impl<F: Field, RLP> RlpCircuit<F, RLP> {
 }
 
 impl<F: Field> Circuit<F> for RlpCircuit<F, SignedTransaction> {
-    type Config = RlpCircuitConfig<F>;
+    type Config = (RlpCircuitConfig<F>, Challenges);
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
@@ -2292,12 +2334,21 @@ impl<F: Field> Circuit<F> for RlpCircuit<F, SignedTransaction> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        let randomness = power_of_randomness_from_instance::<_, 1>(meta);
-        RlpCircuitConfig::configure(meta, randomness[0].clone())
+        let rlp_table = RlpTable::construct(meta);
+        let challenges = Challenges::construct(meta);
+        let rand_exprs = challenges.exprs(meta);
+        let config = RlpCircuitConfig::configure(meta, &rlp_table, &rand_exprs);
+
+        (config, challenges)
     }
 
-    fn synthesize(&self, config: Self::Config, layouter: impl Layouter<F>) -> Result<(), Error> {
-        config.assign(layouter, self.inputs.as_slice(), self.randomness)
+    fn synthesize(
+        &self,
+        (config, challenges): Self::Config,
+        mut layouter: impl Layouter<F>,
+    ) -> Result<(), Error> {
+        let challenges = challenges.values(&mut layouter);
+        config.assign(layouter, self.inputs.as_slice(), &challenges)
     }
 }
 
@@ -2323,7 +2374,7 @@ mod tests {
 
         let num_rows = 1 << k;
         const NUM_BLINDING_ROWS: usize = 8;
-        let instance = vec![vec![randomness; num_rows - NUM_BLINDING_ROWS]];
+        let instance = vec![];
         let prover = MockProver::<F>::run(k, &circuit, instance).unwrap();
         let err = prover.verify_par();
         let print_failures = true;

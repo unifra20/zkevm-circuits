@@ -1325,7 +1325,7 @@ pub struct RlpTable {
     pub tag: Column<Advice>,
     /// Denotes the decrementing index specific to this tag. The final value of
     /// the field is accumulated in `value_acc` at `tag_index == 1`.
-    pub tag_index: Column<Advice>,
+    pub tag_rindex: Column<Advice>,
     /// Denotes the accumulator value for this field, which is a linear
     /// combination or random linear combination of the field's bytes.
     pub value_acc: Column<Advice>,
@@ -1340,7 +1340,7 @@ impl DynamicTableColumns for RlpTable {
         vec![
             self.tx_id,
             self.tag,
-            self.tag_index,
+            self.tag_rindex,
             self.value_acc,
             self.data_type,
         ]
@@ -1353,29 +1353,32 @@ impl RlpTable {
         Self {
             tx_id: meta.advice_column(),
             tag: meta.advice_column(),
-            tag_index: meta.advice_column(),
-            value_acc: meta.advice_column(),
+            tag_rindex: meta.advice_column(),
+            value_acc: meta.advice_column_in(SecondPhase),
             data_type: meta.advice_column(),
         }
     }
 
     /// Get assignments to the RLP table. Meant to be used for dev purposes.
-    pub fn dev_assignments<F: Field>(txs: Vec<SignedTransaction>, randomness: F) -> Vec<[F; 5]> {
+    pub fn dev_assignments<F: Field>(
+        txs: Vec<SignedTransaction>,
+        challenges: &Challenges<Value<F>>,
+    ) -> Vec<[Value<F>; 5]> {
         let mut assignments = vec![];
         for signed_tx in txs {
             for row in signed_tx
-                .gen_witness(randomness)
+                .gen_witness(challenges)
                 .iter()
-                .chain(signed_tx.rlp_rows(randomness).iter())
-                .chain(signed_tx.tx.gen_witness(randomness).iter())
-                .chain(signed_tx.tx.rlp_rows(randomness).iter())
+                .chain(signed_tx.rlp_rows(challenges.keccak_input()).iter())
+                .chain(signed_tx.tx.gen_witness(challenges).iter())
+                .chain(signed_tx.tx.rlp_rows(challenges.keccak_input()).iter())
             {
                 assignments.push([
-                    F::from(row.id as u64),
-                    F::from(row.tag as u64),
-                    F::from(row.tag_index as u64),
+                    Value::known(F::from(row.tx_id as u64)),
+                    Value::known(F::from(row.tag as u64)),
+                    Value::known(F::from(row.tag_rindex as u64)),
                     row.value_acc,
-                    F::from(row.data_type as u64),
+                    Value::known(F::from(row.data_type as u64)),
                 ]);
             }
         }
@@ -1389,7 +1392,7 @@ impl RlpTable {
         &self,
         layouter: &mut impl Layouter<F>,
         txs: Vec<SignedTransaction>,
-        randomness: F,
+        challenges: &Challenges<Value<F>>,
     ) -> Result<(), Error> {
         layouter.assign_region(
             || "rlp table",
@@ -1404,14 +1407,14 @@ impl RlpTable {
                     )?;
                 }
 
-                for row in Self::dev_assignments(txs.clone(), randomness) {
+                for row in Self::dev_assignments(txs.clone(), challenges) {
                     offset += 1;
                     for (column, value) in self.columns().iter().zip(row) {
                         region.assign_advice(
                             || format!("row: {}", offset),
                             *column,
                             offset,
-                            || Value::known(value),
+                            || value,
                         )?;
                     }
                 }

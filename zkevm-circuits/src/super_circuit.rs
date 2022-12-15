@@ -243,12 +243,12 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
                 meta,
                 bytecode_table,
                 keccak_table,
-                challenges,
+                challenges.clone(),
             ),
             keccak_circuit,
             pi_circuit,
             exp_circuit: ExpCircuitConfig::configure(meta, exp_table),
-            rlp_circuit: RlpCircuitConfig::configure(meta, power_of_randomness[0].clone()),
+            rlp_circuit: RlpCircuitConfig::configure(meta, &rlp_table, &challenges),
         }
     }
 

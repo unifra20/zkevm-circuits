@@ -363,7 +363,7 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize> Circuit<F>
         config.rlp_table.dev_load(
             &mut layouter,
             signed_tx_from_geth_tx(self.txs.as_slice(), self.chain_id),
-            self.randomness,
+            &challenges,
         )
     }
 }
