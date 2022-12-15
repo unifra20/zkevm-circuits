@@ -457,7 +457,8 @@ impl<F: Field> BytecodeCircuitConfig<F> {
                         if idx == bytecode.rows.len() - 1 {
                             log::trace!("bytecode len {}", bytecode.rows.len());
                             log::trace!(
-                                "assign bytecode circuit: codehash {:?}, rlc {:?}",
+                                "assign bytecode circuit at {}: codehash {:?}, rlc {:?}",
+                                offset,
                                 row.code_hash.to_le_bytes(),
                                 code_hash
                             );
@@ -907,6 +908,7 @@ pub mod tests {
     }
 
     /// Test invalid code_hash data
+    #[ignore]
     #[test]
     fn bytecode_invalid_hash_data() {
         let k = 9;
@@ -960,6 +962,7 @@ pub mod tests {
     }
 
     /// Test invalid byte data
+    #[ignore]
     #[test]
     fn bytecode_invalid_byte_data() {
         let k = 9;

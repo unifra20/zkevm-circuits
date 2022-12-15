@@ -84,7 +84,7 @@ use std::array;
 use strum::IntoEnumIterator;
 
 /// Mock randomness used for `SuperCircuit`.
-pub const MOCK_RANDOMNESS: u64 = 0x100;
+pub const MOCK_RANDOMNESS: u64 = 0x10000;
 // TODO: Figure out if we can remove MAX_TXS, MAX_CALLDATA and MAX_RWS from the
 // struct.
 
@@ -359,7 +359,13 @@ impl<const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: usize>
     ) -> Result<(u32, Self, Vec<Vec<Fr>>), bus_mapping::Error> {
         let mut block = block_convert(&builder.block, &builder.code_db).unwrap();
         block.randomness = Fr::from(MOCK_RANDOMNESS);
+        Self::build_from_witness_block(block)
+    }
 
+    /// ..
+    pub fn build_from_witness_block(
+        block: Block<Fr>,
+    ) -> Result<(u32, Self, Vec<Vec<Fr>>), bus_mapping::Error> {
         let fixed_table_tags: Vec<FixedTableTag> = FixedTableTag::iter().collect();
         let log2_ceil = |n| u32::BITS - (n as u32).leading_zeros() - (n & (n - 1) == 0) as u32;
 
@@ -379,9 +385,13 @@ impl<const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: usize>
             .sum::<usize>();
         log::debug!("bytecodes len {}", bytecodes_len);
         let bytecodes_len = std::cmp::max(block.circuits_params.max_bytecode, bytecodes_len);
+        let num_rows_required_for_copy_table: usize =
+            block.copy_events.iter().map(|c| c.bytes.len() * 2).sum();
+        log::debug!("copy table len {}", num_rows_required_for_copy_table);
         let k = k.max(log2_ceil(64 + bytecodes_len));
         let k = k.max(log2_ceil(64 + num_rows_required));
-        log::debug!("super circuit uses k = {}", k);
+        let k = k.max(log2_ceil(64 + num_rows_required_for_copy_table));
+        log::debug!("super circuit needs k = {}", k);
 
         let evm_circuit = EvmCircuit::new_from_block(&block);
         let state_circuit = StateCircuit::new_from_block(&block);

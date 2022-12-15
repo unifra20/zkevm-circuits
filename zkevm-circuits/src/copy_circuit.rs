@@ -23,7 +23,7 @@ use crate::{
         witness::Block,
     },
     table::{
-        BytecodeFieldTag, BytecodeTable, CopyTable, LookupTable, RwTable, RwTableTag,
+        BytecodeTable, CopyTable, LookupTable, RwTable, RwTableTag,
         TxContextFieldTag, TxTable,
     },
     util::{Challenges, SubCircuit, SubCircuitConfig},
@@ -363,6 +363,8 @@ impl<F: Field> SubCircuitConfig<F> for CopyCircuitConfig<F> {
             .collect()
         });
 
+        /*
+        // create case unimplemented for poseidon hash
         meta.lookup_any("Bytecode lookup", |meta| {
             let cond = meta.query_fixed(q_enable, Rotation::cur())
                 * tag.value_equals(CopyDataType::Bytecode, Rotation::cur())(meta)
@@ -379,6 +381,7 @@ impl<F: Field> SubCircuitConfig<F> for CopyCircuitConfig<F> {
             .map(|(arg, table)| (cond.clone() * arg, table))
             .collect()
         });
+        */
 
         meta.lookup_any("Tx calldata lookup", |meta| {
             let cond = meta.query_fixed(q_enable, Rotation::cur())
@@ -428,7 +431,13 @@ impl<F: Field> CopyCircuitConfig<F> {
             || "assign copy table",
             |mut region| {
                 let mut offset = 0;
-                for copy_event in block.copy_events.iter() {
+                for (ev_idx, copy_event) in block.copy_events.iter().enumerate() {
+                    log::debug!(
+                        "offset is {} before {}th copy event: {:?}",
+                        offset,
+                        ev_idx,
+                        copy_event
+                    );
                     for (step_idx, (tag, table_row, circuit_row)) in
                         CopyTable::assignments(copy_event, challenges)
                             .iter()
@@ -493,6 +502,7 @@ impl<F: Field> CopyCircuitConfig<F> {
 
                         offset += 1;
                     }
+                    log::debug!("offset after {}th copy event: {}", ev_idx, offset);
                 }
                 // pad two rows in the end to satisfy Halo2 cell assignment check
                 for _ in 0..2 {

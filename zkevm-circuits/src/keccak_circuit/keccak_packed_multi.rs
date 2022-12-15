@@ -24,7 +24,7 @@ use halo2_proofs::{
 use log::{debug, info};
 use std::{env::var, marker::PhantomData, vec};
 
-const MAX_DEGREE: usize = 3;
+const MAX_DEGREE: usize = 9;
 const ABSORB_LOOKUP_RANGE: usize = 3;
 const THETA_C_LOOKUP_RANGE: usize = 6;
 const RHO_PI_LOOKUP_RANGE: usize = 4;
@@ -32,7 +32,7 @@ const CHI_BASE_LOOKUP_RANGE: usize = 5;
 
 fn get_num_rows_per_round() -> usize {
     var("KECCAK_ROWS")
-        .unwrap_or_else(|_| "5".to_string())
+        .unwrap_or_else(|_| "28".to_string())
         .parse()
         .expect("Cannot parse KECCAK_ROWS env var as usize")
 }

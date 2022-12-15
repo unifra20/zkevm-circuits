@@ -173,7 +173,7 @@ impl<F: Field> EvmCircuitConfig<F> {
             }
             num_rows += 1; // EndBlock
         } else {
-            num_rows += block.evm_circuit_pad_to;
+            num_rows = block.evm_circuit_pad_to;
         }
         num_rows
     }

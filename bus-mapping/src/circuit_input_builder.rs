@@ -214,6 +214,16 @@ impl<'a> CircuitInputBuilder {
         // accumulates gas across all txs in the block
         log::info!("handling block {:?}", eth_block.number);
         for (tx_index, tx) in eth_block.transactions.iter().enumerate() {
+            if self.block.txs.len() >= self.block.circuits_params.max_txs {
+                log::warn!(
+                    "skip tx outside MAX_TX limit {}, {}th(inner idx: {}) tx {:?}",
+                    self.block.circuits_params.max_txs,
+                    tx.transaction_index.unwrap_or_default(),
+                    self.block.txs.len(),
+                    tx.hash
+                );
+                continue;
+            }
             let geth_trace = &geth_traces[tx_index];
             if geth_trace.struct_logs.is_empty() {
                 // only update state
