@@ -23,6 +23,7 @@ use eth_types::{
     Address, GethExecStep, ToAddress, ToBigEndian, ToWord, Word, H256,
 };
 use ethers_core::utils::{get_contract_address, get_create2_address};
+use keccak256::EMPTY_HASH;
 use std::cmp::max;
 
 /// Reference to the internal state of the CircuitInputBuilder in a particular
@@ -421,7 +422,20 @@ impl<'a> CircuitInputStateRef<'a> {
             return Err(Error::AccountNotFound(sender));
         }
         let sender_balance_prev = sender_account.balance;
+        debug_assert!(
+            sender_account.balance >= value + fee,
+            "invalid amount balance {:?} value {:?} fee {:?}",
+            sender_account.balance,
+            value,
+            fee
+        );
         let sender_balance = sender_account.balance - value - fee;
+        log::trace!(
+            "balance update: {:?} {:?}->{:?}",
+            sender,
+            sender_balance_prev,
+            sender_balance
+        );
         self.push_op_reversible(
             step,
             RW::WRITE,
@@ -436,6 +450,12 @@ impl<'a> CircuitInputStateRef<'a> {
         let (_found, receiver_account) = self.sdb.get_account(&receiver);
         let receiver_balance_prev = receiver_account.balance;
         let receiver_balance = receiver_account.balance + value;
+        log::trace!(
+            "balance update: {:?} {:?}->{:?}",
+            receiver,
+            receiver_balance_prev,
+            receiver_balance
+        );
         self.push_op_reversible(
             step,
             RW::WRITE,
@@ -572,6 +592,7 @@ impl<'a> CircuitInputStateRef<'a> {
     }
 
     /// Check if address is a precompiled or not.
+    /// FIXME: we should move this to a more common place.
     pub fn is_precompiled(&self, address: &Address) -> bool {
         address.0[0..19] == [0u8; 19] && (1..=9).contains(&address.0[19])
     }
@@ -622,11 +643,15 @@ impl<'a> CircuitInputStateRef<'a> {
                     }
                     _ => address,
                 };
-                let (found, account) = self.sdb.get_account(&code_address);
-                if !found {
-                    return Err(Error::AccountNotFound(code_address));
+                if self.is_precompiled(&code_address) {
+                    (CodeSource::Address(code_address), H256::from(*EMPTY_HASH))
+                } else {
+                    let (found, account) = self.sdb.get_account(&code_address);
+                    if !found {
+                        return Err(Error::AccountNotFound(code_address));
+                    }
+                    (CodeSource::Address(code_address), account.code_hash)
                 }
-                (CodeSource::Address(code_address), account.code_hash)
             }
         };
 
@@ -758,9 +783,8 @@ impl<'a> CircuitInputStateRef<'a> {
                 match op.field {
                     AccountField::Nonce => account.nonce = op.value,
                     AccountField::Balance => account.balance = op.value,
-                    AccountField::CodeHash => {
-                        account.code_hash = op.value.to_be_bytes().into();
-                    }
+                    AccountField::CodeHash => account.code_hash = op.value.to_be_bytes().into(),
+                    AccountField::NonExisting => (),
                 }
             }
             OpEnum::TxRefund(op) => {
@@ -807,27 +831,35 @@ impl<'a> CircuitInputStateRef<'a> {
     /// previous call context.
     pub fn handle_return(&mut self, step: &GethExecStep) -> Result<(), Error> {
         // handle return_data
-        if !self.call()?.is_root {
-            match step.op {
-                OpcodeId::RETURN | OpcodeId::REVERT => {
-                    let offset = step.stack.nth_last(0)?.as_usize();
-                    let length = step.stack.nth_last(1)?.as_usize();
-                    // TODO: Try to get rid of clone.
-                    // At the moment it conflicts with `call_ctx` and `caller_ctx`.
-                    let callee_memory = self.call_ctx()?.memory.clone();
-                    let caller_ctx = self.caller_ctx_mut()?;
-                    caller_ctx.return_data.resize(length, 0);
-                    if length != 0 {
-                        caller_ctx.return_data[0..length]
-                            .copy_from_slice(&callee_memory.0[offset..offset + length]);
+        let (return_data_offset, return_data_length) = {
+            if !self.call()?.is_root {
+                let (offset, length) = match step.op {
+                    OpcodeId::RETURN | OpcodeId::REVERT => {
+                        let offset = step.stack.nth_last(0)?.as_usize();
+                        let length = step.stack.nth_last(1)?.as_usize();
+                        // TODO: Try to get rid of clone.
+                        // At the moment it conflicts with `call_ctx` and `caller_ctx`.
+                        let callee_memory = self.call_ctx()?.memory.clone();
+                        let caller_ctx = self.caller_ctx_mut()?;
+                        caller_ctx.return_data.resize(length, 0);
+                        if length != 0 {
+                            caller_ctx.return_data[0..length]
+                                .copy_from_slice(&callee_memory.0[offset..offset + length]);
+                        }
+                        (offset, length)
                     }
-                }
-                _ => {
-                    let caller_ctx = self.caller_ctx_mut()?;
-                    caller_ctx.return_data.truncate(0);
-                }
+                    _ => {
+                        let caller_ctx = self.caller_ctx_mut()?;
+                        caller_ctx.return_data.truncate(0);
+                        (0, 0)
+                    }
+                };
+
+                (offset.try_into().unwrap(), length.try_into().unwrap())
+            } else {
+                (0, 0)
             }
-        }
+        };
 
         let call = self.call()?.clone();
         let call_ctx = self.call_ctx()?;
@@ -855,8 +887,8 @@ impl<'a> CircuitInputStateRef<'a> {
         // If current call has caller.
         if let Ok(caller) = self.caller_mut() {
             caller.last_callee_id = call.call_id;
-            caller.last_callee_return_data_length = call.return_data_length;
-            caller.last_callee_return_data_offset = call.return_data_offset;
+            caller.last_callee_return_data_length = return_data_length;
+            caller.last_callee_return_data_offset = return_data_offset;
         }
 
         self.tx_ctx.pop_call_ctx();
@@ -913,7 +945,7 @@ impl<'a> CircuitInputStateRef<'a> {
 
         let memory_expansion_gas_cost =
             memory_expansion_gas_cost(curr_memory_word_size, next_memory_word_size);
-        let code_deposit_cost = if call.is_create() {
+        let code_deposit_cost = if call.is_create() && call.is_success {
             GasCost::CODE_DEPOSIT_BYTE_COST.as_u64() * last_callee_return_data_length.as_u64()
         } else {
             0
@@ -1082,6 +1114,7 @@ impl<'a> CircuitInputStateRef<'a> {
         }
 
         // The *CALL*/CREATE* code was not executed
+
         let next_pc = next_step.map(|s| s.pc.0).unwrap_or(1);
         if matches!(
             step.op,
@@ -1128,6 +1161,12 @@ impl<'a> CircuitInputStateRef<'a> {
                 };
                 let (found, _) = self.sdb.get_account(&address);
                 if found {
+                    log::error!(
+                        "create address collision at {:?}, step {:?}, next_step {:?}",
+                        address,
+                        step,
+                        next_step
+                    );
                     return Ok(Some(ExecError::ContractAddressCollision));
                 }
             }

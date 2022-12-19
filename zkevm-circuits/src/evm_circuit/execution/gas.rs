@@ -150,13 +150,14 @@ mod test {
         builder
             .handle_block(&block.eth_block, &block.geth_traces)
             .expect("could not handle block tx");
-        let mut block = block_convert(&builder.block, &builder.code_db);
+        let mut block = block_convert(&builder.block, &builder.code_db).unwrap();
 
         // The above block has 2 steps (GAS and STOP). We forcefully assign a
         // wrong `gas_left` value for the second step, to assert that
         // the circuit verification fails for this scenario.
         assert_eq!(block.txs.len(), 1);
-        assert_eq!(block.txs[0].steps.len(), 4);
+        // BeginTx, Gas, Stop, EndTx, EndInnerBlock, EndBlock
+        assert_eq!(block.txs[0].steps.len(), 5);
         block.txs[0].steps[2].gas_left -= 1;
         assert!(run_test_circuit(block).is_err());
     }

@@ -54,10 +54,12 @@ pub struct Queries<F: Field> {
     pub address: MpiQueries<F, N_LIMBS_ACCOUNT_ADDRESS>,
     pub storage_key: RlcQueries<F, N_BYTES_WORD>,
     pub initial_value: Expression<F>,
+    pub value_prev_col: Expression<F>,
     pub initial_value_prev: Expression<F>,
+    pub is_non_exist: Expression<F>,
     pub lookups: LookupsQueries<F>,
     pub power_of_randomness: [Expression<F>; N_BYTES_WORD - 1],
-    pub first_access: Expression<F>,
+    pub first_different_limb: [Expression<F>; 4],
     pub not_first_access: Expression<F>,
     pub last_access: Expression<F>,
     pub state_root: Expression<F>,
@@ -136,6 +138,17 @@ impl<F: Field> ConstraintBuilder<F> {
         // tag value in RwTableTag range is enforced in BinaryNumberChip
         self.require_boolean("is_write is boolean", q.is_write());
 
+        // 1 if first_different_limb is in the rw counter, 0 otherwise (i.e. any of the
+        // 4 most significant bits are 0)
+        self.require_equal(
+            "not_first_access when first 16 limbs are same",
+            q.not_first_access.clone(),
+            q.first_different_limb[0].clone()
+                * q.first_different_limb[1].clone()
+                * q.first_different_limb[2].clone()
+                * q.first_different_limb[3].clone(),
+        );
+
         // When at least one of the keys (tag, id, address, field_tag, or storage_key)
         // in the current row differs from the previous row.
         self.condition(q.first_access(), |cb| {
@@ -156,6 +169,78 @@ impl<F: Field> ConstraintBuilder<F> {
                 q.initial_value.clone() - q.initial_value_prev(),
             );
         });
+
+        // Only reversible rws have `value_prev`.
+        // There is no need to constain MemoryRw and StackRw since the 'read
+        // consistency' part of the constaints are enough for them to behave
+        // correctly.
+        // For these 6 Rws whose `value_prev` need to be
+        // constrained:
+        // (1) `AccountStorage` and `Account`: they are related to storage
+        // and they should be connected to MPT cricuit later to check the
+        // `value_prev`.
+        // (2)`TxAccessListAccount` and
+        // `TxAccessListAccountStorage`:  Default values of them should be
+        // `false` indicating "not accessed yet".
+        // (3) `AccountDestructed`: Since we probably
+        // will not support this feature, it is skipped now.
+        // (4) `TxRefund`: Default values should be '0'. BTW it may be moved out of rw table in the future. See https://github.com/privacy-scaling-explorations/zkevm-circuits/issues/395
+        // for more details.
+
+        // FIXME: For RwTableTag::Account, this is a dummy placeholder to pass
+        // constraints It should be aux2/committed_value.
+        // We should fix this after the committed_value field of Rw::Account in
+        // both bus-mapping and evm-circuits are implemented.
+        /*
+        self.condition(q.first_access(), |cb| {
+            cb.require_equal(
+                "prev value when first access",
+                q.value_prev_col.clone(),
+                (q.tag_matches(RwTableTag::TxAccessListAccount)
+                    + q.tag_matches(RwTableTag::TxAccessListAccountStorage)
+                    + q.tag_matches(RwTableTag::AccountDestructed)
+                    + q.tag_matches(RwTableTag::TxRefund))
+                    * 0u64.expr()
+                    + q.tag_matches(RwTableTag::Account)
+                          *  q.value_prev_col.clone()
+                    + q.tag_matches(RwTableTag::AccountStorage)
+                       *     q.aux2.clone(), // committed value
+            );
+        });
+        self.condition(q.not_first_access(), |cb| {
+            cb.require_equal(
+                "prev value when not first acccess",
+                q.value_prev_col.clone(),
+                (q.tag_matches(RwTableTag::TxAccessListAccount)
+                    + q.tag_matches(RwTableTag::TxAccessListAccountStorage)
+                    + q.tag_matches(RwTableTag::AccountDestructed)
+                    + q.tag_matches(RwTableTag::TxRefund))
+                    * q.value_prev.clone()
+                    + q.tag_matches(RwTableTag::Account) * q.value_prev_col.clone()
+                    + q.tag_matches(RwTableTag::AccountStorage) * q.value_prev.clone(),
+            );
+        });
+        */
+        /*
+        self.require_equal("rw table rlc", q.rw_rlc.clone(), {
+            rlc::expr(
+                &[
+                    q.rw_counter.value.clone(),
+                    q.is_write.clone(),
+                    q.tag.clone(),
+                    q.id.value.clone(),
+                    q.address.value.clone(),
+                    q.field_tag.clone(),
+                    q.storage_key.encoded.clone(),
+                    q.value.clone(),
+                    q.value_prev_col.clone(),
+                    0u64.expr(), //q.aux1,
+                    q.aux2.clone(),
+                ],
+                &q.power_of_randomness,
+            )
+        })
+        */
     }
 
     fn build_start_constraints(&mut self, q: &Queries<F>) {
@@ -233,6 +318,8 @@ impl<F: Field> ConstraintBuilder<F> {
         // TODO: cold VS warm
         self.require_zero("field_tag is 0 for AccountStorage", q.field_tag());
 
+        let is_non_exist = q.is_non_exist();
+
         self.condition(q.last_access(), |cb| {
             cb.add_lookup(
                 "mpt_update exists in mpt circuit for AccountStorage last access",
@@ -246,7 +333,8 @@ impl<F: Field> ConstraintBuilder<F> {
                         q.mpt_update_table.storage_key.clone(),
                     ),
                     (
-                        ProofType::StorageChanged.expr(),
+                        is_non_exist.expr() * ProofType::StorageDoesNotExist.expr()
+                            + (1.expr() - is_non_exist) * ProofType::StorageChanged.expr(),
                         q.mpt_update_table.proof_type.clone(),
                     ),
                     (q.state_root(), q.mpt_update_table.new_root.clone()),
@@ -480,12 +568,20 @@ impl<F: Field> Queries<F> {
         self.initial_value_prev.clone()
     }
 
+    fn is_non_exist(&self) -> Expression<F> {
+        self.is_non_exist.clone()
+    }
+
     fn tag_matches(&self, tag: RwTableTag) -> Expression<F> {
         BinaryNumberConfig::<RwTableTag, 4>::value_equals_expr(tag, self.tag_bits.clone())
     }
 
+    // be careful! not boolean!!
     fn first_access(&self) -> Expression<F> {
-        self.first_access.clone()
+        not::expr(self.not_first_access.clone())
+    }
+    fn not_first_access(&self) -> Expression<F> {
+        self.not_first_access.clone()
     }
 
     fn address_change(&self) -> Expression<F> {
