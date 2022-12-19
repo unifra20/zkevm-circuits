@@ -62,7 +62,7 @@ use crate::exp_circuit::{ExpCircuit, ExpCircuitConfig};
 use crate::keccak_circuit::keccak_packed_multi::{
     KeccakCircuit, KeccakCircuitConfig, KeccakCircuitConfigArgs,
 };
-use crate::pi_circuit::{PiCircuit, PiCircuitConfig, PiCircuitConfigArgs};
+//use crate::pi_circuit::{PiCircuit, PiCircuitConfig, PiCircuitConfigArgs};
 use crate::state_circuit::{StateCircuit, StateCircuitConfig, StateCircuitConfigArgs};
 use crate::table::{
     BlockTable, BytecodeTable, CopyTable, ExpTable, KeccakTable, MptTable, RwTable, TxTable,
@@ -105,7 +105,7 @@ pub struct SuperCircuitConfig<
     bytecode_circuit: BytecodeCircuitConfig<F>,
     copy_circuit: CopyCircuitConfig<F>,
     keccak_circuit: KeccakCircuitConfig<F>,
-    pi_circuit: PiCircuitConfig<F>,
+    //pi_circuit: PiCircuitConfig<F>,
     exp_circuit: ExpCircuitConfig<F>,
 }
 
@@ -124,7 +124,7 @@ pub struct SuperCircuit<
     /// The transaction circuit that will be used in the `synthesize` step.
     //pub tx_circuit: TxCircuit<F>,
     /// Public Input Circuit
-    pub pi_circuit: PiCircuit<F>,
+    //pub pi_circuit: PiCircuit<F>,
     /// Bytecode Circuit
     pub bytecode_circuit: BytecodeCircuit<F>,
     /// Copy Circuit
@@ -166,15 +166,35 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+        let log_circuit_info = |meta: &mut ConstraintSystem<F>, tag: &'static str| {
+            log::debug!("circuit info after {}: num_fixed_columns {}, num_advice_columns {}, num_instance_columns {}, num_selectors {}, num_permutation_columns {}, degree {}",
+            tag,
+            meta.num_fixed_columns,
+            meta.num_advice_columns,
+            meta.num_instance_columns,
+            meta.num_selectors,
+            meta.permutation.columns.len(),
+            meta.degree());
+        };
+
         let tx_table = TxTable::construct(meta);
+        log_circuit_info(meta, "tx");
         let rw_table = RwTable::construct(meta);
+        log_circuit_info(meta, "rw");
         let mpt_table = MptTable::construct(meta);
+        log_circuit_info(meta, "mpt");
         let bytecode_table = BytecodeTable::construct(meta);
+        log_circuit_info(meta, "bytecode");
         let block_table = BlockTable::construct(meta);
+        log_circuit_info(meta, "block");
         let q_copy_table = meta.fixed_column();
+        log::debug!("q_copy_table {:?}", q_copy_table);
         let copy_table = CopyTable::construct(meta, q_copy_table);
+        log_circuit_info(meta, "copy");
         let exp_table = ExpTable::construct(meta);
+        log_circuit_info(meta, "exp");
         let keccak_table = KeccakTable::construct(meta);
+        log_circuit_info(meta, "keccak");
 
         let power_of_randomness = array::from_fn(|i| {
             Expression::Constant(F::from(MOCK_RANDOMNESS).pow(&[1 + i as u64, 0, 0, 0]))
@@ -192,7 +212,9 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
                 challenges: challenges.clone(),
             },
         );
+        log_circuit_info(meta, "keccak");
 
+        /*
         let pi_circuit = PiCircuitConfig::new(
             meta,
             PiCircuitConfigArgs {
@@ -202,6 +224,9 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
                 tx_table: tx_table.clone(),
             },
         );
+
+        log_circuit_info(meta, "pi");
+        */
         /*
         let tx_circuit = TxCircuitConfig::new(
             meta,
@@ -220,6 +245,8 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
                 challenges: challenges.clone(),
             },
         );
+
+        log_circuit_info(meta, "bytecode");
         let copy_circuit = CopyCircuitConfig::new(
             meta,
             CopyCircuitConfigArgs {
@@ -231,6 +258,7 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
                 challenges: challenges.clone(),
             },
         );
+        log_circuit_info(meta, "copy");
         let state_circuit = StateCircuitConfig::new(
             meta,
             StateCircuitConfigArgs {
@@ -239,7 +267,11 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
                 challenges,
             },
         );
+
+        log_circuit_info(meta, "state");
         let exp_circuit = ExpCircuitConfig::new(meta, exp_table);
+
+        log_circuit_info(meta, "exp");
         let evm_circuit = EvmCircuitConfig::new(
             meta,
             EvmCircuitConfigArgs {
@@ -254,6 +286,8 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
             },
         );
 
+        log_circuit_info(meta, "evm");
+
         Self::Config {
             block_table,
             mpt_table,
@@ -263,7 +297,7 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
             copy_circuit,
             bytecode_circuit,
             keccak_circuit,
-            pi_circuit,
+            //pi_circuit,
             exp_circuit,
         }
     }
@@ -312,8 +346,8 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
             .synthesize_sub(&config.exp_circuit, &challenges, &mut layouter)?;
         self.evm_circuit
             .synthesize_sub(&config.evm_circuit, &challenges, &mut layouter)?;
-        self.pi_circuit
-            .synthesize_sub(&config.pi_circuit, &challenges, &mut layouter)?;
+        //self.pi_circuit
+        //    .synthesize_sub(&config.pi_circuit, &challenges, &mut layouter)?;
         Ok(())
     }
 }
@@ -366,6 +400,10 @@ impl<const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: usize>
     pub fn build_from_witness_block(
         block: Block<Fr>,
     ) -> Result<(u32, Self, Vec<Vec<Fr>>), bus_mapping::Error> {
+        log::debug!(
+            "super circuit build_from_witness_block, circuits_params {:?}",
+            block.circuits_params
+        );
         let fixed_table_tags: Vec<FixedTableTag> = FixedTableTag::iter().collect();
         let log2_ceil = |n| u32::BITS - (n as u32).leading_zeros() - (n & (n - 1) == 0) as u32;
 
@@ -396,7 +434,7 @@ impl<const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: usize>
         let evm_circuit = EvmCircuit::new_from_block(&block);
         let state_circuit = StateCircuit::new_from_block(&block);
         //let tx_circuit = TxCircuit::new_from_block(&block);
-        let pi_circuit = PiCircuit::new_from_block(&block);
+        //let pi_circuit = PiCircuit::new_from_block(&block);
         let bytecode_circuit = BytecodeCircuit::new_from_block(&block);
         let copy_circuit = CopyCircuit::new_from_block(&block);
         let exp_circuit = ExpCircuit::new_from_block(&block);
@@ -406,7 +444,7 @@ impl<const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: usize>
             evm_circuit,
             state_circuit,
             //tx_circuit,
-            pi_circuit,
+            //pi_circuit,
             bytecode_circuit,
             copy_circuit,
             exp_circuit,
@@ -420,11 +458,12 @@ impl<const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: usize>
     /// Returns suitable inputs for the SuperCircuit.
     pub fn instance(&self) -> Vec<Vec<Fr>> {
         // SignVerifyChip -> ECDSAChip -> MainGate instance column
-        let pi_instance = self.pi_circuit.instance();
+        //let pi_instance = self.pi_circuit.instance();
         // FIXME: why two columns??
-        let instance = vec![pi_instance[0].clone()];
+        //let instance = vec![pi_instance[0].clone()];
 
-        instance
+        //instance
+        vec![]
     }
 }
 

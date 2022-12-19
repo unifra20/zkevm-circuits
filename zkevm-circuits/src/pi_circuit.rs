@@ -1119,7 +1119,13 @@ impl<F: Field> SubCircuit<F> for PiCircuit<F> {
     type Config = PiCircuitConfig<F>;
 
     fn new_from_block(block: &witness::Block<F>) -> Self {
-        let context = block.context.ctxs.iter().next().unwrap().1;
+        let context = block
+            .context
+            .ctxs
+            .iter()
+            .next()
+            .map(|(_k, v)| v.clone())
+            .unwrap_or_default();
         let public_data = PublicData {
             chain_id: context.chain_id,
             history_hashes: context.history_hashes.clone(),

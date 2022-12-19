@@ -23,8 +23,7 @@ use crate::{
         witness::Block,
     },
     table::{
-        BytecodeTable, CopyTable, LookupTable, RwTable, RwTableTag,
-        TxContextFieldTag, TxTable,
+        BytecodeTable, CopyTable, LookupTable, RwTable, RwTableTag, TxContextFieldTag, TxTable,
     },
     util::{Challenges, SubCircuit, SubCircuitConfig},
     witness,
@@ -461,14 +460,16 @@ impl<F: Field> CopyCircuitConfig<F> {
 
                         // q_step
                         if is_read {
-                            self.q_step.enable(&mut region, offset)?;
+                            //self.q_step.enable(&mut region, offset)?;
                         }
+                        // FIXME: finish padding of copy circuit
+                        // Now temporarily set it to 0 to make vk univeral
                         // q_enable
                         region.assign_fixed(
                             || "q_enable",
                             self.q_enable,
                             offset,
-                            || Value::known(F::one()),
+                            || Value::known(F::zero()),
                         )?;
 
                         // is_last, value, is_pad, is_code

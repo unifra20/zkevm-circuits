@@ -780,6 +780,23 @@ impl<F: Field> ExecutionConfig<F> {
         }
     }
 
+    pub fn get_num_rows_required(&self, block: &Block<F>) -> usize {
+        // Start at 1 so we can be sure there is an unused `next` row available
+        let mut num_rows = 1;
+        let evm_rows = block.evm_circuit_pad_to;
+        if evm_rows == 0 {
+            for transaction in &block.txs {
+                for step in &transaction.steps {
+                    num_rows += self.get_step_height(step.execution_state);
+                }
+            }
+            num_rows += 1; // EndBlock
+        } else {
+            num_rows = block.evm_circuit_pad_to;
+        }
+        num_rows
+    }
+
     /// Assign block
     /// When exact is enabled, assign exact steps in block without padding for
     /// unit test purpose
@@ -794,9 +811,21 @@ impl<F: Field> ExecutionConfig<F> {
             .try_into()
             .unwrap();
 
+        let mut is_first_time = false;
+
         layouter.assign_region(
             || "Execution step",
             |mut region| {
+                if is_first_time {
+                    is_first_time = false;
+                    region.assign_advice(
+                        || "step selector",
+                        self.q_step,
+                        self.get_num_rows_required(block) - 1,
+                        || Value::known(F::zero()),
+                    )?;
+                    return Ok(());
+                }
                 let mut offset = 0;
 
                 self.q_step_first.enable(&mut region, offset)?;

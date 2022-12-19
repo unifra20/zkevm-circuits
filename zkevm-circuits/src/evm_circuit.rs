@@ -162,20 +162,7 @@ impl<F: Field> EvmCircuitConfig<F> {
     }
 
     pub fn get_num_rows_required(&self, block: &Block<F>) -> usize {
-        // Start at 1 so we can be sure there is an unused `next` row available
-        let mut num_rows = 1;
-        let evm_rows = block.evm_circuit_pad_to;
-        if evm_rows == 0 {
-            for transaction in &block.txs {
-                for step in &transaction.steps {
-                    num_rows += self.execution.get_step_height(step.execution_state);
-                }
-            }
-            num_rows += 1; // EndBlock
-        } else {
-            num_rows = block.evm_circuit_pad_to;
-        }
-        num_rows
+        self.execution.get_num_rows_required(block)
     }
 }
 
