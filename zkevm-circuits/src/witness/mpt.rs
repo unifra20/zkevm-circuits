@@ -73,9 +73,8 @@ impl MptUpdates {
         &self,
         randomness: Value<F>,
     ) -> Vec<MptUpdateRow<Value<F>>> {
-        self.0
-            .values()
-            .map(|update| {
+        std::iter::once(MptUpdateRow([Value::known(F::zero()); 7]))
+            .chain(self.0.values().map(|update| {
                 let (new_root, old_root) = randomness
                     .map(|randomness| update.root_assignments(randomness))
                     .unzip();
@@ -91,7 +90,7 @@ impl MptUpdates {
                     new_value,
                     old_value,
                 ])
-            })
+            }))
             .collect()
     }
 }
