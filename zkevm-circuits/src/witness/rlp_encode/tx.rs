@@ -1,7 +1,9 @@
 use halo2_proofs::circuit::Value;
 use halo2_proofs::{arithmetic::FieldExt, plonk::Expression};
+use strum_macros::EnumIter;
 
 use crate::util::Challenges;
+use crate::witness::rlp_encode::common::handle_u8;
 use crate::{evm_circuit::witness::Transaction, impl_expr, witness::tx::SignedTransaction};
 
 use super::{
@@ -10,19 +12,18 @@ use super::{
 };
 
 /// Tags used to tag rows in the RLP circuit for a transaction.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, EnumIter)]
 pub enum RlpTxTag {
     /// Denotes the prefix bytes indicating the “length of length” and/or
     /// “length” of the tx’s RLP-encoding.
-    Prefix = 1,
+    #[default]
+    Prefix = 0,
     /// Denotes the byte(s) for the tx’s nonce.
     Nonce,
     /// Denotes the byte(s) for the tx’s gas price.
     GasPrice,
     /// Denotes the byte(s) for the tx’s gas.
     Gas,
-    /// Denotes the prefix byte indicating the “length” of the tx’s to.
-    ToPrefix,
     /// Denotes the bytes for the tx’s to.
     To,
     /// Denotes the byte(s) for the tx’s value.
@@ -52,6 +53,12 @@ pub enum RlpTxTag {
 
 impl_expr!(RlpTxTag);
 
+impl From<RlpTxTag> for usize {
+    fn from(t: RlpTxTag) -> Self {
+        t as usize
+    }
+}
+
 /// Denotes the number of tag values in a transaction's RLP trace.
 pub const N_TX_TAGS: usize = 16;
 
@@ -65,7 +72,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for Transaction {
             rlp_data.as_ref(),
             &mut rows,
             RlpDataType::TxSign,
-            RlpTxTag::Prefix as u8,
+            RlpTxTag::Prefix,
             0,
         );
         let idx = handle_u64(
@@ -73,7 +80,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for Transaction {
             rlp_data.as_ref(),
             &mut rows,
             RlpDataType::TxSign,
-            RlpTxTag::Nonce as u8,
+            RlpTxTag::Nonce,
             self.nonce.into(),
             idx,
         );
@@ -83,7 +90,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for Transaction {
             rlp_data.as_ref(),
             &mut rows,
             RlpDataType::TxSign,
-            RlpTxTag::GasPrice as u8,
+            RlpTxTag::GasPrice,
             self.gas_price,
             idx,
         );
@@ -92,7 +99,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for Transaction {
             rlp_data.as_ref(),
             &mut rows,
             RlpDataType::TxSign,
-            RlpTxTag::Gas as u8,
+            RlpTxTag::Gas,
             self.gas.into(),
             idx,
         );
@@ -101,8 +108,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for Transaction {
             rlp_data.as_ref(),
             &mut rows,
             RlpDataType::TxSign,
-            RlpTxTag::ToPrefix as u8,
-            RlpTxTag::To as u8,
+            RlpTxTag::To,
             self.callee_address,
             idx,
         );
@@ -112,7 +118,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for Transaction {
             rlp_data.as_ref(),
             &mut rows,
             RlpDataType::TxSign,
-            RlpTxTag::Value as u8,
+            RlpTxTag::Value,
             self.value,
             idx,
         );
@@ -122,8 +128,8 @@ impl<F: FieldExt> RlpWitnessGen<F> for Transaction {
             rlp_data.as_ref(),
             &mut rows,
             RlpDataType::TxSign,
-            RlpTxTag::DataPrefix as u8,
-            RlpTxTag::Data as u8,
+            RlpTxTag::DataPrefix,
+            RlpTxTag::Data,
             &self.call_data,
             idx,
         );
@@ -132,27 +138,25 @@ impl<F: FieldExt> RlpWitnessGen<F> for Transaction {
             rlp_data.as_ref(),
             &mut rows,
             RlpDataType::TxSign,
-            RlpTxTag::ChainId as u8,
+            RlpTxTag::ChainId,
             self.chain_id.into(),
             idx,
         );
-        let idx = handle_u256(
-            challenges.evm_word(),
+        let idx = handle_u8(
             self.id,
             rlp_data.as_ref(),
             &mut rows,
             RlpDataType::TxSign,
-            RlpTxTag::Zero as u8,
+            RlpTxTag::Zero,
             0.into(),
             idx,
         );
-        let idx = handle_u256(
-            challenges.evm_word(),
+        let idx = handle_u8(
             self.id,
             rlp_data.as_ref(),
             &mut rows,
             RlpDataType::TxSign,
-            RlpTxTag::Zero as u8,
+            RlpTxTag::Zero,
             0.into(),
             idx,
         );
@@ -182,7 +186,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for Transaction {
                 value: 0,
                 value_acc: Value::known(F::from(rlp_out.len() as u64)),
                 value_rlc_acc: Value::known(F::zero()),
-                tag: RlpTxTag::RlpLength as u8,
+                tag: RlpTxTag::RlpLength,
                 tag_length: 1,
                 tag_rindex: 1,
                 length_acc: 0,
@@ -194,7 +198,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for Transaction {
                 value: 0,
                 value_acc: rlc_rlp_out,
                 value_rlc_acc: Value::known(F::zero()),
-                tag: RlpTxTag::Rlp as u8,
+                tag: RlpTxTag::Rlp,
                 tag_length: 1,
                 tag_rindex: 1,
                 length_acc: 0,
@@ -213,7 +217,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for SignedTransaction {
             rlp_data.as_ref(),
             &mut rows,
             RlpDataType::TxHash,
-            RlpTxTag::Prefix as u8,
+            RlpTxTag::Prefix,
             0,
         );
         let idx = handle_u64(
@@ -221,7 +225,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for SignedTransaction {
             rlp_data.as_ref(),
             &mut rows,
             RlpDataType::TxHash,
-            RlpTxTag::Nonce as u8,
+            RlpTxTag::Nonce,
             self.tx.nonce.into(),
             idx,
         );
@@ -231,7 +235,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for SignedTransaction {
             rlp_data.as_ref(),
             &mut rows,
             RlpDataType::TxHash,
-            RlpTxTag::GasPrice as u8,
+            RlpTxTag::GasPrice,
             self.tx.gas_price,
             idx,
         );
@@ -240,7 +244,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for SignedTransaction {
             rlp_data.as_ref(),
             &mut rows,
             RlpDataType::TxHash,
-            RlpTxTag::Gas as u8,
+            RlpTxTag::Gas,
             self.tx.gas.into(),
             idx,
         );
@@ -249,8 +253,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for SignedTransaction {
             rlp_data.as_ref(),
             &mut rows,
             RlpDataType::TxHash,
-            RlpTxTag::ToPrefix as u8,
-            RlpTxTag::To as u8,
+            RlpTxTag::To,
             self.tx.callee_address,
             idx,
         );
@@ -260,7 +263,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for SignedTransaction {
             rlp_data.as_ref(),
             &mut rows,
             RlpDataType::TxHash,
-            RlpTxTag::Value as u8,
+            RlpTxTag::Value,
             self.tx.value,
             idx,
         );
@@ -270,8 +273,8 @@ impl<F: FieldExt> RlpWitnessGen<F> for SignedTransaction {
             rlp_data.as_ref(),
             &mut rows,
             RlpDataType::TxHash,
-            RlpTxTag::DataPrefix as u8,
-            RlpTxTag::Data as u8,
+            RlpTxTag::DataPrefix,
+            RlpTxTag::Data,
             &self.tx.call_data,
             idx,
         );
@@ -280,7 +283,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for SignedTransaction {
             rlp_data.as_ref(),
             &mut rows,
             RlpDataType::TxHash,
-            RlpTxTag::SigV as u8,
+            RlpTxTag::SigV,
             self.signature.v.into(),
             idx,
         );
@@ -290,7 +293,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for SignedTransaction {
             rlp_data.as_ref(),
             &mut rows,
             RlpDataType::TxHash,
-            RlpTxTag::SigR as u8,
+            RlpTxTag::SigR,
             self.signature.r,
             idx,
         );
@@ -300,7 +303,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for SignedTransaction {
             rlp_data.as_ref(),
             &mut rows,
             RlpDataType::TxHash,
-            RlpTxTag::SigS as u8,
+            RlpTxTag::SigS,
             self.signature.s,
             idx,
         );
@@ -330,7 +333,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for SignedTransaction {
                 value: 0,
                 value_acc: Value::known(F::from(rlp_out.len() as u64)),
                 value_rlc_acc: Value::known(F::zero()),
-                tag: RlpTxTag::RlpLength as u8,
+                tag: RlpTxTag::RlpLength,
                 tag_length: 1,
                 tag_rindex: 1,
                 length_acc: 0,
@@ -342,7 +345,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for SignedTransaction {
                 value: 0,
                 value_acc: rlc_rlp_out,
                 value_rlc_acc: Value::known(F::zero()),
-                tag: RlpTxTag::Rlp as u8,
+                tag: RlpTxTag::Rlp,
                 tag_length: 1,
                 tag_rindex: 1,
                 length_acc: 0,
@@ -388,57 +391,57 @@ mod tests {
         assert_eq!(tx_rlp.len(), witness_rows.len());
 
         // prefix verification
-        assert_eq!(witness_rows[0].tag, RlpTxTag::Prefix as u8);
+        assert_eq!(witness_rows[0].tag, RlpTxTag::Prefix);
         assert_eq!(witness_rows[0].tag_rindex, 2);
         assert_eq!(witness_rows[0].tag_length, 2);
         assert_eq!(witness_rows[0].length_acc, 0);
         assert_eq!(witness_rows[0].value, 248);
-        assert_eq!(witness_rows[1].tag, RlpTxTag::Prefix as u8);
+        assert_eq!(witness_rows[1].tag, RlpTxTag::Prefix);
         assert_eq!(witness_rows[1].tag_rindex, 1);
         assert_eq!(witness_rows[1].tag_length, 2);
         assert_eq!(witness_rows[1].length_acc, 84);
         assert_eq!(witness_rows[1].value, 84);
 
         // nonce verification
-        assert_eq!(witness_rows[2].tag, RlpTxTag::Nonce as u8);
+        assert_eq!(witness_rows[2].tag, RlpTxTag::Nonce);
         assert_eq!(witness_rows[2].tag_rindex, 1);
         assert_eq!(witness_rows[2].tag_length, 1);
         assert_eq!(witness_rows[2].value, 1);
 
         // gas price verification
-        assert_eq!(witness_rows[3].tag, RlpTxTag::GasPrice as u8);
+        assert_eq!(witness_rows[3].tag, RlpTxTag::GasPrice);
         assert_eq!(witness_rows[3].tag_rindex, 1);
         assert_eq!(witness_rows[3].tag_length, 1);
         assert_eq!(witness_rows[3].value, 2);
 
         // gas verification
-        assert_eq!(witness_rows[4].tag, RlpTxTag::Gas as u8);
+        assert_eq!(witness_rows[4].tag, RlpTxTag::Gas);
         assert_eq!(witness_rows[4].tag_rindex, 1);
         assert_eq!(witness_rows[4].tag_length, 1);
         assert_eq!(witness_rows[4].value, 3);
 
         // to prefix verification
-        assert_eq!(witness_rows[5].tag, RlpTxTag::ToPrefix as u8);
-        assert_eq!(witness_rows[5].tag_rindex, 1);
-        assert_eq!(witness_rows[5].tag_length, 1);
+        assert_eq!(witness_rows[5].tag, RlpTxTag::To);
+        assert_eq!(witness_rows[5].tag_rindex, 21);
+        assert_eq!(witness_rows[5].tag_length, 21);
         assert_eq!(witness_rows[5].value, 148);
 
         // to verification
         for (i, row) in witness_rows.iter().skip(6).take(20).enumerate() {
-            assert_eq!(row.tag, RlpTxTag::To as u8);
-            assert_eq!(row.tag_rindex, 20 - i);
-            assert_eq!(row.tag_length, 20);
+            assert_eq!(row.tag, RlpTxTag::To);
+            assert_eq!(row.tag_rindex, 21 - (i + 1));
+            assert_eq!(row.tag_length, 21);
             assert_eq!(row.value, mock::MOCK_ACCOUNTS[0][i]);
         }
 
         // value verification
-        assert_eq!(witness_rows[26].tag, RlpTxTag::Value as u8);
+        assert_eq!(witness_rows[26].tag, RlpTxTag::Value);
         assert_eq!(witness_rows[26].tag_rindex, 1);
         assert_eq!(witness_rows[26].tag_length, 1);
         assert_eq!(witness_rows[26].value, 4);
 
         // data prefix verification
-        assert_eq!(witness_rows[27].tag, RlpTxTag::DataPrefix as u8);
+        assert_eq!(witness_rows[27].tag, RlpTxTag::DataPrefix);
         assert_eq!(witness_rows[27].tag_rindex, 1);
         assert_eq!(witness_rows[27].tag_length, 1);
         assert_eq!(witness_rows[27].value, 128 + 55);
@@ -446,7 +449,7 @@ mod tests {
 
         // data verification
         for (i, row) in witness_rows.iter().skip(28).take(55).enumerate() {
-            assert_eq!(row.tag, RlpTxTag::Data as u8);
+            assert_eq!(row.tag, RlpTxTag::Data);
             assert_eq!(row.tag_rindex, 55 - i);
             assert_eq!(row.tag_length, 55);
             assert_eq!(row.value, call_data[i]);
@@ -482,17 +485,17 @@ mod tests {
         assert_eq!(tx_rlp.len(), witness_rows.len());
 
         // prefix verification
-        assert_eq!(witness_rows[0].tag, RlpTxTag::Prefix as u8);
+        assert_eq!(witness_rows[0].tag, RlpTxTag::Prefix);
         assert_eq!(witness_rows[0].tag_rindex, 3);
         assert_eq!(witness_rows[0].tag_length, 3);
         assert_eq!(witness_rows[0].length_acc, 0);
         assert_eq!(witness_rows[0].value, 249);
-        assert_eq!(witness_rows[1].tag, RlpTxTag::Prefix as u8);
+        assert_eq!(witness_rows[1].tag, RlpTxTag::Prefix);
         assert_eq!(witness_rows[1].tag_rindex, 2);
         assert_eq!(witness_rows[1].tag_length, 3);
         assert_eq!(witness_rows[1].length_acc, 8);
         assert_eq!(witness_rows[1].value, 8);
-        assert_eq!(witness_rows[2].tag, RlpTxTag::Prefix as u8);
+        assert_eq!(witness_rows[2].tag, RlpTxTag::Prefix);
         assert_eq!(witness_rows[2].tag_rindex, 1);
         assert_eq!(witness_rows[2].tag_length, 3);
         assert_eq!(witness_rows[2].length_acc, 2091);
@@ -506,13 +509,13 @@ mod tests {
             .cloned()
             .collect::<Vec<u8>>();
         assert_eq!(nonce_bytes.len(), 3);
-        assert_eq!(witness_rows[3].tag, RlpTxTag::Nonce as u8);
+        assert_eq!(witness_rows[3].tag, RlpTxTag::Nonce);
         assert_eq!(witness_rows[3].tag_length, 4);
         assert_eq!(witness_rows[3].tag_rindex, 4);
         assert_eq!(witness_rows[3].value, 128 + 3);
         assert_eq!(witness_rows[3].length_acc, 3);
         for (i, row) in witness_rows.iter().skip(4).take(3).enumerate() {
-            assert_eq!(row.tag, RlpTxTag::Nonce as u8);
+            assert_eq!(row.tag, RlpTxTag::Nonce);
             assert_eq!(row.tag_length, 4);
             assert_eq!(row.tag_rindex, 3 - i);
             assert_eq!(row.value, nonce_bytes[i]);
@@ -525,24 +528,18 @@ mod tests {
             4 +  // gas
             21 + // callee address
             4; // value
-        assert_eq!(
-            witness_rows[START_DATA_PREFIX - 1].tag,
-            RlpTxTag::Value as u8
-        );
+        assert_eq!(witness_rows[START_DATA_PREFIX - 1].tag, RlpTxTag::Value);
 
         // data prefix verification
         // 2048 -> 0x0800 -> len_of_len == 2
-        assert_eq!(
-            witness_rows[START_DATA_PREFIX].tag,
-            RlpTxTag::DataPrefix as u8
-        );
+        assert_eq!(witness_rows[START_DATA_PREFIX].tag, RlpTxTag::DataPrefix);
         assert_eq!(witness_rows[START_DATA_PREFIX].tag_rindex, 3);
         assert_eq!(witness_rows[START_DATA_PREFIX].tag_length, 3);
         assert_eq!(witness_rows[START_DATA_PREFIX].value, 183 + 2);
         assert_eq!(witness_rows[START_DATA_PREFIX].length_acc, 0);
         assert_eq!(
             witness_rows[START_DATA_PREFIX + 1].tag,
-            RlpTxTag::DataPrefix as u8
+            RlpTxTag::DataPrefix
         );
         assert_eq!(witness_rows[START_DATA_PREFIX + 1].tag_rindex, 2);
         assert_eq!(witness_rows[START_DATA_PREFIX + 1].tag_length, 3);
@@ -550,7 +547,7 @@ mod tests {
         assert_eq!(witness_rows[START_DATA_PREFIX + 1].length_acc, 8);
         assert_eq!(
             witness_rows[START_DATA_PREFIX + 2].tag,
-            RlpTxTag::DataPrefix as u8
+            RlpTxTag::DataPrefix
         );
         assert_eq!(witness_rows[START_DATA_PREFIX + 2].tag_rindex, 1);
         assert_eq!(witness_rows[START_DATA_PREFIX + 2].tag_length, 3);
@@ -558,10 +555,7 @@ mod tests {
         assert_eq!(witness_rows[START_DATA_PREFIX + 2].length_acc, 2048);
 
         // data verification
-        assert_eq!(
-            witness_rows[START_DATA_PREFIX + 3].tag,
-            RlpTxTag::Data as u8
-        );
+        assert_eq!(witness_rows[START_DATA_PREFIX + 3].tag, RlpTxTag::Data);
         assert_eq!(witness_rows[START_DATA_PREFIX + 3].tag_rindex, 2048);
         assert_eq!(witness_rows[START_DATA_PREFIX + 3].tag_length, 2048);
         assert_eq!(witness_rows[START_DATA_PREFIX + 3].value, call_data[0]);

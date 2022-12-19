@@ -1,3 +1,4 @@
+use crate::witness::RlpTxTag;
 use eth_types::{Address, U256, U64};
 use halo2_proofs::arithmetic::FieldExt;
 use halo2_proofs::circuit::Value;
@@ -10,7 +11,7 @@ pub fn handle_prefix<F: FieldExt>(
     rlp_data: &[u8],
     rows: &mut Vec<RlpWitnessRow<Value<F>>>,
     data_type: RlpDataType,
-    tag: u8,
+    tag: RlpTxTag,
     mut idx: usize,
 ) -> usize {
     if rlp_data[idx] > 0xf7 {
@@ -73,13 +74,45 @@ pub fn handle_prefix<F: FieldExt>(
     idx
 }
 
+pub fn handle_u8<F: FieldExt>(
+    tx_id: usize,
+    rlp_data: &[u8],
+    rows: &mut Vec<RlpWitnessRow<Value<F>>>,
+    data_type: RlpDataType,
+    tag: RlpTxTag,
+    value: u8,
+    mut idx: usize,
+) -> usize {
+    if value == 0 {
+        assert_eq!(rlp_data[idx], 0x80);
+        rows.push(RlpWitnessRow {
+            tx_id,
+            index: idx + 1,
+            data_type,
+            value: rlp_data[idx],
+            value_acc: Value::known(F::zero()),
+            value_rlc_acc: Value::known(F::zero()),
+            tag,
+            tag_length: 1,
+            tag_rindex: 1,
+            length_acc: 0,
+        });
+        idx += 1;
+    } else {
+        // TODO: handle this case
+        panic!("should never happen");
+    }
+
+    idx
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn handle_u64<F: FieldExt>(
     tx_id: usize,
     rlp_data: &[u8],
     rows: &mut Vec<RlpWitnessRow<Value<F>>>,
     data_type: RlpDataType,
-    tag: u8,
+    tag: RlpTxTag,
     value: U64,
     mut idx: usize,
 ) -> usize {
@@ -166,7 +199,7 @@ pub fn handle_u256<F: FieldExt>(
     rlp_data: &[u8],
     rows: &mut Vec<RlpWitnessRow<Value<F>>>,
     data_type: RlpDataType,
-    tag: u8,
+    tag: RlpTxTag,
     value: U256,
     mut idx: usize,
 ) -> usize {
@@ -210,7 +243,7 @@ pub fn handle_u256<F: FieldExt>(
             index: idx + 1,
             data_type,
             value: rlp_data[idx],
-            value_acc: Value::known(F::from(rlp_data[idx] as u64)),
+            value_acc: Value::known(F::zero()),
             value_rlc_acc: Value::known(F::zero()),
             tag,
             tag_length,
@@ -254,8 +287,7 @@ pub fn handle_address<F: FieldExt>(
     rlp_data: &[u8],
     rows: &mut Vec<RlpWitnessRow<Value<F>>>,
     data_type: RlpDataType,
-    prefix_tag: u8,
-    tag: u8,
+    tag: RlpTxTag,
     value: Address,
     mut idx: usize,
 ) -> usize {
@@ -265,7 +297,7 @@ pub fn handle_address<F: FieldExt>(
         assert_eq!(
             rlp_data[idx], 0x80,
             "RLP data mismatch({:?}): value = {}",
-            prefix_tag, rlp_data[idx]
+            tag, rlp_data[idx]
         );
         rows.push(RlpWitnessRow {
             tx_id,
@@ -283,7 +315,7 @@ pub fn handle_address<F: FieldExt>(
         assert_eq!(
             rlp_data[idx], 0x94,
             "RLP data mismatch({:?}): value = {}",
-            prefix_tag, rlp_data[idx]
+            tag, rlp_data[idx]
         );
         rows.push(RlpWitnessRow {
             tx_id,
@@ -292,10 +324,10 @@ pub fn handle_address<F: FieldExt>(
             value: rlp_data[idx],
             value_acc: Value::known(F::zero()),
             value_rlc_acc: Value::known(F::zero()),
-            tag: prefix_tag,
-            tag_length: 1,
-            tag_rindex: 1,
-            length_acc: 0,
+            tag,
+            tag_length: 21,
+            tag_rindex: 21,
+            length_acc: 20,
         });
         idx += 1;
         let mut value_acc = F::zero();
@@ -315,8 +347,8 @@ pub fn handle_address<F: FieldExt>(
                 value_acc: Value::known(F::from(value_acc)),
                 value_rlc_acc: Value::known(F::zero()),
                 tag,
-                tag_length: 20,
-                tag_rindex: 20 - i,
+                tag_length: 21,
+                tag_rindex: 21 - (i + 1),
                 length_acc: 0,
             });
             idx += 1;
@@ -333,8 +365,8 @@ pub fn handle_bytes<F: FieldExt>(
     rlp_data: &[u8],
     rows: &mut Vec<RlpWitnessRow<Value<F>>>,
     data_type: RlpDataType,
-    prefix_tag: u8,
-    tag: u8,
+    prefix_tag: RlpTxTag,
+    tag: RlpTxTag,
     call_data: &[u8],
     mut idx: usize,
 ) -> usize {

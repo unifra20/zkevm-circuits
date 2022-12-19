@@ -4,6 +4,7 @@ use rlp::Encodable;
 
 use crate::impl_expr;
 use crate::util::Challenges;
+use crate::witness::RlpTxTag;
 
 /// Data types that are supported by the RLP circuit.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -39,7 +40,7 @@ pub struct RlpWitnessRow<F> {
     /// RLC accumulator value used for call data bytes.
     pub value_rlc_acc: F,
     /// Denotes the row’s tag, which can be a field from the data type encoded.
-    pub tag: u8,
+    pub tag: RlpTxTag,
     /// Denotes the current tag's length in bytes.
     pub tag_length: usize,
     /// Denotes a decrementing index specific to the tag in in the current block
