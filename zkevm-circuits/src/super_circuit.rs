@@ -207,7 +207,7 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
             TxCircuitConfigArgs {
                 tx_table: tx_table.clone(),
                 keccak_table: keccak_table.clone(),
-                rlp_table: rlp_table.clone(),
+                rlp_table,
                 challenges: challenges.clone(),
             },
         );

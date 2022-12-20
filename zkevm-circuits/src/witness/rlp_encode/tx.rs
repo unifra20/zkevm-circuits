@@ -12,7 +12,7 @@ use super::{
 };
 
 /// Tags used to tag rows in the RLP circuit for a transaction.
-#[derive(Clone, Copy, Debug, Default, PartialEq, EnumIter)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, EnumIter)]
 pub enum RlpTxTag {
     /// Denotes the prefix bytes indicating the “length of length” and/or
     /// “length” of the tx’s RLP-encoding.
@@ -148,7 +148,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for Transaction {
             &mut rows,
             RlpDataType::TxSign,
             RlpTxTag::Zero,
-            0.into(),
+            0,
             idx,
         );
         let idx = handle_u8(
@@ -157,7 +157,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for Transaction {
             &mut rows,
             RlpDataType::TxSign,
             RlpTxTag::Zero,
-            0.into(),
+            0,
             idx,
         );
 

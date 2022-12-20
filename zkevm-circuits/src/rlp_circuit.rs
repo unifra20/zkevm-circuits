@@ -18,12 +18,12 @@ use halo2_proofs::{
     poly::Rotation,
 };
 
-use crate::evm_circuit::table::FixedTableTag;
+// use crate::evm_circuit::table::FixedTableTag;
 use crate::util::Challenges;
 use crate::{
     evm_circuit::{
         util::{and, constraint_builder::BaseConstraintBuilder, not, or},
-        witness::{RlpTxTag, RlpWitnessGen, N_TX_TAGS},
+        witness::{RlpTxTag, RlpWitnessGen},
     },
     table::RlpTable,
     util::Expr,
@@ -413,12 +413,6 @@ impl<F: Field> RlpCircuitConfig<F> {
             //////////////////////////////////////////////////////////////////////////////////////
             cb.condition(is_simple_tag.clone(), |cb| {
                 // TODO: add tag_length < max_length
-                // tag_index < 10
-                // cb.require_equal(
-                //     "tag_index < 10",
-                //     tag_index_lt_10.is_lt(meta, None),
-                //     1.expr(),
-                // );
 
                 // tag_index >= 1
                 cb.require_zero(
@@ -718,14 +712,14 @@ impl<F: Field> RlpCircuitConfig<F> {
         meta.create_gate("DataType::TxSign (unsigned transaction)", |meta| {
             let mut cb = BaseConstraintBuilder::default();
 
-            let (tindex_lt, tindex_eq) = tag_index_cmp_1.expr(meta, None);
+            let (_, tindex_eq) = tag_index_cmp_1.expr(meta, None);
 
             //////////////////////////////////////////////////////////////////////////////////////
             ////////////////////////////////// RlpTxTag::ChainID /////////////////////////////////
             //////////////////////////////////////////////////////////////////////////////////////
 
             // if tag_index == 1
-            cb.condition(is_chainid(meta) * tindex_eq.clone(), |cb| {
+            cb.condition(is_chainid(meta) * tindex_eq, |cb| {
                 // checks for RlpTxTag::Zero on the next row.
                 cb.require_equal(
                     "next tag is Zero => tag_index::next == 1",
@@ -834,10 +828,10 @@ impl<F: Field> RlpCircuitConfig<F> {
         meta.create_gate("DataType::TxHash (signed transaction)", |meta| {
             let mut cb = BaseConstraintBuilder::default();
 
-            let (tindex_lt, tindex_eq) = tag_index_cmp_1.expr(meta, None);
+            let (_, tindex_eq) = tag_index_cmp_1.expr(meta, None);
 
             // if tag_index == 1
-            cb.condition(is_sig_s(meta) * tindex_eq.clone(), |cb| {
+            cb.condition(is_sig_s(meta) * tindex_eq, |cb| {
                 // RlpTxTag::RlpLength checks.
                 cb.require_equal(
                     "tag_index::next == 1",
@@ -1664,7 +1658,6 @@ mod tests {
             _marker: PhantomData,
         };
 
-        let num_rows = 1 << k;
         const NUM_BLINDING_ROWS: usize = 8;
         let instance = vec![];
         let prover = MockProver::<F>::run(k, &circuit, instance).unwrap();

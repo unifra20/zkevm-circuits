@@ -344,7 +344,7 @@ pub fn handle_address<F: FieldExt>(
                 index: idx + 1,
                 data_type,
                 value: *value_byte,
-                value_acc: Value::known(F::from(value_acc)),
+                value_acc: Value::known(value_acc),
                 value_rlc_acc: Value::known(F::zero()),
                 tag,
                 tag_length: 21,
