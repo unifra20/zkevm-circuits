@@ -1351,7 +1351,7 @@ pub struct RlpTable {
     /// transaction within the L2 block.
     pub tx_id: Column<Advice>,
     /// Denotes the field/tag that this row represents. Example: nonce, gas,
-    /// gasprice, and so on.
+    /// gas_price, and so on.
     pub tag: Column<Advice>,
     /// Denotes the decrementing index specific to this tag. The final value of
     /// the field is accumulated in `value_acc` at `tag_index == 1`.

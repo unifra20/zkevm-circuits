@@ -49,6 +49,8 @@ pub enum RlpTxTag {
     /// combination in its accumulator value. Its used to support a lookup
     /// for rlc(rlp(tx)).
     Rlp,
+    /// This tag is reserved for padding purpose.
+    Padding,
 }
 
 impl_expr!(RlpTxTag);

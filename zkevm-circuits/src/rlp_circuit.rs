@@ -9,7 +9,6 @@ use gadgets::util::select;
 use gadgets::{
     comparator::{ComparatorChip, ComparatorConfig, ComparatorInstruction},
     less_than::{LtChip, LtConfig, LtInstruction},
-    util::sum,
 };
 use halo2_proofs::plonk::SecondPhase;
 use halo2_proofs::{
@@ -248,12 +247,9 @@ impl<F: Field> RlpCircuitConfig<F> {
         is_tx_tag!(is_data_prefix, DataPrefix);
         is_tx_tag!(is_data, Data);
         is_tx_tag!(is_chainid, ChainId);
-        is_tx_tag!(is_zero, Zero);
         is_tx_tag!(is_sig_v, SigV);
         is_tx_tag!(is_sig_r, SigR);
         is_tx_tag!(is_sig_s, SigS);
-        is_tx_tag!(is_rlp_length, RlpLength);
-        is_tx_tag!(is_rlp_summary, Rlp);
 
         // TODO: add lookup for byte_value in the fixed byte table.
 
@@ -642,7 +638,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                     RlpTxTag::Data.expr(),
                 );
                 cb.require_equal(
-                    "tag_index::next == tag_index - 1",
+                    "tag_rindex::next == tag_rindex - 1",
                     meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                     meta.query_advice(rlp_table.tag_rindex, Rotation::cur()) - 1.expr(),
                 );
@@ -652,15 +648,15 @@ impl<F: Field> RlpCircuitConfig<F> {
                     meta.query_advice(tag_length, Rotation::cur()),
                 );
                 cb.require_equal(
-                    "value_acc_rlc::next == value_acc_rlc::cur * randomness + value::next",
+                    "calldata_bytes_rlc_acc' == calldata_bytes_rlc_acc * r + byte_value'",
                     meta.query_advice(calldata_bytes_rlc_acc, Rotation::next()),
                     meta.query_advice(calldata_bytes_rlc_acc, Rotation::cur()) * keccak_input_rand.clone()
                         + meta.query_advice(byte_value, Rotation::next()),
                 );
                 cb.require_equal(
-                    "value::cur == value_acc::cur",
-                    meta.query_advice(byte_value, Rotation::cur()),
+                    "rlp_table.value_acc == byte_value",
                     meta.query_advice(rlp_table.value_acc, Rotation::cur()),
+                    meta.query_advice(byte_value, Rotation::cur()),
                 );
             });
 
@@ -722,7 +718,12 @@ impl<F: Field> RlpCircuitConfig<F> {
             cb.condition(is_chainid(meta) * tindex_eq, |cb| {
                 // checks for RlpTxTag::Zero on the next row.
                 cb.require_equal(
-                    "next tag is Zero => tag_index::next == 1",
+                    "next tag is Zero",
+                    meta.query_advice(rlp_table.tag, Rotation::next()),
+                    RlpTxTag::Zero.expr(),
+                );
+                cb.require_equal(
+                    "next tag is Zero => tag_rindex::next == 1",
                     meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                     1.expr(),
                 );
@@ -732,24 +733,24 @@ impl<F: Field> RlpCircuitConfig<F> {
                     128.expr(),
                 );
                 cb.require_equal(
-                    "next tag is Zero => value_acc::next == 128",
+                    "next tag is Zero => value_acc::next == 0",
                     meta.query_advice(rlp_table.value_acc, Rotation::next()),
                     0.expr(),
                 );
 
-                // checks for RlpTxTag::Zero on the next-to-next row.
+                // checks for RlpTxTag::Zero on the next(2) row.
                 cb.require_equal(
                     "tag::Rotation(2) == RlpTxTag::Zero",
                     meta.query_advice(rlp_table.tag, Rotation(2)),
                     RlpTxTag::Zero.expr(),
                 );
                 cb.require_equal(
-                    "tag_index::Rotation(2) == tag_length::Rotation(2)",
+                    "tag_rindex::Rotation(2) == tag_length::Rotation(2)",
                     meta.query_advice(rlp_table.tag_rindex, Rotation(2)),
                     meta.query_advice(tag_length, Rotation(2)),
                 );
                 cb.require_equal(
-                    "next-to-next tag is Zero => tag_index::Rotation(2) == 1",
+                    "next-to-next tag is Zero => tag_rindex::Rotation(2) == 1",
                     meta.query_advice(rlp_table.tag_rindex, Rotation(2)),
                     1.expr(),
                 );
@@ -759,57 +760,57 @@ impl<F: Field> RlpCircuitConfig<F> {
                     128.expr(),
                 );
                 cb.require_equal(
-                    "next-to-next tag is Zero => value_acc::Rotation(2) == 128",
+                    "next-to-next tag is Zero => value_acc::Rotation(2) == 0",
                     meta.query_advice(rlp_table.value_acc, Rotation(2)),
                     0.expr(),
                 );
 
-                // checks for RlpTxTag::RlpLength on the next-to-next-to-next row.
+                // checks for RlpTxTag::RlpLength on the next(3) row.
                 cb.require_equal(
                     "tag::Rotation(3) == RlpTxTag::RlpLength",
                     meta.query_advice(rlp_table.tag, Rotation(3)),
                     RlpTxTag::RlpLength.expr(),
                 );
                 cb.require_equal(
-                    "tag_index::Rotation(3) == tag_length::Rotation(3)",
+                    "tag_rindex::Rotation(3) == tag_length::Rotation(3)",
                     meta.query_advice(rlp_table.tag_rindex, Rotation(3)),
                     meta.query_advice(tag_length, Rotation(3)),
                 );
                 cb.require_equal(
-                    "tag_index::Rotation(3) == 1",
+                    "tag_rindex::Rotation(3) == 1",
                     meta.query_advice(rlp_table.tag_rindex, Rotation(3)),
                     1.expr(),
                 );
                 cb.require_equal(
-                    "value::Rotation(3) == Rlp encoding length == index::Rotation(2)",
+                    "value_acc::Rotation(3) == Rlp encoding length == index::Rotation(2)",
                     meta.query_advice(rlp_table.value_acc, Rotation(3)),
                     meta.query_advice(index, Rotation(2)),
                 );
 
-                // checks for RlpTxTag::Rlp on the next-to-next-to-next-to-next row.
+                // checks for RlpTxTag::Rlp on the next(4) row.
                 cb.require_equal(
                     "tag::Rotation(4) == RlpTxTag::Rlp",
                     meta.query_advice(rlp_table.tag, Rotation(4)),
                     RlpTxTag::Rlp.expr(),
                 );
+                // reaches the end of an RLP(TxSign) instance
+                cb.require_zero(
+                    "next(4) tag is Rlp => rindex == 0",
+                    meta.query_advice(rindex, Rotation(4)),
+                );
                 cb.require_equal(
-                    "tag_index::Rotation(4) == tag_length::Rotation(4)",
+                    "tag_rindex::Rotation(4) == tag_length::Rotation(4)",
                     meta.query_advice(rlp_table.tag_rindex, Rotation(4)),
                     meta.query_advice(tag_length, Rotation(4)),
                 );
                 cb.require_equal(
-                    "tag_index::Rotation(4) == 1",
+                    "tag_rindex::Rotation(4) == 1",
                     meta.query_advice(rlp_table.tag_rindex, Rotation(4)),
                     1.expr(),
                 );
                 cb.require_equal(
-                    "last tag is Rlp => value_acc::Rotation(4) == value_rlc::Rotation(4)",
+                    "last tag is Rlp => value_acc::Rotation(4) == all_bytes_rlc_acc::Rotation(2)",
                     meta.query_advice(rlp_table.value_acc, Rotation(4)),
-                    meta.query_advice(all_bytes_rlc_acc, Rotation(4)),
-                );
-                cb.require_equal(
-                    "last tag is Rlp => value_rlc::Rotation(4) == value_rlc::Rotation(2)",
-                    meta.query_advice(all_bytes_rlc_acc, Rotation(4)),
                     meta.query_advice(all_bytes_rlc_acc, Rotation(2)),
                 );
                 cb.require_equal(
@@ -832,9 +833,20 @@ impl<F: Field> RlpCircuitConfig<F> {
 
             // if tag_index == 1
             cb.condition(is_sig_s(meta) * tindex_eq, |cb| {
+                // rindex == 0 for the end of an RLP(TxHash) instance
+                cb.require_equal(
+                    "next(2) tag is Rlp => rindex == 0",
+                    meta.query_advice(rindex, Rotation(2)),
+                    0.expr(),
+                );
                 // RlpTxTag::RlpLength checks.
                 cb.require_equal(
-                    "tag_index::next == 1",
+                    "next tag is RlpLength",
+                    meta.query_advice(rlp_table.tag, Rotation::next()),
+                    RlpTxTag::RlpLength.expr(),
+                );
+                cb.require_equal(
+                    "tag_rindex::next == 1",
                     meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                     1.expr(),
                 );
@@ -851,14 +863,9 @@ impl<F: Field> RlpCircuitConfig<F> {
                     RlpTxTag::Rlp.expr(),
                 );
                 cb.require_equal(
-                    "last tag is Rlp => value_rlc::Rotation(2) == value_rlc::cur",
-                    meta.query_advice(all_bytes_rlc_acc, Rotation(2)),
-                    meta.query_advice(all_bytes_rlc_acc, Rotation::cur()),
-                );
-                cb.require_equal(
-                    "last tag is Rlp => value_acc::Rotation(2) == value_rlc::Rotation(2)",
+                    "last tag is Rlp => value_acc::Rotation(2) == all_bytes_rlc_acc::cur()",
                     meta.query_advice(rlp_table.value_acc, Rotation(2)),
-                    meta.query_advice(all_bytes_rlc_acc, Rotation(2)),
+                    meta.query_advice(all_bytes_rlc_acc, Rotation::cur()),
                 );
                 cb.require_equal(
                     "is_last::Rotation(2) == 1",
@@ -885,30 +892,10 @@ impl<F: Field> RlpCircuitConfig<F> {
                 "is_last is boolean",
                 meta.query_advice(is_last, Rotation::cur()),
             );
-            cb.require_boolean(
-                "data_type is boolean",
+            cb.require_in_set(
+                "data_type is in set {TxHash, TxSign}",
                 meta.query_advice(rlp_table.data_type, Rotation::cur()),
-            );
-            cb.require_equal(
-                "only one tag is turned on",
-                sum::expr(&[
-                    is_prefix(meta),
-                    is_nonce(meta),
-                    is_gas_price(meta),
-                    is_gas(meta),
-                    is_to(meta),
-                    is_value(meta),
-                    is_data_prefix(meta),
-                    is_data(meta),
-                    is_chainid(meta),
-                    is_zero(meta),
-                    is_sig_v(meta),
-                    is_sig_r(meta),
-                    is_sig_s(meta),
-                    is_rlp_length(meta),
-                    is_rlp_summary(meta),
-                ]),
-                1.expr(),
+                vec![RlpDataType::TxHash.expr(), RlpDataType::TxSign.expr()],
             );
 
             cb.gate(meta.query_fixed(q_usable, Rotation::cur()))
@@ -935,35 +922,39 @@ impl<F: Field> RlpCircuitConfig<F> {
             ]))
         });
 
-        // Constraints for every row except the first and last rows.
-        meta.create_gate("is_first == 0 and is_last == 0", |meta| {
+        // Constraints for every row except the last row in one RLP instance.
+        meta.create_gate("is_last == 0", |meta| {
             let mut cb = BaseConstraintBuilder::default();
 
             cb.require_equal(
-                "index == index_prev + 1",
-                meta.query_advice(index, Rotation::cur()),
-                meta.query_advice(index, Rotation::prev()) + 1.expr(),
+                "index' == index + 1",
+                meta.query_advice(index, Rotation::next()),
+                meta.query_advice(index, Rotation::cur()) + 1.expr(),
             );
             cb.require_equal(
-                "rindex == rindex_prev - 1",
-                meta.query_advice(rindex, Rotation::cur()),
-                meta.query_advice(rindex, Rotation::prev()) - 1.expr(),
+                "rindex' == rindex - 1",
+                meta.query_advice(rindex, Rotation::next()),
+                meta.query_advice(rindex, Rotation::cur()) - 1.expr(),
             );
             cb.require_equal(
-                "tx_id == tx_id::prev",
+                "tx_id' == tx_id",
+                meta.query_advice(rlp_table.tx_id, Rotation::next()),
                 meta.query_advice(rlp_table.tx_id, Rotation::cur()),
-                meta.query_advice(rlp_table.tx_id, Rotation::prev()),
             );
             cb.require_equal(
-                "value_rlc == (value_rlc_prev * r) + value",
-                meta.query_advice(all_bytes_rlc_acc, Rotation::cur()),
-                meta.query_advice(all_bytes_rlc_acc, Rotation::prev()) * keccak_input_rand
-                    + meta.query_advice(byte_value, Rotation::cur()),
+                "data_type' == data_type",
+                meta.query_advice(rlp_table.data_type, Rotation::next()),
+                meta.query_advice(rlp_table.data_type, Rotation::cur()),
+            );
+            cb.require_equal(
+                "all_bytes_rlc_acc' == (all_bytes_rlc_acc * r) + byte_value'",
+                meta.query_advice(all_bytes_rlc_acc, Rotation::next()),
+                meta.query_advice(all_bytes_rlc_acc, Rotation::cur()) * keccak_input_rand
+                    + meta.query_advice(byte_value, Rotation::next()),
             );
 
             cb.gate(and::expr(vec![
                 meta.query_fixed(q_usable, Rotation::cur()),
-                not::expr(meta.query_advice(is_first, Rotation::cur())),
                 not::expr(meta.query_advice(is_last, Rotation::cur())),
             ]))
         });
@@ -972,11 +963,6 @@ impl<F: Field> RlpCircuitConfig<F> {
         meta.create_gate("is_last == 1", |meta| {
             let mut cb = BaseConstraintBuilder::default();
 
-            cb.require_equal(
-                "is_last == 1 then value_acc == value_rlc",
-                meta.query_advice(rlp_table.value_acc, Rotation::cur()),
-                meta.query_advice(all_bytes_rlc_acc, Rotation::cur()),
-            );
             cb.require_equal(
                 "is_last == 1 then tag == RlpTxTag::Rlp",
                 meta.query_advice(rlp_table.tag, Rotation::cur()),
@@ -1163,13 +1149,9 @@ impl<F: Field> RlpCircuitConfig<F> {
                         offset += 1;
 
                         // update value accumulator over the entire RLP encoding.
-                        all_bytes_rlc_acc = if row.tag == RlpTxTag::Rlp {
-                            row.value_acc
-                        } else {
-                            all_bytes_rlc_acc
-                                .zip(keccak_input_rand)
-                                .map(|(acc, rand)| acc * rand + F::from(row.value as u64))
-                        };
+                        all_bytes_rlc_acc = all_bytes_rlc_acc
+                            .zip(keccak_input_rand)
+                            .map(|(acc, rand)| acc * rand + F::from(row.value as u64));
 
                         // q_usable
                         region.assign_fixed(
@@ -1186,7 +1168,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                             || Value::known(F::from((idx == 0) as u64)),
                         )?;
                         // advices
-                        let rindex = (n_rows + 2 - row.index) as u64;
+                        let rindex = (n_rows + 2 - row.index) as u64; // rindex decreases from n_rows+1 to 0
                         for (name, column, value) in [
                             ("is_last", self.is_last, F::from(row.index == n_rows + 2)),
                             (
@@ -1359,13 +1341,9 @@ impl<F: Field> RlpCircuitConfig<F> {
                         offset += 1;
 
                         // update value accumulator over the entire RLP encoding.
-                        all_bytes_rlc_acc = if row.tag == RlpTxTag::Rlp {
-                            row.value_acc
-                        } else {
-                            all_bytes_rlc_acc
-                                .zip(keccak_input_rand)
-                                .map(|(acc, rand)| acc * rand + F::from(row.value as u64))
-                        };
+                        all_bytes_rlc_acc = all_bytes_rlc_acc
+                            .zip(keccak_input_rand)
+                            .map(|(acc, rand)| acc * rand + F::from(row.value as u64));
 
                         // q_usable
                         region.assign_fixed(
@@ -1382,7 +1360,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                             || Value::known(F::from((idx == 0) as u64)),
                         )?;
                         // advices
-                        let rindex = (n_rows + 2 - row.index) as u64;
+                        let rindex = (n_rows + 2 - row.index) as u64; // rindex decreases from n_rows+1 to 0
                         for (name, column, value) in [
                             ("is_last", self.is_last, F::from(row.index == n_rows + 2)),
                             (
