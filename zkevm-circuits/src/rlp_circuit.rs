@@ -144,9 +144,35 @@ impl<F: Field> RlpCircuitConfig<F> {
             max_length: meta.fixed_column(),
         };
 
+        // Helper macro to declare booleans to check the current row tag.
+        macro_rules! is_tx_tag {
+            ($var:ident, $tag_variant:ident) => {
+                let $var = |meta: &mut VirtualCells<F>| {
+                    tag_bits.value_equals(RlpTxTag::$tag_variant, Rotation::cur())(meta)
+                };
+            };
+        }
+        is_tx_tag!(is_prefix, Prefix);
+        is_tx_tag!(is_nonce, Nonce);
+        is_tx_tag!(is_gas_price, GasPrice);
+        is_tx_tag!(is_gas, Gas);
+        is_tx_tag!(is_to, To);
+        is_tx_tag!(is_value, Value);
+        is_tx_tag!(is_data_prefix, DataPrefix);
+        is_tx_tag!(is_data, Data);
+        is_tx_tag!(is_chainid, ChainId);
+        is_tx_tag!(is_sig_v, SigV);
+        is_tx_tag!(is_sig_r, SigR);
+        is_tx_tag!(is_sig_s, SigS);
+        is_tx_tag!(is_padding, Padding);
+
         // Enable the comparator and lt chips if the current row is enabled.
-        let cmp_lt_enabled =
-            |meta: &mut VirtualCells<F>| meta.query_fixed(q_usable, Rotation::cur());
+        let cmp_lt_enabled = |meta: &mut VirtualCells<F>| {
+            let q_usable = meta.query_fixed(q_usable, Rotation::cur());
+            let is_padding = is_padding(meta);
+
+            q_usable * not::expr(is_padding)
+        };
 
         let tag_index_cmp_1 = ComparatorChip::configure(
             meta,
@@ -238,28 +264,6 @@ impl<F: Field> RlpCircuitConfig<F> {
             |_meta| 0.expr(),
             |meta| meta.query_advice(length_acc, Rotation::cur()),
         );
-
-        // Helper macro to declare booleans to check the current row tag.
-        macro_rules! is_tx_tag {
-            ($var:ident, $tag_variant:ident) => {
-                let $var = |meta: &mut VirtualCells<F>| {
-                    tag_bits.value_equals(RlpTxTag::$tag_variant, Rotation::cur())(meta)
-                };
-            };
-        }
-        is_tx_tag!(is_prefix, Prefix);
-        is_tx_tag!(is_nonce, Nonce);
-        is_tx_tag!(is_gas_price, GasPrice);
-        is_tx_tag!(is_gas, Gas);
-        is_tx_tag!(is_to, To);
-        is_tx_tag!(is_value, Value);
-        is_tx_tag!(is_data_prefix, DataPrefix);
-        is_tx_tag!(is_data, Data);
-        is_tx_tag!(is_chainid, ChainId);
-        is_tx_tag!(is_sig_v, SigV);
-        is_tx_tag!(is_sig_r, SigR);
-        is_tx_tag!(is_sig_s, SigS);
-        is_tx_tag!(is_padding, Padding);
 
         meta.create_gate("is_simple_tag", |meta| {
             let is_simple_tag = meta.query_advice(is_simple_tag, Rotation::cur());
@@ -1490,43 +1494,6 @@ impl<F: Field> RlpCircuitConfig<F> {
                 // end with padding rows.
                 for offset in padding_start_offset..padding_end_offset {
                     self.assign_padding_rows(&mut region, offset)?;
-                    tag_chip.assign(&mut region, offset, &RlpTxTag::Padding)?;
-
-                    for (chip, lhs, rhs) in [
-                        (&tag_index_cmp_1_chip, 1, 0),
-                        (&tag_index_length_cmp_chip, 0, 0),
-                        (&tag_length_cmp_1_chip, 1, 0),
-                        (&length_acc_cmp_0_chip, 0, 0),
-                    ] {
-                        chip.assign(&mut region, offset, F::from(lhs as u64), F::from(rhs))?;
-                    }
-
-                    value_eq_128_chip.assign(
-                        &mut region,
-                        offset,
-                        Value::known(F::from(0u64)),
-                        Value::known(F::from(128u64)),
-                    )?;
-
-                    for (chip, lhs, rhs) in [
-                        (&tag_index_lt_10_chip, 0, 10),
-                        (&tag_index_lt_34_chip, 0, 34),
-                        (&value_gt_127_chip, 127, 0),
-                        (&value_gt_183_chip, 183, 0),
-                        (&value_gt_191_chip, 191, 0),
-                        (&value_gt_247_chip, 247, 0),
-                        (&value_lt_129_chip, 0, 129),
-                        (&value_lt_184_chip, 0, 184),
-                        (&value_lt_192_chip, 0, 192),
-                        (&value_lt_248_chip, 0, 248),
-                    ] {
-                        chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(lhs as u64),
-                            F::from(rhs as u64),
-                        )?;
-                    }
                 }
 
                 Ok(())
@@ -1536,19 +1503,10 @@ impl<F: Field> RlpCircuitConfig<F> {
 
     fn assign_padding_rows(&self, region: &mut Region<'_, F>, offset: usize) -> Result<(), Error> {
         for column in [
-            self.is_first,
-            self.is_last,
             self.rlp_table.tx_id,
             self.rlp_table.tag_rindex,
             self.rlp_table.value_acc,
             self.rlp_table.data_type,
-            self.index,
-            self.tag_length,
-            self.length_acc,
-            self.rindex,
-            self.byte_value,
-            self.calldata_bytes_rlc_acc,
-            self.all_bytes_rlc_acc,
         ]
         .into_iter()
         {
