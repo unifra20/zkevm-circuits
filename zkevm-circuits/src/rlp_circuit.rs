@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 use eth_types::Field;
 use gadgets::binary_number::{BinaryNumberChip, BinaryNumberConfig};
 use gadgets::is_equal::{IsEqualChip, IsEqualConfig, IsEqualInstruction};
-use gadgets::util::select;
+use gadgets::util::{select, sum};
 use gadgets::{
     comparator::{ComparatorChip, ComparatorConfig, ComparatorInstruction},
     less_than::{LtChip, LtConfig, LtInstruction},
@@ -20,6 +20,9 @@ use halo2_proofs::{
 // use crate::evm_circuit::table::FixedTableTag;
 use crate::util::{Challenges, SubCircuit, SubCircuitConfig};
 use crate::witness::Block;
+use crate::witness::RlpTxTag::{
+    ChainId, DataPrefix, Gas, GasPrice, Nonce, Prefix, SigR, SigS, SigV, To,
+};
 use crate::{
     evm_circuit::{
         util::{and, constraint_builder::BaseConstraintBuilder, not, or},
@@ -72,6 +75,13 @@ pub struct RlpCircuitConfig<F> {
     length_acc: Column<Advice>,
     /// Denotes an accumulator for the byte value field over all rows (bytes).
     all_bytes_rlc_acc: Column<Advice>,
+    /// Denotes if tag is simple
+    /// (the one that tag_bits provides has degree 4, which is too large)
+    is_simple_tag: Column<Advice>,
+    /// Denotes if tag is Prefix
+    is_prefix_tag: Column<Advice>,
+    /// Denotes if tag is DataPrefix
+    is_dp_tag: Column<Advice>,
     /// Comparison chip to check: 1 <= tag_index.
     tag_index_cmp_1: ComparatorConfig<F, 1>,
     /// Comparison chip to check: tag_index <= tag_length.
@@ -122,6 +132,11 @@ impl<F: Field> RlpCircuitConfig<F> {
         let all_bytes_rlc_acc = meta.advice_column_in(SecondPhase);
         let evm_word_rand = challenges.evm_word();
         let keccak_input_rand = challenges.keccak_input();
+        // this col is used to store intermediate expression so as to reduce the
+        // constraint's degree
+        let is_simple_tag = meta.advice_column();
+        let is_prefix_tag = meta.advice_column();
+        let is_dp_tag = meta.advice_column();
         let tag_bits = BinaryNumberChip::configure(meta, q_usable, Some(rlp_table.tag));
         let tag_rom = RlpTagROM {
             tag: meta.fixed_column(),
@@ -246,19 +261,33 @@ impl<F: Field> RlpCircuitConfig<F> {
         is_tx_tag!(is_sig_s, SigS);
         is_tx_tag!(is_padding, Padding);
 
-        // TODO: add lookup for byte_value in the fixed byte table.
-
-        meta.lookup_any("(tag, tag_next) in tag_ROM", |meta| {
-            let is_simple_tag = or::expr([
+        meta.create_gate("is_simple_tag", |meta| {
+            let is_simple_tag = meta.query_advice(is_simple_tag, Rotation::cur());
+            let is_prefix_tag = meta.query_advice(is_prefix_tag, Rotation::cur());
+            let is_data_prefix_tag = meta.query_advice(is_dp_tag, Rotation::cur());
+            let q_usable = meta.query_fixed(q_usable, Rotation::cur());
+            let tags = sum::expr([
                 is_nonce(meta),
                 is_gas_price(meta),
                 is_gas(meta),
                 is_to(meta),
+                is_value(meta),
                 is_sig_v(meta),
                 is_sig_r(meta),
                 is_sig_s(meta),
                 is_chainid(meta),
             ]);
+            vec![
+                q_usable.expr() * (is_simple_tag - tags),
+                q_usable.expr() * (is_prefix_tag - is_prefix(meta)),
+                q_usable.expr() * (is_data_prefix_tag - is_data_prefix(meta)),
+            ]
+        });
+
+        // TODO: add lookup for byte_value in the fixed byte table.
+
+        meta.lookup_any("(tag, tag_next) in tag_ROM", |meta| {
+            let is_simple_tag = meta.query_advice(is_simple_tag, Rotation::cur());
             let tag = meta.query_advice(rlp_table.tag, Rotation::cur());
             let tag_next = meta.query_advice(rlp_table.tag, Rotation::next());
             let rom_tag = meta.query_fixed(tag_rom.tag, Rotation::cur());
@@ -274,23 +303,18 @@ impl<F: Field> RlpCircuitConfig<F> {
         });
 
         meta.create_gate("Common constraints", |meta| {
-            let mut cb = BaseConstraintBuilder::default();
+            let mut cb = BaseConstraintBuilder::new(9);
 
             let (tindex_lt, tindex_eq) = tag_index_cmp_1.expr(meta, None);
+            assert_eq!(tindex_lt.degree(), 1, "{}", tindex_lt.degree());
+            assert_eq!(tindex_eq.degree(), 2, "{}", tindex_lt.degree());
             let (tlength_lt, tlength_eq) = tag_length_cmp_1.expr(meta, None);
             let (tindex_lt_tlength, tindex_eq_tlength) = tag_index_length_cmp.expr(meta, None);
             let (length_acc_gt_0, length_acc_eq_0) = length_acc_cmp_0.expr(meta, None);
-            let is_simple_tag = or::expr([
-                is_nonce(meta),
-                is_gas_price(meta),
-                is_gas(meta),
-                is_to(meta),
-                is_value(meta),
-                is_sig_v(meta),
-                is_sig_r(meta),
-                is_sig_s(meta),
-            ]);
-            let is_tag_word = or::expr([
+            let is_simple_tag = meta.query_advice(is_simple_tag, Rotation::cur());
+            let is_prefix_tag = meta.query_advice(is_prefix_tag, Rotation::cur());
+            let is_dp_tag = meta.query_advice(is_dp_tag, Rotation::cur());
+            let is_tag_word = sum::expr([
                 is_gas_price(meta),
                 is_value(meta),
                 is_sig_r(meta),
@@ -300,7 +324,7 @@ impl<F: Field> RlpCircuitConfig<F> {
             //////////////////////////////////////////////////////////////////////////////////////
             ////////////////////////////////// RlpTxTag::Prefix //////////////////////////////////
             //////////////////////////////////////////////////////////////////////////////////////
-            cb.condition(is_prefix(meta), |cb| {
+            cb.condition(is_prefix_tag.expr(), |cb| {
                 // tag_index < 10
                 cb.require_equal(
                     "tag_index < 10",
@@ -316,7 +340,7 @@ impl<F: Field> RlpCircuitConfig<F> {
             });
 
             // if tag_index > 1
-            cb.condition(is_prefix(meta) * tindex_lt.clone(), |cb| {
+            cb.condition(is_prefix_tag.expr() * tindex_lt.clone(), |cb| {
                 cb.require_equal(
                     "tag::next == RlpTxTag::Prefix",
                     meta.query_advice(rlp_table.tag, Rotation::next()),
@@ -335,7 +359,7 @@ impl<F: Field> RlpCircuitConfig<F> {
             });
 
             // if tag_index == 1
-            cb.condition(is_prefix(meta) * tindex_eq.clone(), |cb| {
+            cb.condition(is_prefix_tag.expr() * tindex_eq.clone(), |cb| {
                 cb.require_equal(
                     "tag::next == RlpTxTag::Nonce",
                     meta.query_advice(rlp_table.tag, Rotation::next()),
@@ -356,7 +380,7 @@ impl<F: Field> RlpCircuitConfig<F> {
 
             // if tag_index == tag_length && tag_length > 1
             cb.condition(
-                is_prefix(meta) * tindex_eq_tlength.clone() * tlength_lt.clone(),
+                is_prefix_tag.expr() * tindex_eq_tlength.clone() * tlength_lt.clone(),
                 |cb| {
                     cb.require_equal("247 < value", value_gt_247.is_lt(meta, None), 1.expr());
                     // cb.require_equal("value < 256", value_lt_256.is_lt(meta, None), 1.expr());
@@ -374,7 +398,7 @@ impl<F: Field> RlpCircuitConfig<F> {
 
             // if tag_index == tag_length && tag_length == 1
             cb.condition(
-                is_prefix(meta) * tindex_eq_tlength.clone() * tlength_eq.clone(),
+                is_prefix_tag.expr() * tindex_eq_tlength.clone() * tlength_eq.clone(),
                 |cb| {
                     cb.require_equal("191 < value", value_gt_191.is_lt(meta, None), 1.expr());
                     cb.require_equal("value < 248", value_lt_248.is_lt(meta, None), 1.expr());
@@ -388,7 +412,7 @@ impl<F: Field> RlpCircuitConfig<F> {
 
             // if tag_index < tag_length && tag_length > 1
             cb.condition(
-                is_prefix(meta) * tindex_lt_tlength.clone() * tlength_lt.clone(),
+                is_prefix_tag.expr() * tindex_lt_tlength.clone() * tlength_lt.clone(),
                 |cb| {
                     cb.require_equal(
                         "length_acc == (length_acc::prev * 256) + value",
@@ -412,6 +436,10 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
             });
 
+            // cb.require_equal(
+            //     "interm == is_simple_tag "
+            //     is_simple_tag.clone()
+            // )
             // if tag_index == tag_length && tag_length == 1
             cb.condition(
                 is_simple_tag.clone() * tindex_eq_tlength.clone() * tlength_eq.clone(),
@@ -496,7 +524,7 @@ impl<F: Field> RlpCircuitConfig<F> {
             //////////////////////////////////////////////////////////////////////////////////////
             ///////////////////////////////// RlpTxTag::DataPrefix ///////////////////////////////
             //////////////////////////////////////////////////////////////////////////////////////
-            cb.condition(is_data_prefix(meta), |cb| {
+            cb.condition(is_dp_tag.expr(), |cb| {
                 // tag_index < 10
                 cb.require_equal(
                     "tag_index < 10",
@@ -512,7 +540,7 @@ impl<F: Field> RlpCircuitConfig<F> {
             });
 
             // if tag_index > 1
-            cb.condition(is_data_prefix(meta) * tindex_lt.clone(), |cb| {
+            cb.condition(is_dp_tag.expr() * tindex_lt.clone(), |cb| {
                 cb.require_equal(
                     "tag::next == RlpTxTag::DataPrefix",
                     meta.query_advice(rlp_table.tag, Rotation::next()),
@@ -532,7 +560,7 @@ impl<F: Field> RlpCircuitConfig<F> {
 
             // if length_acc == 0
             cb.condition(
-                is_data_prefix(meta) * tindex_eq.clone() * length_acc_eq_0,
+                is_dp_tag.expr() * tindex_eq.clone() * length_acc_eq_0,
                 |cb| {
                     cb.require_equal(
                         "tag::next == RlpTxTag::ChainId",
@@ -549,7 +577,7 @@ impl<F: Field> RlpCircuitConfig<F> {
 
             // if length_acc > 0
             cb.condition(
-                is_data_prefix(meta) * tindex_eq.clone() * length_acc_gt_0,
+                is_dp_tag.expr() * tindex_eq.clone() * length_acc_gt_0,
                 |cb| {
                     cb.require_equal(
                         "tag::next == RlpTxTag::Data",
@@ -571,7 +599,7 @@ impl<F: Field> RlpCircuitConfig<F> {
 
             // if tag_index == tag_length && tag_length > 1
             cb.condition(
-                is_data_prefix(meta) * tindex_eq_tlength.clone() * tlength_lt.clone(),
+                is_dp_tag.expr() * tindex_eq_tlength.clone() * tlength_lt.clone(),
                 |cb| {
                     cb.require_equal("value > 183", value_gt_183.is_lt(meta, None), 1.expr());
                     cb.require_equal("value < 192", value_lt_192.is_lt(meta, None), 1.expr());
@@ -589,7 +617,7 @@ impl<F: Field> RlpCircuitConfig<F> {
 
             // if tag_index < tag_length && tag_length > 1
             cb.condition(
-                is_data_prefix(meta) * tindex_lt_tlength * tlength_lt,
+                is_dp_tag.expr() * tindex_lt_tlength * tlength_lt,
                 |cb| {
                     cb.require_equal(
                         "length_acc == (length_acc::prev * 256) + value",
@@ -602,7 +630,7 @@ impl<F: Field> RlpCircuitConfig<F> {
 
             // if tag_index == tag_length && tag_length == 1
             cb.condition(
-                is_data_prefix(meta) * tindex_eq_tlength * tlength_eq,
+                is_dp_tag.expr() * tindex_eq_tlength * tlength_eq,
                 |cb| {
                     cb.require_equal("127 < value", value_gt_127.is_lt(meta, None), 1.expr());
                     cb.require_equal("value < 184", value_lt_184.is_lt(meta, None), 1.expr());
@@ -701,7 +729,7 @@ impl<F: Field> RlpCircuitConfig<F> {
         });
 
         meta.create_gate("DataType::TxSign (unsigned transaction)", |meta| {
-            let mut cb = BaseConstraintBuilder::default();
+            let mut cb = BaseConstraintBuilder::new(9);
 
             let (_, tindex_eq) = tag_index_cmp_1.expr(meta, None);
 
@@ -822,7 +850,7 @@ impl<F: Field> RlpCircuitConfig<F> {
         });
 
         meta.create_gate("DataType::TxHash (signed transaction)", |meta| {
-            let mut cb = BaseConstraintBuilder::default();
+            let mut cb = BaseConstraintBuilder::new(9);
 
             let (_, tindex_eq) = tag_index_cmp_1.expr(meta, None);
 
@@ -877,7 +905,7 @@ impl<F: Field> RlpCircuitConfig<F> {
 
         // Constraints that always need to be satisfied.
         meta.create_gate("always", |meta| {
-            let mut cb = BaseConstraintBuilder::default();
+            let mut cb = BaseConstraintBuilder::new(9);
 
             cb.require_boolean(
                 "is_first is boolean",
@@ -898,7 +926,7 @@ impl<F: Field> RlpCircuitConfig<F> {
 
         // Constraints for the first row in the layout.
         meta.create_gate("is_first == 1", |meta| {
-            let mut cb = BaseConstraintBuilder::default();
+            let mut cb = BaseConstraintBuilder::new(9);
 
             cb.require_equal(
                 "value_rlc == value",
@@ -914,12 +942,13 @@ impl<F: Field> RlpCircuitConfig<F> {
             cb.gate(and::expr(vec![
                 meta.query_fixed(q_usable, Rotation::cur()),
                 meta.query_advice(is_first, Rotation::cur()),
+                not::expr(is_padding(meta)),
             ]))
         });
 
         // Constraints for every row except the last row in one RLP instance.
         meta.create_gate("is_last == 0", |meta| {
-            let mut cb = BaseConstraintBuilder::default();
+            let mut cb = BaseConstraintBuilder::new(9);
 
             cb.require_equal(
                 "index' == index + 1",
@@ -951,12 +980,13 @@ impl<F: Field> RlpCircuitConfig<F> {
             cb.gate(and::expr(vec![
                 meta.query_fixed(q_usable, Rotation::cur()),
                 not::expr(meta.query_advice(is_last, Rotation::cur())),
+                not::expr(is_padding(meta)),
             ]))
         });
 
         // Constraints for the last row, i.e. RLP summary row.
         meta.create_gate("is_last == 1", |meta| {
-            let mut cb = BaseConstraintBuilder::default();
+            let mut cb = BaseConstraintBuilder::new(9);
 
             cb.require_equal(
                 "is_last == 1 then tag == RlpTxTag::Rlp",
@@ -1035,7 +1065,7 @@ impl<F: Field> RlpCircuitConfig<F> {
         });
 
         meta.create_gate("padding rows", |meta| {
-            let mut cb = BaseConstraintBuilder::default();
+            let mut cb = BaseConstraintBuilder::new(9);
 
             cb.condition(is_padding(meta), |cb| {
                 cb.require_equal(
@@ -1080,6 +1110,9 @@ impl<F: Field> RlpCircuitConfig<F> {
             tag_length,
             length_acc,
             all_bytes_rlc_acc,
+            is_simple_tag,
+            is_prefix_tag,
+            is_dp_tag,
             tag_index_cmp_1,
             tag_index_length_cmp,
             tag_length_cmp_1,
@@ -1127,7 +1160,7 @@ impl<F: Field> RlpCircuitConfig<F> {
 
         let length_acc_cmp_0_chip = ComparatorChip::construct(self.length_acc_cmp_0.clone());
 
-        let last_row_offset = k - self.minimum_rows + 1;
+        let padding_end_offset = k - self.minimum_rows + 1;
         layouter.assign_region(
             || "assign tag rom",
             |mut region| {
@@ -1174,7 +1207,17 @@ impl<F: Field> RlpCircuitConfig<F> {
             || "assign RLP-encoded data",
             |mut region| {
                 let mut offset = 0;
-                // self.assign_padding_rows(&mut region, offset)?;
+                let simple_tags = [
+                    Nonce,
+                    GasPrice,
+                    Gas,
+                    To,
+                    RlpTxTag::Value,
+                    SigV,
+                    SigR,
+                    SigS,
+                    ChainId,
+                ];
 
                 for signed_tx in signed_txs.iter() {
                     // tx hash (signed tx)
@@ -1208,10 +1251,18 @@ impl<F: Field> RlpCircuitConfig<F> {
                         // advices
                         let rindex = (n_rows + 2 - row.index) as u64; // rindex decreases from n_rows+1 to 0
                         let rlp_table = &self.rlp_table;
+                        let is_simple_tag =
+                            simple_tags.iter().filter(|tag| **tag == row.tag).count();
+                        let is_prefix_tag = (row.tag == Prefix).into();
+                        let is_dp_tag = (row.tag == DataPrefix).into();
+
                         for (name, column, value) in [
                             ("is_last", self.is_last, (row.index == n_rows + 2).into()),
                             ("tx_id", rlp_table.tx_id, row.tx_id as u64),
                             ("tag", rlp_table.tag, (row.tag as u64)),
+                            ("is_simple_tag", self.is_simple_tag, is_simple_tag as u64),
+                            ("is_prefix_tag", self.is_prefix_tag, is_prefix_tag),
+                            ("is_dp_tag", self.is_dp_tag, is_dp_tag),
                             ("tag_index", rlp_table.tag_rindex, (row.tag_rindex as u64)),
                             ("data_type", rlp_table.data_type, (row.data_type as u64)),
                             ("index", self.index, (row.index as u64)),
@@ -1328,10 +1379,17 @@ impl<F: Field> RlpCircuitConfig<F> {
                         // advices
                         let rindex = (n_rows + 2 - row.index) as u64; // rindex decreases from n_rows+1 to 0
                         let rlp_table = &self.rlp_table;
+                        let is_simple_tag =
+                            simple_tags.iter().filter(|tag| **tag == row.tag).count();
+                        let is_prefix_tag = (row.tag == Prefix).into();
+                        let is_dp_tag = (row.tag == DataPrefix).into();
                         for (name, column, value) in [
                             ("is_last", self.is_last, (row.index == n_rows + 2).into()),
                             ("tx_id", rlp_table.tx_id, row.tx_id as u64),
                             ("tag", rlp_table.tag, row.tag as u64),
+                            ("is_simple_tag", self.is_simple_tag, is_simple_tag as u64),
+                            ("is_prefix_tag", self.is_prefix_tag, is_prefix_tag),
+                            ("is_dp_tag", self.is_dp_tag, is_dp_tag),
                             ("tag_rindex", rlp_table.tag_rindex, row.tag_rindex as u64),
                             ("data_type", rlp_table.data_type, row.data_type as u64),
                             ("index", self.index, row.index as u64),
@@ -1414,9 +1472,48 @@ impl<F: Field> RlpCircuitConfig<F> {
                     }
                 }
 
+                // TODO: speed up the assignment of padding rows
+                let padding_start_offset = offset;
                 // end with padding rows.
-                for i in offset..=last_row_offset {
-                    self.assign_padding_rows(&mut region, i)?;
+                for offset in padding_start_offset..padding_end_offset {
+                    self.assign_padding_rows(&mut region, offset)?;
+                    tag_chip.assign(&mut region, offset, &RlpTxTag::Padding)?;
+
+                    for (chip, lhs, rhs) in [
+                        (&tag_index_cmp_1_chip, 1, 0),
+                        (&tag_index_length_cmp_chip, 0, 0),
+                        (&tag_length_cmp_1_chip, 1, 0),
+                        (&length_acc_cmp_0_chip, 0, 0),
+                    ] {
+                        chip.assign(&mut region, offset, F::from(lhs as u64), F::from(rhs))?;
+                    }
+
+                    value_eq_128_chip.assign(
+                        &mut region,
+                        offset,
+                        Value::known(F::from(0u64)),
+                        Value::known(F::from(128u64)),
+                    )?;
+
+                    for (chip, lhs, rhs) in [
+                        (&tag_index_lt_10_chip, 0, 10),
+                        (&tag_index_lt_34_chip, 0, 34),
+                        (&value_gt_127_chip, 127, 0),
+                        (&value_gt_183_chip, 183, 0),
+                        (&value_gt_191_chip, 191, 0),
+                        (&value_gt_247_chip, 247, 0),
+                        (&value_lt_129_chip, 0, 129),
+                        (&value_lt_184_chip, 0, 184),
+                        (&value_lt_192_chip, 0, 192),
+                        (&value_lt_248_chip, 0, 248),
+                    ] {
+                        chip.assign(
+                            &mut region,
+                            offset,
+                            F::from(lhs as u64),
+                            F::from(rhs as u64),
+                        )?;
+                    }
                 }
 
                 Ok(())
@@ -1429,7 +1526,6 @@ impl<F: Field> RlpCircuitConfig<F> {
             self.is_first,
             self.is_last,
             self.rlp_table.tx_id,
-            self.rlp_table.tag,
             self.rlp_table.tag_rindex,
             self.rlp_table.value_acc,
             self.rlp_table.data_type,
@@ -1450,6 +1546,22 @@ impl<F: Field> RlpCircuitConfig<F> {
                 || Value::known(F::zero()),
             )?;
         }
+        region.assign_advice(
+            || format!("padding row, tag = Padding, offset: {}", offset),
+            self.rlp_table.tag,
+            offset,
+            || {
+                Value::known(F::from(
+                    <RlpTxTag as Into<usize>>::into(RlpTxTag::Padding) as u64
+                ))
+            },
+        )?;
+        region.assign_fixed(
+            || format!("padding row, offset: {}", offset),
+            self.q_usable,
+            offset,
+            || Value::known(F::one()),
+        )?;
 
         Ok(())
     }
