@@ -114,7 +114,7 @@ pub struct TxTable {
     /// Tx ID
     pub tx_id: Column<Advice>,
     /// Tag (TxContextFieldTag)
-    pub tag: Column<Fixed>,
+    pub tag: Column<Advice>,
     /// Index for Tag = CallData
     pub index: Column<Advice>,
     /// Value
@@ -126,7 +126,7 @@ impl TxTable {
     pub fn construct<F: Field>(meta: &mut ConstraintSystem<F>) -> Self {
         Self {
             tx_id: meta.advice_column(),
-            tag: meta.fixed_column(),
+            tag: meta.advice_column(),
             index: meta.advice_column(),
             value: meta.advice_column_in(SecondPhase),
         }
@@ -160,7 +160,7 @@ impl TxTable {
                         || Value::known(F::zero()),
                     )?;
                 }
-                region.assign_fixed(
+                region.assign_advice(
                     || "tx table all-zero row",
                     self.tag,
                     offset,
@@ -184,7 +184,7 @@ impl TxTable {
                                 || row[if index > 0 { index + 1 } else { index }],
                             )?;
                         }
-                        region.assign_fixed(
+                        region.assign_advice(
                             || format!("tx table row {}", offset),
                             self.tag,
                             offset,
@@ -203,7 +203,7 @@ impl<F: Field> LookupTable<F> for TxTable {
     fn table_exprs(&self, meta: &mut VirtualCells<F>) -> Vec<Expression<F>> {
         vec![
             meta.query_advice(self.tx_id, Rotation::cur()),
-            meta.query_fixed(self.tag, Rotation::cur()),
+            meta.query_advice(self.tag, Rotation::cur()),
             meta.query_advice(self.index, Rotation::cur()),
             meta.query_advice(self.value, Rotation::cur()),
         ]

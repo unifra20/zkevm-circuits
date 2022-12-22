@@ -18,7 +18,7 @@ use eth_types::{
 };
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Region, SimpleFloorPlanner, Value},
-    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Expression, Fixed},
+    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Expression},
 };
 use itertools::Itertools;
 use log::error;
@@ -38,7 +38,7 @@ pub use halo2_proofs::halo2curves::{
 #[derive(Clone, Debug)]
 pub struct TxCircuitConfig<F: Field> {
     tx_id: Column<Advice>,
-    tag: Column<Fixed>,
+    tag: Column<Advice>,
     index: Column<Advice>,
     value: Column<Advice>,
     sign_verify: SignVerifyConfig,
@@ -117,7 +117,7 @@ impl<F: Field> TxCircuitConfig<F> {
             offset,
             || Value::known(F::from(tx_id as u64)),
         )?;
-        region.assign_fixed(
+        region.assign_advice(
             || "tag",
             self.tag,
             offset,
