@@ -12,7 +12,7 @@ pub enum RlpDataType {
     /// Data type for an RLP-encoded unsigned transaction. The encoding consists
     /// of: [nonce, gas_price, gas, to, value, input, chain_id, 0, 0].
     #[default]
-    TxSign,
+    TxSign = 0,
     /// Data type for an RLP-encoded signed transaction. The encoding consists
     /// of: [nonce, gas_price, gas, to, value, input, v, r, s].
     /// where the fields `v`, `r` and `s` represent the compressed form of an
