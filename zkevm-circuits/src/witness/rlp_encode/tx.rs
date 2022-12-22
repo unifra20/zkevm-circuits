@@ -14,10 +14,12 @@ use super::{
 /// Tags used to tag rows in the RLP circuit for a transaction.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, EnumIter)]
 pub enum RlpTxTag {
+    /// This tag is reserved for padding purpose.
+    #[default]
+    Padding = 0,
     /// Denotes the prefix bytes indicating the “length of length” and/or
     /// “length” of the tx’s RLP-encoding.
-    #[default]
-    Prefix = 0,
+    Prefix,
     /// Denotes the byte(s) for the tx’s nonce.
     Nonce,
     /// Denotes the byte(s) for the tx’s gas price.
@@ -49,8 +51,6 @@ pub enum RlpTxTag {
     /// combination in its accumulator value. Its used to support a lookup
     /// for rlc(rlp(tx)).
     Rlp,
-    /// This tag is reserved for padding purpose.
-    Padding,
 }
 
 impl_expr!(RlpTxTag);

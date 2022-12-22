@@ -18,7 +18,8 @@ use halo2_proofs::{
 };
 
 // use crate::evm_circuit::table::FixedTableTag;
-use crate::util::Challenges;
+use crate::util::{Challenges, SubCircuit, SubCircuitConfig};
+use crate::witness::Block;
 use crate::{
     evm_circuit::{
         util::{and, constraint_builder::BaseConstraintBuilder, not, or},
@@ -41,6 +42,7 @@ struct RlpTagROM {
 #[derive(Clone, Debug)]
 /// Config for the RLP circuit.
 pub struct RlpCircuitConfig<F> {
+    minimum_rows: usize,
     /// Denotes whether or not the row is enabled.
     q_usable: Column<Fixed>,
     /// Denotes whether the row is the first row in the layout.
@@ -98,8 +100,6 @@ pub struct RlpCircuitConfig<F> {
     value_lt_192: LtConfig<F, 1>,
     /// Lt chip to check: value < 248.
     value_lt_248: LtConfig<F, 1>,
-    /// Lt chip to check: value < 256.
-    value_lt_256: LtConfig<F, 2>,
     /// Comparison chip to check: 0 <= length_acc.
     length_acc_cmp_0: ComparatorConfig<F, 1>,
 }
@@ -217,12 +217,6 @@ impl<F: Field> RlpCircuitConfig<F> {
             |meta| meta.query_advice(byte_value, Rotation::cur()),
             |_meta| 248.expr(),
         );
-        let value_lt_256 = LtChip::configure(
-            meta,
-            cmp_lt_enabled,
-            |meta| meta.query_advice(byte_value, Rotation::cur()),
-            |_meta| 256.expr(),
-        );
         let length_acc_cmp_0 = ComparatorChip::configure(
             meta,
             cmp_lt_enabled,
@@ -250,6 +244,7 @@ impl<F: Field> RlpCircuitConfig<F> {
         is_tx_tag!(is_sig_v, SigV);
         is_tx_tag!(is_sig_r, SigR);
         is_tx_tag!(is_sig_s, SigS);
+        is_tx_tag!(is_padding, Padding);
 
         // TODO: add lookup for byte_value in the fixed byte table.
 
@@ -364,7 +359,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                 is_prefix(meta) * tindex_eq_tlength.clone() * tlength_lt.clone(),
                 |cb| {
                     cb.require_equal("247 < value", value_gt_247.is_lt(meta, None), 1.expr());
-                    cb.require_equal("value < 256", value_lt_256.is_lt(meta, None), 1.expr());
+                    // cb.require_equal("value < 256", value_lt_256.is_lt(meta, None), 1.expr());
                     cb.require_equal(
                         "tag_index::next == value - 0xf7",
                         meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
@@ -990,16 +985,24 @@ impl<F: Field> RlpCircuitConfig<F> {
                         meta.query_advice(rlp_table.tag, Rotation::next()),
                         RlpTxTag::Prefix.expr(),
                     );
+                    cb.require_equal(
+                        "TxSign rows' first row starts with rlp_table.tag_rindex = tag_length",
+                        meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
+                        meta.query_advice(tag_length, Rotation::next()),
+                    );
                 },
             );
 
-            // if data_type::cur == TxSign and it was not the last tx in the layout
+            // if data_type::cur == TxSign and it was **not**
+            // the last tx in the layout (tag::next != Padding)
             // - tx_id increments.
             // - TxHash rows follow.
+            let is_tag_next_padding =
+                tag_bits.value_equals(RlpTxTag::Padding, Rotation::next())(meta);
             cb.condition(
                 and::expr(vec![
                     not::expr(meta.query_advice(rlp_table.data_type, Rotation::cur())),
-                    meta.query_fixed(q_usable, Rotation::next()),
+                    not::expr(is_tag_next_padding),
                 ]),
                 |cb| {
                     cb.require_equal(
@@ -1017,6 +1020,11 @@ impl<F: Field> RlpCircuitConfig<F> {
                         meta.query_advice(rlp_table.tag, Rotation::next()),
                         RlpTxTag::Prefix.expr(),
                     );
+                    cb.require_equal(
+                        "TxSign rows' first row starts with rlp_table.tag_rindex = tag_length",
+                        meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
+                        meta.query_advice(tag_length, Rotation::next()),
+                    );
                 },
             );
 
@@ -1026,7 +1034,39 @@ impl<F: Field> RlpCircuitConfig<F> {
             ]))
         });
 
+        meta.create_gate("padding rows", |meta| {
+            let mut cb = BaseConstraintBuilder::default();
+
+            cb.condition(is_padding(meta), |cb| {
+                cb.require_equal(
+                    "tag_next == Padding",
+                    meta.query_advice(rlp_table.tag, Rotation::next()),
+                    RlpTxTag::Padding.expr(),
+                );
+
+                cb.require_zero(
+                    "tx_id == 0",
+                    meta.query_advice(rlp_table.tx_id, Rotation::cur()),
+                );
+                cb.require_zero(
+                    "data_type == 0",
+                    meta.query_advice(rlp_table.data_type, Rotation::cur()),
+                );
+                cb.require_zero(
+                    "tag_rindex == 0",
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::cur()),
+                );
+                cb.require_zero(
+                    "value_acc == 0",
+                    meta.query_advice(rlp_table.value_acc, Rotation::cur()),
+                );
+            });
+
+            cb.gate(meta.query_fixed(q_usable, Rotation::cur()))
+        });
+
         Self {
+            minimum_rows: meta.minimum_rows(),
             q_usable,
             is_first,
             is_last,
@@ -1054,15 +1094,15 @@ impl<F: Field> RlpCircuitConfig<F> {
             value_lt_184,
             value_lt_192,
             value_lt_248,
-            value_lt_256,
             length_acc_cmp_0,
         }
     }
 
     pub(crate) fn assign(
         &self,
-        mut layouter: impl Layouter<F>,
+        layouter: &mut impl Layouter<F>,
         signed_txs: &[SignedTransaction],
+        k: usize,
         challenges: &Challenges<Value<F>>,
     ) -> Result<(), Error> {
         let keccak_input_rand = challenges.keccak_input();
@@ -1084,10 +1124,10 @@ impl<F: Field> RlpCircuitConfig<F> {
         let value_lt_184_chip = LtChip::construct(self.value_lt_184);
         let value_lt_192_chip = LtChip::construct(self.value_lt_192);
         let value_lt_248_chip = LtChip::construct(self.value_lt_248);
-        let value_lt_256_chip = LtChip::construct(self.value_lt_256);
 
         let length_acc_cmp_0_chip = ComparatorChip::construct(self.length_acc_cmp_0.clone());
 
+        let last_row_offset = k - self.minimum_rows + 1;
         layouter.assign_region(
             || "assign tag rom",
             |mut region| {
@@ -1134,7 +1174,7 @@ impl<F: Field> RlpCircuitConfig<F> {
             || "assign RLP-encoded data",
             |mut region| {
                 let mut offset = 0;
-                self.assign_padding_rows(&mut region, offset)?;
+                // self.assign_padding_rows(&mut region, offset)?;
 
                 for signed_tx in signed_txs.iter() {
                     // tx hash (signed tx)
@@ -1146,8 +1186,6 @@ impl<F: Field> RlpCircuitConfig<F> {
                         .chain(signed_tx.rlp_rows(keccak_input_rand).iter())
                         .enumerate()
                     {
-                        offset += 1;
-
                         // update value accumulator over the entire RLP encoding.
                         all_bytes_rlc_acc = all_bytes_rlc_acc
                             .zip(keccak_input_rand)
@@ -1169,43 +1207,24 @@ impl<F: Field> RlpCircuitConfig<F> {
                         )?;
                         // advices
                         let rindex = (n_rows + 2 - row.index) as u64; // rindex decreases from n_rows+1 to 0
+                        let rlp_table = &self.rlp_table;
                         for (name, column, value) in [
-                            ("is_last", self.is_last, F::from(row.index == n_rows + 2)),
-                            (
-                                "rlp_table::tx_id",
-                                self.rlp_table.tx_id,
-                                F::from(row.tx_id as u64),
-                            ),
-                            (
-                                "rlp_table::tag",
-                                self.rlp_table.tag,
-                                F::from(row.tag as u64),
-                            ),
-                            (
-                                "rlp_table::tag_index",
-                                self.rlp_table.tag_rindex,
-                                F::from(row.tag_rindex as u64),
-                            ),
-                            (
-                                "rlp_table::data_type",
-                                self.rlp_table.data_type,
-                                F::from(row.data_type as u64),
-                            ),
-                            ("index", self.index, F::from(row.index as u64)),
-                            ("rindex", self.rindex, F::from(rindex)),
-                            ("value", self.byte_value, F::from(row.value as u64)),
-                            (
-                                "tag_length",
-                                self.tag_length,
-                                F::from(row.tag_length as u64),
-                            ),
-                            ("length_acc", self.length_acc, F::from(row.length_acc)),
+                            ("is_last", self.is_last, (row.index == n_rows + 2).into()),
+                            ("tx_id", rlp_table.tx_id, row.tx_id as u64),
+                            ("tag", rlp_table.tag, (row.tag as u64)),
+                            ("tag_index", rlp_table.tag_rindex, (row.tag_rindex as u64)),
+                            ("data_type", rlp_table.data_type, (row.data_type as u64)),
+                            ("index", self.index, (row.index as u64)),
+                            ("rindex", self.rindex, (rindex)),
+                            ("value", self.byte_value, (row.value as u64)),
+                            ("tag_length", self.tag_length, (row.tag_length as u64)),
+                            ("length_acc", self.length_acc, (row.length_acc)),
                         ] {
                             region.assign_advice(
                                 || format!("assign {} {}", name, offset),
                                 column,
                                 offset,
-                                || Value::known(value),
+                                || Value::known(F::from(value)),
                             )?;
                         }
                         for (name, column, value) in [
@@ -1215,11 +1234,15 @@ impl<F: Field> RlpCircuitConfig<F> {
                                 row.value_acc,
                             ),
                             (
-                                "value_acc_rlc",
+                                "calldata_bytes_acc_rlc",
                                 self.calldata_bytes_rlc_acc,
                                 row.value_rlc_acc,
                             ),
-                            ("value_rlc", self.all_bytes_rlc_acc, all_bytes_rlc_acc),
+                            (
+                                "all_bytes_rlc_acc",
+                                self.all_bytes_rlc_acc,
+                                all_bytes_rlc_acc,
+                            ),
                         ] {
                             region.assign_advice(
                                 || format!("assign {} {}", name, offset),
@@ -1231,102 +1254,47 @@ impl<F: Field> RlpCircuitConfig<F> {
 
                         tag_chip.assign(&mut region, offset, &row.tag)?;
 
-                        tag_index_cmp_1_chip.assign(
-                            &mut region,
-                            offset,
-                            F::one(),
-                            F::from(row.tag_rindex as u64),
-                        )?;
-                        tag_index_length_cmp_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.tag_rindex as u64),
-                            F::from(row.tag_length as u64),
-                        )?;
-                        tag_length_cmp_1_chip.assign(
-                            &mut region,
-                            offset,
-                            F::one(),
-                            F::from(row.tag_length as u64),
-                        )?;
-                        tag_index_lt_10_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.tag_rindex as u64),
-                            F::from(10u64),
-                        )?;
-                        tag_index_lt_34_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.tag_rindex as u64),
-                            F::from(34u64),
-                        )?;
-                        value_gt_127_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(127u64),
-                            F::from(row.value as u64),
-                        )?;
-                        value_gt_183_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(183u64),
-                            F::from(row.value as u64),
-                        )?;
-                        value_gt_191_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(191u64),
-                            F::from(row.value as u64),
-                        )?;
-                        value_gt_247_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(247u64),
-                            F::from(row.value as u64),
-                        )?;
-                        value_lt_129_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.value as u64),
-                            F::from(129u64),
-                        )?;
+                        for (chip, lhs, rhs) in [
+                            (&tag_index_cmp_1_chip, 1, row.tag_rindex as u64),
+                            (
+                                &tag_index_length_cmp_chip,
+                                row.tag_rindex,
+                                row.tag_length as u64,
+                            ),
+                            (&tag_length_cmp_1_chip, 1, row.tag_length as u64),
+                            (&length_acc_cmp_0_chip, 0, row.length_acc),
+                        ] {
+                            chip.assign(&mut region, offset, F::from(lhs as u64), F::from(rhs))?;
+                        }
+
                         value_eq_128_chip.assign(
                             &mut region,
                             offset,
                             Value::known(F::from(row.value as u64)),
                             Value::known(F::from(128u64)),
                         )?;
-                        value_lt_184_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.value as u64),
-                            F::from(184u64),
-                        )?;
-                        value_lt_192_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.value as u64),
-                            F::from(192u64),
-                        )?;
-                        value_lt_248_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.value as u64),
-                            F::from(248u64),
-                        )?;
-                        value_lt_256_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.value as u64),
-                            F::from(256u64),
-                        )?;
-                        length_acc_cmp_0_chip.assign(
-                            &mut region,
-                            offset,
-                            F::zero(),
-                            F::from(row.length_acc as u64),
-                        )?;
+
+                        for (chip, lhs, rhs) in [
+                            (&tag_index_lt_10_chip, row.tag_rindex, 10),
+                            (&tag_index_lt_34_chip, row.tag_rindex, 34),
+                            (&value_gt_127_chip, 127, row.value),
+                            (&value_gt_183_chip, 183, row.value),
+                            (&value_gt_191_chip, 191, row.value),
+                            (&value_gt_247_chip, 247, row.value),
+                            (&value_lt_129_chip, row.value as usize, 129),
+                            (&value_lt_184_chip, row.value as usize, 184),
+                            (&value_lt_192_chip, row.value as usize, 192),
+                            (&value_lt_248_chip, row.value as usize, 248),
+                        ] {
+                            chip.assign(
+                                &mut region,
+                                offset,
+                                F::from(lhs as u64),
+                                F::from(rhs as u64),
+                            )?;
+                        }
+
+                        offset += 1;
                     }
 
                     // tx sign (unsigned tx)
@@ -1338,8 +1306,6 @@ impl<F: Field> RlpCircuitConfig<F> {
                         .chain(signed_tx.tx.rlp_rows(challenges.keccak_input()).iter())
                         .enumerate()
                     {
-                        offset += 1;
-
                         // update value accumulator over the entire RLP encoding.
                         all_bytes_rlc_acc = all_bytes_rlc_acc
                             .zip(keccak_input_rand)
@@ -1361,51 +1327,28 @@ impl<F: Field> RlpCircuitConfig<F> {
                         )?;
                         // advices
                         let rindex = (n_rows + 2 - row.index) as u64; // rindex decreases from n_rows+1 to 0
+                        let rlp_table = &self.rlp_table;
                         for (name, column, value) in [
-                            ("is_last", self.is_last, F::from(row.index == n_rows + 2)),
-                            (
-                                "rlp_table::tx_id",
-                                self.rlp_table.tx_id,
-                                F::from(row.tx_id as u64),
-                            ),
-                            (
-                                "rlp_table::tag",
-                                self.rlp_table.tag,
-                                F::from(row.tag as u64),
-                            ),
-                            (
-                                "rlp_table::tag_index",
-                                self.rlp_table.tag_rindex,
-                                F::from(row.tag_rindex as u64),
-                            ),
-                            (
-                                "rlp_table::data_type",
-                                self.rlp_table.data_type,
-                                F::from(row.data_type as u64),
-                            ),
-                            ("index", self.index, F::from(row.index as u64)),
-                            ("rindex", self.rindex, F::from(rindex)),
-                            ("byte value", self.byte_value, F::from(row.value as u64)),
-                            (
-                                "tag_length",
-                                self.tag_length,
-                                F::from(row.tag_length as u64),
-                            ),
-                            ("length_acc", self.length_acc, F::from(row.length_acc)),
+                            ("is_last", self.is_last, (row.index == n_rows + 2).into()),
+                            ("tx_id", rlp_table.tx_id, row.tx_id as u64),
+                            ("tag", rlp_table.tag, row.tag as u64),
+                            ("tag_rindex", rlp_table.tag_rindex, row.tag_rindex as u64),
+                            ("data_type", rlp_table.data_type, row.data_type as u64),
+                            ("index", self.index, row.index as u64),
+                            ("rindex", self.rindex, rindex),
+                            ("byte value", self.byte_value, row.value as u64),
+                            ("tag_length", self.tag_length, row.tag_length as u64),
+                            ("length_acc", self.length_acc, row.length_acc),
                         ] {
                             region.assign_advice(
                                 || format!("assign {} {}", name, offset),
                                 column,
                                 offset,
-                                || Value::known(value),
+                                || Value::known(F::from(value)),
                             )?;
                         }
                         for (name, column, value) in [
-                            (
-                                "rlp_table::value_acc",
-                                self.rlp_table.value_acc,
-                                row.value_acc,
-                            ),
+                            ("rlp_table::value_acc", rlp_table.value_acc, row.value_acc),
                             (
                                 "calldata_bytes_rlc_acc",
                                 self.calldata_bytes_rlc_acc,
@@ -1427,108 +1370,53 @@ impl<F: Field> RlpCircuitConfig<F> {
 
                         tag_chip.assign(&mut region, offset, &row.tag)?;
 
-                        tag_index_cmp_1_chip.assign(
-                            &mut region,
-                            offset,
-                            F::one(),
-                            F::from(row.tag_rindex as u64),
-                        )?;
-                        tag_index_length_cmp_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.tag_rindex as u64),
-                            F::from(row.tag_length as u64),
-                        )?;
-                        tag_length_cmp_1_chip.assign(
-                            &mut region,
-                            offset,
-                            F::one(),
-                            F::from(row.tag_length as u64),
-                        )?;
-                        tag_index_lt_10_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.tag_rindex as u64),
-                            F::from(10u64),
-                        )?;
-                        tag_index_lt_34_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.tag_rindex as u64),
-                            F::from(34u64),
-                        )?;
-                        value_gt_127_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(127u64),
-                            F::from(row.value as u64),
-                        )?;
-                        value_gt_183_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(183u64),
-                            F::from(row.value as u64),
-                        )?;
-                        value_gt_191_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(191u64),
-                            F::from(row.value as u64),
-                        )?;
-                        value_gt_247_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(247u64),
-                            F::from(row.value as u64),
-                        )?;
-                        value_lt_129_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.value as u64),
-                            F::from(129u64),
-                        )?;
+                        for (chip, lhs, rhs) in [
+                            (&tag_index_cmp_1_chip, 1, row.tag_rindex as u64),
+                            (
+                                &tag_index_length_cmp_chip,
+                                row.tag_rindex,
+                                row.tag_length as u64,
+                            ),
+                            (&tag_length_cmp_1_chip, 1, row.tag_length as u64),
+                            (&length_acc_cmp_0_chip, 0, row.length_acc),
+                        ] {
+                            chip.assign(&mut region, offset, F::from(lhs as u64), F::from(rhs))?;
+                        }
+
                         value_eq_128_chip.assign(
                             &mut region,
                             offset,
                             Value::known(F::from(row.value as u64)),
                             Value::known(F::from(128u64)),
                         )?;
-                        value_lt_184_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.value as u64),
-                            F::from(184u64),
-                        )?;
-                        value_lt_192_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.value as u64),
-                            F::from(192u64),
-                        )?;
-                        value_lt_248_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.value as u64),
-                            F::from(248u64),
-                        )?;
-                        value_lt_256_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.value as u64),
-                            F::from(256u64),
-                        )?;
-                        length_acc_cmp_0_chip.assign(
-                            &mut region,
-                            offset,
-                            F::zero(),
-                            F::from(row.length_acc as u64),
-                        )?;
+
+                        for (chip, lhs, rhs) in [
+                            (&tag_index_lt_10_chip, row.tag_rindex, 10),
+                            (&tag_index_lt_34_chip, row.tag_rindex, 34),
+                            (&value_gt_127_chip, 127, row.value),
+                            (&value_gt_183_chip, 183, row.value),
+                            (&value_gt_191_chip, 191, row.value),
+                            (&value_gt_247_chip, 247, row.value),
+                            (&value_lt_129_chip, row.value as usize, 129),
+                            (&value_lt_184_chip, row.value as usize, 184),
+                            (&value_lt_192_chip, row.value as usize, 192),
+                            (&value_lt_248_chip, row.value as usize, 248),
+                        ] {
+                            chip.assign(
+                                &mut region,
+                                offset,
+                                F::from(lhs as u64),
+                                F::from(rhs as u64),
+                            )?;
+                        }
+
+                        offset += 1;
                     }
                 }
 
-                // end with dummy rows.
-                for i in 1..=4 {
-                    self.assign_padding_rows(&mut region, offset + i)?;
+                // end with padding rows.
+                for i in offset..=last_row_offset {
+                    self.assign_padding_rows(&mut region, i)?;
                 }
 
                 Ok(())
@@ -1567,9 +1455,29 @@ impl<F: Field> RlpCircuitConfig<F> {
     }
 }
 
-struct RlpCircuit<F, RLP> {
-    inputs: Vec<RLP>,
-    randomness: F,
+/// Circuit configuration arguments
+pub struct RlpCircuitConfigArgs<F: Field> {
+    /// RlpTable
+    rlp_table: RlpTable,
+    /// Challenges
+    challenges: Challenges<Expression<F>>,
+}
+
+impl<F: Field> SubCircuitConfig<F> for RlpCircuitConfig<F> {
+    type ConfigArgs = RlpCircuitConfigArgs<F>;
+
+    fn new(meta: &mut ConstraintSystem<F>, args: Self::ConfigArgs) -> Self {
+        RlpCircuitConfig::configure(meta, &args.rlp_table, &args.challenges)
+    }
+}
+
+/// Circuit to verify RLP encoding is correct
+#[derive(Clone, Debug)]
+pub struct RlpCircuit<F, RLP> {
+    /// Rlp encoding inputs
+    pub inputs: Vec<RLP>,
+    /// Size of the circuit
+    pub size: usize,
     _marker: PhantomData<F>,
 }
 
@@ -1577,15 +1485,40 @@ impl<F: Field, RLP> Default for RlpCircuit<F, RLP> {
     fn default() -> Self {
         Self {
             inputs: vec![],
-            randomness: F::one(),
+            size: 0,
             _marker: PhantomData,
         }
     }
 }
 
-impl<F: Field, RLP> RlpCircuit<F, RLP> {
-    fn get_randomness() -> F {
-        F::from(194881236412749812)
+impl<F: Field> SubCircuit<F> for RlpCircuit<F, SignedTransaction> {
+    type Config = RlpCircuitConfig<F>;
+
+    fn new_from_block(block: &Block<F>) -> Self {
+        let signed_txs = block
+            .txs
+            .iter()
+            .zip(block.sigs.iter())
+            .map(|(tx, sig)| SignedTransaction {
+                tx: tx.clone(),
+                signature: *sig,
+            })
+            .collect::<Vec<_>>();
+
+        Self {
+            inputs: signed_txs,
+            size: block.evm_circuit_pad_to,
+            _marker: Default::default(),
+        }
+    }
+
+    fn synthesize_sub(
+        &self,
+        config: &Self::Config,
+        challenges: &Challenges<Value<F>>,
+        layouter: &mut impl Layouter<F>,
+    ) -> Result<(), Error> {
+        config.assign(layouter, &self.inputs, self.size, challenges)
     }
 }
 
@@ -1612,7 +1545,12 @@ impl<F: Field> Circuit<F> for RlpCircuit<F, SignedTransaction> {
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
         let challenges = challenges.values(&mut layouter);
-        config.assign(layouter, self.inputs.as_slice(), &challenges)
+        config.assign(
+            &mut layouter,
+            self.inputs.as_slice(),
+            self.size,
+            &challenges,
+        )
     }
 }
 
@@ -1629,10 +1567,9 @@ mod tests {
     use super::RlpCircuit;
 
     fn verify_txs<F: Field>(k: u32, inputs: Vec<SignedTransaction>, success: bool) {
-        let randomness = RlpCircuit::<F, SignedTransaction>::get_randomness();
         let circuit = RlpCircuit::<F, SignedTransaction> {
             inputs,
-            randomness,
+            size: 1 << k,
             _marker: PhantomData,
         };
 
