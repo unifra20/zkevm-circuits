@@ -70,7 +70,7 @@ use crate::table::{
 };
 
 use crate::util::{Challenges, SubCircuit, SubCircuitConfig};
-use crate::witness::{block_convert, Block, MptUpdates};
+use crate::witness::{block_convert, Block, MptUpdates, SignedTransaction};
 use bus_mapping::circuit_input_builder::{CircuitInputBuilder, CircuitsParams};
 use bus_mapping::mock::BlockData;
 use eth_types::geth_types::GethData;
@@ -81,7 +81,7 @@ use halo2_proofs::{
     plonk::{Circuit, ConstraintSystem, Error, Expression},
 };
 
-use crate::rlp_circuit::RlpCircuitConfig;
+use crate::rlp_circuit::{RlpCircuit, RlpCircuitConfig};
 use std::array;
 use strum::IntoEnumIterator;
 
@@ -137,6 +137,8 @@ pub struct SuperCircuit<
     pub exp_circuit: ExpCircuit<F>,
     /// Keccak Circuit
     pub keccak_circuit: KeccakCircuit<F>,
+    /// Rlp Circuit
+    pub rlp_circuit: RlpCircuit<F, SignedTransaction>,
 }
 
 impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: usize>
@@ -198,6 +200,7 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
         let exp_table = ExpTable::construct(meta);
         log_circuit_info(meta, "exp");
         let rlp_table = RlpTable::construct(meta);
+        log_circuit_info(meta, "rlp");
         let keccak_table = KeccakTable::construct(meta);
         log_circuit_info(meta, "keccak");
 
@@ -220,6 +223,7 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
         log_circuit_info(meta, "keccak");
 
         let rlp_circuit = RlpCircuitConfig::configure(meta, &rlp_table, &challenges);
+        log_circuit_info(meta, "rlp");
         /*
         let pi_circuit = PiCircuitConfig::new(
             meta,
@@ -355,6 +359,8 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
             .synthesize_sub(&config.exp_circuit, &challenges, &mut layouter)?;
         self.evm_circuit
             .synthesize_sub(&config.evm_circuit, &challenges, &mut layouter)?;
+        self.rlp_circuit
+            .synthesize_sub(&config.rlp_circuit, &challenges, &mut layouter)?;
         //self.pi_circuit
         //    .synthesize_sub(&config.pi_circuit, &challenges, &mut layouter)?;
         Ok(())
@@ -448,6 +454,7 @@ impl<const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: usize>
         let copy_circuit = CopyCircuit::new_from_block(&block);
         let exp_circuit = ExpCircuit::new_from_block(&block);
         let keccak_circuit = KeccakCircuit::new_from_block(&block);
+        let rlp_circuit = RlpCircuit::new_from_block(&block);
 
         let circuit = SuperCircuit::<_, MAX_TXS, MAX_CALLDATA, MAX_RWS> {
             evm_circuit,
@@ -458,6 +465,7 @@ impl<const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: usize>
             copy_circuit,
             exp_circuit,
             keccak_circuit,
+            rlp_circuit,
         };
 
         let instance = circuit.instance();
