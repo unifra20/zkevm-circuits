@@ -229,7 +229,9 @@ pub fn block_convert(
         .next()
         .map(|(k, _)| *k)
         .unwrap_or_default();
-    let chain_id = block.headers.values()
+    let chain_id = block
+        .headers
+        .values()
         .into_iter()
         .next()
         .map(|header| header.chain_id.as_u64())

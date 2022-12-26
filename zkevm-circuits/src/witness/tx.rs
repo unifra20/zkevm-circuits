@@ -234,7 +234,7 @@ pub(super) fn tx_convert(
             .input
             .iter()
             .fold(0, |acc, byte| acc + if *byte == 0 { 4 } else { 16 }),
-        chain_id, // FIXME
+        chain_id,
         calls: tx
             .calls()
             .iter()
