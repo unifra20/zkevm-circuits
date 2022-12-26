@@ -229,6 +229,12 @@ pub fn block_convert(
         .next()
         .map(|(k, _)| *k)
         .unwrap_or_default();
+    let chain_id = block.headers.values()
+        .into_iter()
+        .next()
+        .map(|header| header.chain_id.as_u64())
+        .unwrap_or(1);
+
     Ok(Block {
         randomness: Fr::from_u128(DEFAULT_RAND),
         context: block.into(),
@@ -243,7 +249,7 @@ pub fn block_convert(
                 } else {
                     None
                 };
-                tx_convert(tx, idx + 1, next_tx)
+                tx_convert(tx, idx + 1, chain_id, next_tx)
             })
             .collect(),
         sigs: block.txs().iter().map(|tx| tx.signature).collect(),

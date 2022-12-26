@@ -214,6 +214,7 @@ impl From<MockTransaction> for SignedTransaction {
 pub(super) fn tx_convert(
     tx: &circuit_input_builder::Transaction,
     id: usize,
+    chain_id: u64,
     next_tx: Option<&circuit_input_builder::Transaction>,
 ) -> Transaction {
     Transaction {
@@ -233,7 +234,7 @@ pub(super) fn tx_convert(
             .input
             .iter()
             .fold(0, |acc, byte| acc + if *byte == 0 { 4 } else { 16 }),
-        chain_id: 1, // FIXME
+        chain_id, // FIXME
         calls: tx
             .calls()
             .iter()
