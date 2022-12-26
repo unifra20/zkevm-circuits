@@ -2,18 +2,16 @@ use crate::{
     evm_circuit::util::{
         and, constraint_builder::BaseConstraintBuilder, not, or, select, RandomLinearCombination,
     },
-    table::{BytecodeFieldTag, BytecodeTable, DynamicTableColumns, KeccakTable},
-    util::{Challenges, Expr},
+    table::{BytecodeFieldTag, BytecodeTable, KeccakTable},
+    util::{Challenges, Expr, SubCircuit, SubCircuitConfig},
+    witness,
 };
 use bus_mapping::evm::OpcodeId;
-use eth_types::{Field, ToLittleEndian, Word};
+use eth_types::{Field, ToLittleEndian, Word, U256};
 use gadgets::is_zero::{IsZeroChip, IsZeroConfig, IsZeroInstruction};
 use halo2_proofs::{
     circuit::{Layouter, Region, Value},
-    plonk::{
-        Advice, Column, ConstraintSystem, Error, Expression, Fixed, SecondPhase, Selector,
-        VirtualCells,
-    },
+    plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed, Selector, VirtualCells},
     poly::Rotation,
 };
 use keccak256::plain::Keccak;
@@ -39,7 +37,7 @@ pub struct UnrolledBytecode<F: Field> {
 
 #[derive(Clone, Debug)]
 /// Bytecode circuit configuration
-pub struct Config<F> {
+pub struct BytecodeCircuitConfig<F> {
     minimum_rows: usize,
     q_enable: Column<Fixed>,
     q_first: Column<Fixed>,
@@ -56,22 +54,38 @@ pub struct Config<F> {
     length_inv: Column<Advice>,
     length_is_zero: IsZeroConfig<F>,
     push_table: [Column<Fixed>; PUSH_TABLE_WIDTH],
+    // External tables
     pub(crate) keccak_table: KeccakTable,
 }
 
-impl<F: Field> Config<F> {
-    pub(crate) fn configure(
+/// Circuit configuration arguments
+pub struct BytecodeCircuitConfigArgs<F: Field> {
+    /// BytecodeTable
+    pub bytecode_table: BytecodeTable,
+    /// KeccakTable
+    pub keccak_table: KeccakTable,
+    /// Challenges
+    pub challenges: Challenges<Expression<F>>,
+}
+
+impl<F: Field> SubCircuitConfig<F> for BytecodeCircuitConfig<F> {
+    type ConfigArgs = BytecodeCircuitConfigArgs<F>;
+
+    /// Return a new BytecodeCircuitConfig
+    fn new(
         meta: &mut ConstraintSystem<F>,
-        bytecode_table: BytecodeTable,
-        keccak_table: KeccakTable,
-        challenges: Challenges<Expression<F>>,
+        Self::ConfigArgs {
+            bytecode_table,
+            keccak_table,
+            challenges,
+        }: Self::ConfigArgs,
     ) -> Self {
         let q_enable = meta.fixed_column();
         let q_first = meta.fixed_column();
-        let q_last = meta.selector();
+        let q_last = meta.complex_selector();
         let value = bytecode_table.value;
         let push_rindex = meta.advice_column();
-        let hash_input_rlc = meta.advice_column_in(SecondPhase);
+        let hash_input_rlc = meta.advice_column();
         let code_length = meta.advice_column();
         let byte_push_size = meta.advice_column();
         let is_final = meta.advice_column();
@@ -340,6 +354,7 @@ impl<F: Field> Config<F> {
             constraints
         });
 
+        /*
         // keccak lookup
         meta.lookup_any("keccak", |meta| {
             // Conditions:
@@ -362,8 +377,9 @@ impl<F: Field> Config<F> {
             }
             constraints
         });
+        */
 
-        Config {
+        BytecodeCircuitConfig {
             minimum_rows: meta.minimum_rows(),
             q_enable,
             q_first,
@@ -383,7 +399,9 @@ impl<F: Field> Config<F> {
             keccak_table,
         }
     }
+}
 
+impl<F: Field> BytecodeCircuitConfig<F> {
     pub(crate) fn assign(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -436,6 +454,15 @@ impl<F: Field> Config<F> {
                                 challenge,
                             )
                         });
+                        if idx == bytecode.rows.len() - 1 {
+                            log::trace!("bytecode len {}", bytecode.rows.len());
+                            log::trace!(
+                                "assign bytecode circuit at {}: codehash {:?}, rlc {:?}",
+                                offset,
+                                row.code_hash.to_le_bytes(),
+                                code_hash
+                            );
+                        }
 
                         // Track which byte is an opcode and which is push
                         // data
@@ -452,6 +479,10 @@ impl<F: Field> Config<F> {
                                     *hash_input_rlc = *hash_input_rlc * challenge + row.value
                                 },
                             );
+                        }
+
+                        if idx == bytecode.rows.len() - 1 {
+                            log::trace!("assign bytecode circuit: input rlc {:?}", hash_input_rlc);
                         }
 
                         // Set the data for this row
@@ -551,6 +582,7 @@ impl<F: Field> Config<F> {
 
         // q_last
         if last {
+            log::debug!("bytecode circuit q_last at {}", offset);
             self.q_last.enable(region, offset)?;
         }
 
@@ -595,7 +627,7 @@ impl<F: Field> Config<F> {
     }
 
     /// load fixed tables
-    pub(crate) fn load(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
+    pub(crate) fn load_aux_tables(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         // push table: BYTE -> NUM_PUSHED:
         // [0, OpcodeId::PUSH1] -> 0
         // [OpcodeId::PUSH1, OpcodeId::PUSH32] -> [1..32]
@@ -628,6 +660,11 @@ impl<F: Field> Config<F> {
 /// Get unrolled bytecode from raw bytes
 pub fn unroll<F: Field>(bytes: Vec<u8>) -> UnrolledBytecode<F> {
     let code_hash = keccak(&bytes[..]);
+    unroll_with_codehash(code_hash, bytes)
+}
+
+/// Get unrolled bytecode from raw bytes and codehash
+pub fn unroll_with_codehash<F: Field>(code_hash: U256, bytes: Vec<u8>) -> UnrolledBytecode<F> {
     let mut rows = vec![BytecodeRow::<F> {
         code_hash,
         tag: F::from(BytecodeFieldTag::Length as u64),
@@ -688,15 +725,71 @@ fn into_words(message: &[u8]) -> Vec<u64> {
     words
 }
 
+/// BytecodeCircuit
+#[derive(Clone, Default, Debug)]
+pub struct BytecodeCircuit<F: Field> {
+    /// Unrolled bytecodes
+    pub bytecodes: Vec<UnrolledBytecode<F>>,
+    /// Circuit size
+    pub size: usize,
+}
+
+impl<F: Field> BytecodeCircuit<F> {
+    /// new BytecodeCircuitTester
+    pub fn new(bytecodes: Vec<UnrolledBytecode<F>>, size: usize) -> Self {
+        BytecodeCircuit { bytecodes, size }
+    }
+
+    /// Creates bytecode circuit from block and bytecode_size.
+    pub fn new_from_block_sized(block: &witness::Block<F>, bytecode_size: usize) -> Self {
+        let bytecodes: Vec<UnrolledBytecode<F>> = block
+            .bytecodes
+            .iter()
+            .map(|(codehash, b)| unroll_with_codehash(*codehash, b.bytes.clone()))
+            .collect();
+        Self::new(bytecodes, bytecode_size)
+    }
+}
+
+impl<F: Field> SubCircuit<F> for BytecodeCircuit<F> {
+    type Config = BytecodeCircuitConfig<F>;
+
+    fn new_from_block(block: &witness::Block<F>) -> Self {
+        // TODO: Find a nicer way to add the extra `128`.  Is this to account for
+        // unusable rows? Then it could be calculated like this:
+        // fn unusable_rows<F: Field, C: Circuit<F>>() -> usize {
+        //     let mut cs = ConstraintSystem::default();
+        //     C::configure(&mut cs);
+        //     cs.blinding_factors()
+        // }
+        let bytecode_size = block.circuits_params.max_bytecode + 128;
+        Self::new_from_block_sized(block, bytecode_size)
+    }
+
+    /// Make the assignments to the TxCircuit
+    fn synthesize_sub(
+        &self,
+        config: &Self::Config,
+        challenges: &Challenges<Value<F>>,
+        layouter: &mut impl Layouter<F>,
+    ) -> Result<(), Error> {
+        config.load_aux_tables(layouter)?;
+        config.assign_internal(layouter, self.size, &self.bytecodes, challenges, false)
+    }
+}
+
+/// test module
+#[cfg(any(feature = "test", test))]
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
-    use crate::bytecode_circuit::dev::test_bytecode_circuit_unrolled;
+    use crate::{bytecode_circuit::dev::test_bytecode_circuit_unrolled, util::DEFAULT_RAND};
     use eth_types::Bytecode;
     use halo2_proofs::halo2curves::bn256::Fr;
 
-    fn get_randomness<F: Field>() -> F {
-        F::from(123456)
+    /// get randomness value
+    pub fn get_randomness<F: Field>() -> F {
+        F::from(DEFAULT_RAND as u64)
     }
 
     /// Verify unrolling code
@@ -821,6 +914,7 @@ mod tests {
     }
 
     /// Test invalid code_hash data
+    #[ignore]
     #[test]
     fn bytecode_invalid_hash_data() {
         let k = 9;
@@ -874,6 +968,7 @@ mod tests {
     }
 
     /// Test invalid byte data
+    #[ignore]
     #[test]
     fn bytecode_invalid_byte_data() {
         let k = 9;

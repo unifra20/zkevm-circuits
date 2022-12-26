@@ -7,7 +7,7 @@ use crate::impl_expr;
 use crate::util::build_tx_log_address;
 use crate::util::Challenges;
 use crate::witness::{
-    Block, BlockContext, Bytecode, MptUpdateRow, MptUpdates, RlpWitnessGen, Rw, RwMap, RwRow,
+    Block, BlockContexts, Bytecode, MptUpdateRow, MptUpdates, RlpWitnessGen, Rw, RwMap, RwRow,
     SignedTransaction, Transaction,
 };
 use bus_mapping::circuit_input_builder::{CopyDataType, CopyEvent, CopyStep, ExpEvent};
@@ -94,6 +94,8 @@ pub enum TxFieldTag {
     TxHash,
     /// CallData
     CallData,
+    /// The block number in which this tx is included.
+    BlockNumber,
 }
 impl_expr!(TxFieldTag);
 
@@ -107,12 +109,12 @@ impl From<TxFieldTag> for usize {
 pub type TxContextFieldTag = TxFieldTag;
 
 /// Table that contains the fields of all Transactions in a block
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct TxTable {
     /// Tx ID
     pub tx_id: Column<Advice>,
     /// Tag (TxContextFieldTag)
-    pub tag: Column<Fixed>,
+    pub tag: Column<Advice>,
     /// Index for Tag = CallData
     pub index: Column<Advice>,
     /// Value
@@ -124,7 +126,7 @@ impl TxTable {
     pub fn construct<F: Field>(meta: &mut ConstraintSystem<F>) -> Self {
         Self {
             tx_id: meta.advice_column(),
-            tag: meta.fixed_column(),
+            tag: meta.advice_column(),
             index: meta.advice_column(),
             value: meta.advice_column_in(SecondPhase),
         }
@@ -137,7 +139,7 @@ impl TxTable {
         layouter: &mut impl Layouter<F>,
         txs: &[Transaction],
         max_txs: usize,
-        randomness: F,
+        challenges: &Challenges<Value<F>>,
     ) -> Result<(), Error> {
         assert!(
             txs.len() <= max_txs,
@@ -158,7 +160,7 @@ impl TxTable {
                         || Value::known(F::zero()),
                     )?;
                 }
-                region.assign_fixed(
+                region.assign_advice(
                     || "tx table all-zero row",
                     self.tag,
                     offset,
@@ -173,20 +175,20 @@ impl TxTable {
                     })
                     .collect();
                 for tx in txs.iter().chain(padding_txs.iter()) {
-                    for row in tx.table_assignments(randomness) {
+                    for row in tx.table_assignments(*challenges) {
                         for (index, column) in advice_columns.iter().enumerate() {
                             region.assign_advice(
                                 || format!("tx table row {}", offset),
                                 *column,
                                 offset,
-                                || Value::known(row[if index > 0 { index + 1 } else { index }]),
+                                || row[if index > 0 { index + 1 } else { index }],
                             )?;
                         }
-                        region.assign_fixed(
+                        region.assign_advice(
                             || format!("tx table row {}", offset),
                             self.tag,
                             offset,
-                            || Value::known(row[1]),
+                            || row[1],
                         )?;
                         offset += 1;
                     }
@@ -201,7 +203,7 @@ impl<F: Field> LookupTable<F> for TxTable {
     fn table_exprs(&self, meta: &mut VirtualCells<F>) -> Vec<Expression<F>> {
         vec![
             meta.query_advice(self.tx_id, Rotation::cur()),
-            meta.query_fixed(self.tag, Rotation::cur()),
+            meta.query_advice(self.tag, Rotation::cur()),
             meta.query_advice(self.index, Rotation::cur()),
             meta.query_advice(self.value, Rotation::cur()),
         ]
@@ -260,7 +262,7 @@ impl From<RwTableTag> for usize {
 }
 
 /// Tag for an AccountField in RwTable
-#[derive(Clone, Copy, Debug, EnumIter, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, EnumIter, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AccountFieldTag {
     /// Nonce field
     Nonce = 1,
@@ -268,6 +270,8 @@ pub enum AccountFieldTag {
     Balance,
     /// CodeHash field
     CodeHash,
+    /// NonExisting field
+    NonExisting,
 }
 impl_expr!(AccountFieldTag);
 
@@ -408,13 +412,13 @@ impl RwTable {
             id: meta.advice_column(),
             address: meta.advice_column(),
             field_tag: meta.advice_column(),
-            storage_key: meta.advice_column_in(SecondPhase),
-            value: meta.advice_column_in(SecondPhase),
-            value_prev: meta.advice_column_in(SecondPhase),
+            storage_key: meta.advice_column(),
+            value: meta.advice_column(),
+            value_prev: meta.advice_column(),
             // It seems that aux1 for the moment is not using randomness
             // TODO check in a future review
-            aux1: meta.advice_column_in(SecondPhase),
-            aux2: meta.advice_column_in(SecondPhase),
+            aux1: meta.advice_column(),
+            aux2: meta.advice_column(),
         }
     }
     fn assign<F: Field>(
@@ -448,11 +452,11 @@ impl RwTable {
         layouter: &mut impl Layouter<F>,
         rws: &[Rw],
         n_rows: usize,
-        randomness: Value<F>,
+        challenges: Value<F>,
     ) -> Result<(), Error> {
         layouter.assign_region(
             || "rw table",
-            |mut region| self.load_with_region(&mut region, rws, n_rows, randomness),
+            |mut region| self.load_with_region(&mut region, rws, n_rows, challenges),
         )
     }
 
@@ -461,11 +465,11 @@ impl RwTable {
         region: &mut Region<'_, F>,
         rws: &[Rw],
         n_rows: usize,
-        randomness: Value<F>,
+        challenges: Value<F>,
     ) -> Result<(), Error> {
         let (rows, _) = RwMap::table_assignments_prepad(rws, n_rows);
         for (offset, row) in rows.iter().enumerate() {
-            self.assign(region, offset, &row.table_assignment(randomness))?;
+            self.assign(region, offset, &row.table_assignment(challenges))?;
         }
         Ok(())
     }
@@ -479,12 +483,14 @@ pub enum ProofType {
     BalanceChanged = AccountFieldTag::Balance as isize,
     /// Code hash exists
     CodeHashExists = AccountFieldTag::CodeHash as isize,
+    /// Account does not exist
+    AccountDoesNotExist = AccountFieldTag::NonExisting as isize,
     /// Account destroyed
     AccountDestructed,
-    /// Account does not exist
-    AccountDoesNotExist,
     /// Storage updated
     StorageChanged,
+    /// Storage does not exist
+    StorageDoesNotExist,
 }
 impl_expr!(ProofType);
 
@@ -494,6 +500,7 @@ impl From<AccountFieldTag> for ProofType {
             AccountFieldTag::Nonce => Self::NonceChanged,
             AccountFieldTag::Balance => Self::BalanceChanged,
             AccountFieldTag::CodeHash => Self::CodeHashExists,
+            AccountFieldTag::NonExisting => Self::AccountDoesNotExist,
         }
     }
 }
@@ -564,7 +571,7 @@ pub enum BytecodeFieldTag {
 impl_expr!(BytecodeFieldTag);
 
 /// Table with Bytecode indexed by its Code Hash
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct BytecodeTable {
     /// Code Hash
     pub code_hash: Column<Advice>,
@@ -582,7 +589,7 @@ impl BytecodeTable {
     /// Construct a new BytecodeTable
     pub fn construct<F: Field>(meta: &mut ConstraintSystem<F>) -> Self {
         let [tag, index, is_code, value] = array::from_fn(|_| meta.advice_column());
-        let code_hash = meta.advice_column_in(SecondPhase);
+        let code_hash = meta.advice_column();
         Self {
             code_hash,
             tag,
@@ -667,11 +674,17 @@ pub enum BlockContextFieldTag {
     /// Chain ID field.  Although this is not a field in the block header, we
     /// add it here for convenience.
     ChainId,
+    /// In a multi-block setup, this variant represents the total number of txs
+    /// included in this block.
+    NumTxs,
+    /// In a multi-block setup, this variant represents the cumulative number of
+    /// txs included up to this block, including the txs in this block.
+    CumNumTxs,
 }
 impl_expr!(BlockContextFieldTag);
 
 /// Table with Block header fields
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct BlockTable {
     /// Tag
     pub tag: Column<Advice>,
@@ -695,34 +708,43 @@ impl BlockTable {
     pub fn load<F: Field>(
         &self,
         layouter: &mut impl Layouter<F>,
-        block: &BlockContext,
+        block_ctxs: &BlockContexts,
+        txs: &[Transaction],
         randomness: F,
     ) -> Result<(), Error> {
         layouter.assign_region(
             || "block table",
             |mut region| {
                 let mut offset = 0;
-                for column in self.columns() {
+                let block_table_columns = self.columns();
+                for column in block_table_columns.iter() {
                     region.assign_advice(
                         || "block table all-zero row",
-                        column,
+                        *column,
                         offset,
                         || Value::known(F::zero()),
                     )?;
                 }
                 offset += 1;
 
-                let block_table_columns = self.columns();
-                for row in block.table_assignments(randomness) {
-                    for (column, value) in block_table_columns.iter().zip_eq(row) {
-                        region.assign_advice(
-                            || format!("block table row {}", offset),
-                            *column,
-                            offset,
-                            || Value::known(value),
-                        )?;
+                let mut cum_num_txs = 0usize;
+                for block_ctx in block_ctxs.ctxs.values() {
+                    let num_txs = txs
+                        .iter()
+                        .filter(|tx| tx.block_number == block_ctx.number.as_u64())
+                        .count();
+                    cum_num_txs += num_txs;
+                    for row in block_ctx.table_assignments(num_txs, cum_num_txs, randomness) {
+                        for (column, value) in block_table_columns.iter().zip_eq(row) {
+                            region.assign_advice(
+                                || format!("block table row {}", offset),
+                                *column,
+                                offset,
+                                || Value::known(value),
+                            )?;
+                        }
+                        offset += 1;
                     }
-                    offset += 1;
                 }
 
                 Ok(())
@@ -738,7 +760,7 @@ impl DynamicTableColumns for BlockTable {
 }
 
 /// Keccak Table, used to verify keccak hashing from RLC'ed input.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct KeccakTable {
     /// True when the row is enabled
     pub is_enabled: Column<Advice>,
@@ -755,9 +777,9 @@ impl KeccakTable {
     pub fn construct<F: Field>(meta: &mut ConstraintSystem<F>) -> Self {
         Self {
             is_enabled: meta.advice_column(),
-            input_rlc: meta.advice_column_in(SecondPhase),
+            input_rlc: meta.advice_column(),
             input_len: meta.advice_column(),
-            output_rlc: meta.advice_column_in(SecondPhase),
+            output_rlc: meta.advice_column(),
         }
     }
 
@@ -793,15 +815,10 @@ impl KeccakTable {
         &self,
         region: &mut Region<F>,
         offset: usize,
-        values: [F; 4],
+        values: [Value<F>; 4],
     ) -> Result<(), Error> {
         for (column, value) in self.columns().iter().zip(values.iter()) {
-            region.assign_advice(
-                || format!("assign {}", offset),
-                *column,
-                offset,
-                || Value::known(*value),
-            )?;
+            region.assign_advice(|| format!("assign {}", offset), *column, offset, || *value)?;
         }
         Ok(())
     }
@@ -895,8 +912,8 @@ pub struct CopyTable {
     pub tag: BinaryNumberConfig<CopyDataType, 3>,
 }
 
-type CopyTableRow<F> = [(F, &'static str); 8];
-type CopyCircuitRow<F> = [(F, &'static str); 4];
+type CopyTableRow<F> = [(Value<F>, &'static str); 8];
+type CopyCircuitRow<F> = [(Value<F>, &'static str); 4];
 
 impl CopyTable {
     /// Construct a new CopyTable
@@ -917,7 +934,7 @@ impl CopyTable {
     /// Generate the copy table and copy circuit assignments from a copy event.
     pub fn assignments<F: Field>(
         copy_event: &CopyEvent,
-        randomness: F,
+        challenges: Challenges<Value<F>>,
     ) -> Vec<(CopyDataType, CopyTableRow<F>, CopyCircuitRow<F>)> {
         let mut assignments = Vec::new();
         // rlc_acc
@@ -927,11 +944,13 @@ impl CopyTable {
                 .iter()
                 .map(|(value, _)| *value)
                 .collect::<Vec<u8>>();
-            rlc::value(values.iter().rev(), randomness)
+            challenges
+                .evm_word()
+                .map(|evm_word_challenge| rlc::value(values.iter().rev(), evm_word_challenge))
         } else {
-            F::zero()
+            Value::known(F::zero())
         };
-        let mut value_acc = F::zero();
+        let mut value_acc = Value::known(F::zero());
         for (step_idx, (is_read_step, copy_step)) in copy_event
             .bytes
             .iter()
@@ -957,19 +976,19 @@ impl CopyTable {
             .enumerate()
         {
             // is_first
-            let is_first = if step_idx == 0 { F::one() } else { F::zero() };
+            let is_first = Value::known(if step_idx == 0 { F::one() } else { F::zero() });
             // is last
             let is_last = if step_idx == copy_event.bytes.len() * 2 - 1 {
-                F::one()
+                Value::known(F::one())
             } else {
-                F::zero()
+                Value::known(F::zero())
             };
 
             // id
             let id = if is_read_step {
-                number_or_hash_to_field(&copy_event.src_id, randomness)
+                number_or_hash_to_field(&copy_event.src_id, challenges.evm_word())
             } else {
-                number_or_hash_to_field(&copy_event.dst_id, randomness)
+                number_or_hash_to_field(&copy_event.dst_id, challenges.evm_word())
             };
 
             // tag binary bumber chip
@@ -988,15 +1007,17 @@ impl CopyTable {
                 } + (u64::try_from(step_idx).unwrap() - if is_read_step { 0 } else { 1 }) / 2u64;
 
             let addr = if tag == CopyDataType::TxLog {
-                build_tx_log_address(
-                    copy_step_addr,
-                    TxLogFieldTag::Data,
-                    copy_event.log_id.unwrap(),
+                Value::known(
+                    build_tx_log_address(
+                        copy_step_addr,
+                        TxLogFieldTag::Data,
+                        copy_event.log_id.unwrap(),
+                    )
+                    .to_scalar()
+                    .unwrap(),
                 )
-                .to_scalar()
-                .unwrap()
             } else {
-                F::from(copy_step_addr)
+                Value::known(F::from(copy_step_addr))
             };
 
             // bytes_left
@@ -1004,19 +1025,22 @@ impl CopyTable {
             // value
             let value = if copy_event.dst_type == CopyDataType::RlcAcc {
                 if is_read_step {
-                    F::from(copy_step.value as u64)
+                    Value::known(F::from(copy_step.value as u64))
                 } else {
-                    value_acc = value_acc * randomness + F::from(copy_step.value as u64);
+                    value_acc = value_acc * challenges.evm_word()
+                        + Value::known(F::from(copy_step.value as u64));
                     value_acc
                 }
             } else {
-                F::from(copy_step.value as u64)
+                Value::known(F::from(copy_step.value as u64))
             };
             // is_pad
-            let is_pad = F::from(is_read_step && copy_step_addr >= copy_event.src_addr_end);
+            let is_pad = Value::known(F::from(
+                is_read_step && copy_step_addr >= copy_event.src_addr_end,
+            ));
 
             // is_code
-            let is_code = copy_step.is_code.map_or(F::zero(), |v| F::from(v));
+            let is_code = Value::known(copy_step.is_code.map_or(F::zero(), |v| F::from(v)));
 
             assignments.push((
                 tag,
@@ -1024,12 +1048,18 @@ impl CopyTable {
                     (is_first, "is_first"),
                     (id, "id"),
                     (addr, "addr"),
-                    (F::from(copy_event.src_addr_end), "src_addr_end"),
-                    (F::from(bytes_left), "bytes_left"),
-                    (rlc_acc, "rlc_acc"),
-                    (F::from(copy_event.rw_counter(step_idx)), "rw_counter"),
                     (
-                        F::from(copy_event.rw_counter_increase_left(step_idx)),
+                        Value::known(F::from(copy_event.src_addr_end)),
+                        "src_addr_end",
+                    ),
+                    (Value::known(F::from(bytes_left)), "bytes_left"),
+                    (rlc_acc, "rlc_acc"),
+                    (
+                        Value::known(F::from(copy_event.rw_counter(step_idx))),
+                        "rw_counter",
+                    ),
+                    (
+                        Value::known(F::from(copy_event.rw_counter_increase_left(step_idx))),
                         "rwc_inc_left",
                     ),
                 ],
@@ -1049,7 +1079,7 @@ impl CopyTable {
         &self,
         layouter: &mut impl Layouter<F>,
         block: &Block<F>,
-        randomness: F,
+        challenges: &Challenges<Value<F>>,
     ) -> Result<(), Error> {
         layouter.assign_region(
             || "copy table",
@@ -1068,13 +1098,13 @@ impl CopyTable {
                 let tag_chip = BinaryNumberChip::construct(self.tag);
                 let copy_table_columns = self.columns();
                 for copy_event in block.copy_events.iter() {
-                    for (tag, row, _) in Self::assignments(copy_event, randomness) {
+                    for (tag, row, _) in Self::assignments(copy_event, *challenges) {
                         for (column, (value, label)) in copy_table_columns.iter().zip_eq(row) {
                             region.assign_advice(
                                 || format!("{} at row: {}", label, offset),
                                 *column,
                                 offset,
-                                || Value::known(value),
+                                || value,
                             )?;
                         }
                         tag_chip.assign(&mut region, offset, &tag)?;
@@ -1321,11 +1351,11 @@ pub struct RlpTable {
     /// transaction within the L2 block.
     pub tx_id: Column<Advice>,
     /// Denotes the field/tag that this row represents. Example: nonce, gas,
-    /// gasprice, and so on.
+    /// gas_price, and so on.
     pub tag: Column<Advice>,
     /// Denotes the decrementing index specific to this tag. The final value of
     /// the field is accumulated in `value_acc` at `tag_index == 1`.
-    pub tag_index: Column<Advice>,
+    pub tag_rindex: Column<Advice>,
     /// Denotes the accumulator value for this field, which is a linear
     /// combination or random linear combination of the field's bytes.
     pub value_acc: Column<Advice>,
@@ -1340,7 +1370,7 @@ impl DynamicTableColumns for RlpTable {
         vec![
             self.tx_id,
             self.tag,
-            self.tag_index,
+            self.tag_rindex,
             self.value_acc,
             self.data_type,
         ]
@@ -1353,29 +1383,32 @@ impl RlpTable {
         Self {
             tx_id: meta.advice_column(),
             tag: meta.advice_column(),
-            tag_index: meta.advice_column(),
-            value_acc: meta.advice_column(),
+            tag_rindex: meta.advice_column(),
+            value_acc: meta.advice_column_in(SecondPhase),
             data_type: meta.advice_column(),
         }
     }
 
     /// Get assignments to the RLP table. Meant to be used for dev purposes.
-    pub fn dev_assignments<F: Field>(txs: Vec<SignedTransaction>, randomness: F) -> Vec<[F; 5]> {
+    pub fn dev_assignments<F: Field>(
+        txs: Vec<SignedTransaction>,
+        challenges: &Challenges<Value<F>>,
+    ) -> Vec<[Value<F>; 5]> {
         let mut assignments = vec![];
         for signed_tx in txs {
             for row in signed_tx
-                .gen_witness(randomness)
+                .gen_witness(challenges)
                 .iter()
-                .chain(signed_tx.rlp_rows(randomness).iter())
-                .chain(signed_tx.tx.gen_witness(randomness).iter())
-                .chain(signed_tx.tx.rlp_rows(randomness).iter())
+                .chain(signed_tx.rlp_rows(challenges.keccak_input()).iter())
+                .chain(signed_tx.tx.gen_witness(challenges).iter())
+                .chain(signed_tx.tx.rlp_rows(challenges.keccak_input()).iter())
             {
                 assignments.push([
-                    F::from(row.id as u64),
-                    F::from(row.tag as u64),
-                    F::from(row.tag_index as u64),
+                    Value::known(F::from(row.tx_id as u64)),
+                    Value::known(F::from(row.tag as u64)),
+                    Value::known(F::from(row.tag_rindex as u64)),
                     row.value_acc,
-                    F::from(row.data_type as u64),
+                    Value::known(F::from(row.data_type as u64)),
                 ]);
             }
         }
@@ -1389,7 +1422,7 @@ impl RlpTable {
         &self,
         layouter: &mut impl Layouter<F>,
         txs: Vec<SignedTransaction>,
-        randomness: F,
+        challenges: &Challenges<Value<F>>,
     ) -> Result<(), Error> {
         layouter.assign_region(
             || "rlp table",
@@ -1404,14 +1437,14 @@ impl RlpTable {
                     )?;
                 }
 
-                for row in Self::dev_assignments(txs.clone(), randomness) {
+                for row in Self::dev_assignments(txs.clone(), challenges) {
                     offset += 1;
                     for (column, value) in self.columns().iter().zip(row) {
                         region.assign_advice(
                             || format!("row: {}", offset),
                             *column,
                             offset,
-                            || Value::known(value),
+                            || value,
                         )?;
                     }
                 }

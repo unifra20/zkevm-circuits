@@ -1,5 +1,7 @@
+use crate::witness::RlpTxTag;
 use eth_types::{Address, U256, U64};
 use halo2_proofs::arithmetic::FieldExt;
+use halo2_proofs::circuit::Value;
 use num::Zero;
 
 use super::witness_gen::{RlpDataType, RlpWitnessRow};
@@ -7,78 +9,110 @@ use super::witness_gen::{RlpDataType, RlpWitnessRow};
 pub fn handle_prefix<F: FieldExt>(
     id: usize,
     rlp_data: &[u8],
-    rows: &mut Vec<RlpWitnessRow<F>>,
+    rows: &mut Vec<RlpWitnessRow<Value<F>>>,
     data_type: RlpDataType,
-    tag: u8,
+    tag: RlpTxTag,
     mut idx: usize,
 ) -> usize {
-    if rlp_data[idx] > 247 {
+    if rlp_data[idx] > 0xf7 {
         // length of length
-        let length_of_length = (rlp_data[idx] - 247) as usize;
+        let length_of_length = (rlp_data[idx] - 0xf7) as usize;
         let tag_length = length_of_length + 1;
         rows.push(RlpWitnessRow {
-            id,
+            tx_id: id,
             index: idx + 1,
             data_type,
             value: rlp_data[idx],
-            value_acc: F::from(rlp_data[idx] as u64),
+            value_acc: Value::known(F::zero()),
+            value_rlc_acc: Value::known(F::zero()),
             tag,
             tag_length,
-            tag_index: tag_length,
+            tag_rindex: tag_length,
             length_acc: 0,
-            ..Default::default()
         });
         idx += 1;
         let mut length_acc = 0;
-        for (k, rlp_byte) in rlp_data.iter().skip(idx).take(length_of_length).enumerate() {
+        for (k, rlp_byte) in rlp_data[idx..].iter().take(length_of_length).enumerate() {
             length_acc = (length_acc * 256) + (*rlp_byte as u64);
             rows.push(RlpWitnessRow {
-                id,
+                tx_id: id,
                 index: idx + 1,
                 data_type,
                 value: *rlp_byte,
-                value_acc: F::from(length_acc as u64),
+                value_acc: Value::known(F::from(length_acc as u64)),
+                value_rlc_acc: Value::known(F::zero()),
                 tag,
                 tag_length,
-                tag_index: tag_length - (1 + k),
+                tag_rindex: tag_length - (1 + k),
                 length_acc,
-                ..Default::default()
             });
             idx += 1;
         }
     } else {
         // length
         assert!(
-            rlp_data[idx] > 191 && rlp_data[idx] < 248,
-            "RLP data mismatch({:?}): 191 < value < 248, got: {:?} at idx: {:?}",
+            rlp_data[idx] >= 0xc0 && rlp_data[idx] < 0xf8,
+            "RLP data mismatch({:?}): 0xc0 <= value < 0xf8, got: {:?} at idx: {:?}",
             tag,
             rlp_data[idx],
             idx,
         );
         rows.push(RlpWitnessRow {
-            id,
+            tx_id: id,
             index: idx + 1,
             data_type,
             value: rlp_data[idx],
-            value_acc: F::from(rlp_data[idx] as u64),
+            value_acc: Value::known(F::from(rlp_data[idx] as u64)),
+            value_rlc_acc: Value::known(F::zero()),
             tag,
             tag_length: 1,
-            tag_index: 1,
+            tag_rindex: 1,
             length_acc: (rlp_data[idx] - 192) as u64,
-            ..Default::default()
         });
         idx += 1;
     }
     idx
 }
 
+pub fn handle_u8<F: FieldExt>(
+    tx_id: usize,
+    rlp_data: &[u8],
+    rows: &mut Vec<RlpWitnessRow<Value<F>>>,
+    data_type: RlpDataType,
+    tag: RlpTxTag,
+    value: u8,
+    mut idx: usize,
+) -> usize {
+    if value == 0 {
+        assert_eq!(rlp_data[idx], 0x80);
+        rows.push(RlpWitnessRow {
+            tx_id,
+            index: idx + 1,
+            data_type,
+            value: rlp_data[idx],
+            value_acc: Value::known(F::zero()),
+            value_rlc_acc: Value::known(F::zero()),
+            tag,
+            tag_length: 1,
+            tag_rindex: 1,
+            length_acc: 0,
+        });
+        idx += 1;
+    } else {
+        // TODO: handle this case
+        panic!("should never happen");
+    }
+
+    idx
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn handle_u64<F: FieldExt>(
-    id: usize,
+    tx_id: usize,
     rlp_data: &[u8],
-    rows: &mut Vec<RlpWitnessRow<F>>,
+    rows: &mut Vec<RlpWitnessRow<Value<F>>>,
     data_type: RlpDataType,
-    tag: u8,
+    tag: RlpTxTag,
     value: U64,
     mut idx: usize,
 ) -> usize {
@@ -90,85 +124,66 @@ pub fn handle_u64<F: FieldExt>(
         .cloned()
         .collect::<Vec<u8>>();
 
-    if value_bytes.is_empty() {
-        assert!(
-            rlp_data[idx] == 128,
-            "RLP data mismatch({:?}): value == 128",
-            tag,
+    if value_bytes.len() == 1 && value_bytes[0] < 0x80 {
+        assert_eq!(
+            rlp_data[idx], value_bytes[0],
+            "RLP data mismatch({:?}): value < 0x80",
+            tag
         );
         rows.push(RlpWitnessRow {
-            id,
-            index: idx + 1,
-            data_type,
-            value: 128,
-            value_acc: F::from(128),
-            tag,
-            tag_length: 1,
-            tag_index: 1,
-            length_acc: 0,
-            ..Default::default()
-        });
-        idx += 1;
-    } else if value_bytes.len() == 1 && value_bytes[0] < 128 {
-        assert!(
-            rlp_data[idx] == value_bytes[0],
-            "RLP data mismatch({:?}): value < 128",
-            tag,
-        );
-        rows.push(RlpWitnessRow {
-            id,
+            tx_id,
             index: idx + 1,
             data_type,
             value: value_bytes[0],
-            value_acc: F::from(value_bytes[0] as u64),
+            value_acc: Value::known(F::from(value_bytes[0] as u64)),
+            value_rlc_acc: Value::known(F::zero()),
             tag,
             tag_length: 1,
-            tag_index: 1,
+            tag_rindex: 1,
             length_acc: 0,
-            ..Default::default()
         });
         idx += 1;
     } else {
-        assert!(
-            rlp_data[idx] as usize == 128 + value_bytes.len(),
+        assert_eq!(
+            rlp_data[idx] as usize,
+            0x80 + value_bytes.len(),
             "RLP data mismatch({:?}): len(value)",
-            tag,
+            tag
         );
         let tag_length = 1 + value_bytes.len();
         rows.push(RlpWitnessRow {
-            id,
+            tx_id,
             index: idx + 1,
             data_type,
             value: rlp_data[idx],
-            value_acc: F::from(rlp_data[idx] as u64),
+            value_acc: Value::known(F::zero()),
+            value_rlc_acc: Value::known(F::zero()),
             tag,
             tag_length,
-            tag_index: tag_length,
-            length_acc: value_bytes.len() as u64,
-            ..Default::default()
+            tag_rindex: tag_length,
+            length_acc: tag_length as u64 - 1,
         });
         idx += 1;
 
         let mut value_acc = F::zero();
         for (i, value_byte) in value_bytes.iter().enumerate() {
-            assert!(
-                rlp_data[idx] == *value_byte,
+            assert_eq!(
+                rlp_data[idx], *value_byte,
                 "RLP data mismatch({:?}): value[{}]",
-                tag,
-                i,
+                tag, i
             );
             value_acc = value_acc * F::from(256) + F::from(*value_byte as u64);
             rows.push(RlpWitnessRow {
-                id,
+                tx_id,
                 index: idx + 1,
                 data_type,
                 value: *value_byte,
-                value_acc,
+                value_acc: Value::known(value_acc),
+                value_rlc_acc: Value::known(F::zero()),
                 tag,
                 tag_length,
-                tag_index: tag_length - (1 + i),
+                tag_rindex: tag_length - (1 + i),
                 length_acc: 0,
-                ..Default::default()
             });
             idx += 1;
         }
@@ -179,12 +194,12 @@ pub fn handle_u64<F: FieldExt>(
 
 #[allow(clippy::too_many_arguments)]
 pub fn handle_u256<F: FieldExt>(
-    randomness: F,
+    randomness: Value<F>,
     id: usize,
     rlp_data: &[u8],
-    rows: &mut Vec<RlpWitnessRow<F>>,
+    rows: &mut Vec<RlpWitnessRow<Value<F>>>,
     data_type: RlpDataType,
-    tag: u8,
+    tag: RlpTxTag,
     value: U256,
     mut idx: usize,
 ) -> usize {
@@ -196,85 +211,68 @@ pub fn handle_u256<F: FieldExt>(
         .cloned()
         .collect::<Vec<u8>>();
 
-    if value_bytes.is_empty() {
-        assert!(
-            rlp_data[idx] == 128,
-            "RLP data mismatch({:?}): value == 128",
-            tag,
+    if value_bytes.len() == 1 && value_bytes[0] < 0x80 {
+        assert_eq!(
+            rlp_data[idx], value_bytes[0],
+            "RLP data mismatch({:?}): value < 0x80",
+            tag
         );
         rows.push(RlpWitnessRow {
-            id,
-            index: idx + 1,
-            data_type,
-            value: 128,
-            value_acc: F::from(128),
-            tag,
-            tag_length: 1,
-            tag_index: 1,
-            length_acc: 0,
-            ..Default::default()
-        });
-        idx += 1;
-    } else if value_bytes.len() == 1 && value_bytes[0] < 128 {
-        assert!(
-            rlp_data[idx] == value_bytes[0],
-            "RLP data mismatch({:?}): value < 128",
-            tag,
-        );
-        rows.push(RlpWitnessRow {
-            id,
+            tx_id: id,
             index: idx + 1,
             data_type,
             value: value_bytes[0],
-            value_acc: F::from(value_bytes[0] as u64),
+            value_acc: Value::known(F::from(value_bytes[0] as u64)),
+            value_rlc_acc: Value::known(F::zero()),
             tag,
             tag_length: 1,
-            tag_index: 1,
+            tag_rindex: 1,
             length_acc: 0,
-            ..Default::default()
         });
         idx += 1;
     } else {
-        assert!(
-            rlp_data[idx] as usize == 128 + value_bytes.len(),
+        assert_eq!(
+            rlp_data[idx] as usize,
+            0x80 + value_bytes.len(),
             "RLP data mismatch({:?}): len(value)",
-            tag,
+            tag
         );
         let tag_length = 1 + value_bytes.len();
         rows.push(RlpWitnessRow {
-            id,
+            tx_id: id,
             index: idx + 1,
             data_type,
             value: rlp_data[idx],
-            value_acc: F::from(rlp_data[idx] as u64),
+            value_acc: Value::known(F::zero()),
+            value_rlc_acc: Value::known(F::zero()),
             tag,
             tag_length,
-            tag_index: tag_length,
+            tag_rindex: tag_length,
             length_acc: value_bytes.len() as u64,
-            ..Default::default()
         });
         idx += 1;
 
-        let mut value_acc = F::zero();
+        let mut value_acc = Value::known(F::zero());
         for (i, value_byte) in value_bytes.iter().enumerate() {
-            assert!(
-                rlp_data[idx] == *value_byte,
+            assert_eq!(
+                rlp_data[idx], *value_byte,
                 "RLP data mismatch({:?}): value[{}]",
-                tag,
-                i,
+                tag, i
             );
-            value_acc = value_acc * randomness + F::from(*value_byte as u64);
+            value_acc = value_acc
+                .zip(randomness)
+                .map(|(value_acc, rand)| value_acc * rand + F::from(*value_byte as u64));
             rows.push(RlpWitnessRow {
-                id,
+                tx_id: id,
                 index: idx + 1,
                 data_type,
                 value: *value_byte,
                 value_acc,
+                value_rlc_acc: Value::known(F::zero()),
                 tag,
                 tag_length,
-                tag_index: tag_length - (1 + i),
+                tag_rindex: tag_length - (1 + i),
                 length_acc: 0,
-                ..Default::default()
             });
             idx += 1;
         }
@@ -285,58 +283,76 @@ pub fn handle_u256<F: FieldExt>(
 
 #[allow(clippy::too_many_arguments)]
 pub fn handle_address<F: FieldExt>(
-    id: usize,
+    tx_id: usize,
     rlp_data: &[u8],
-    rows: &mut Vec<RlpWitnessRow<F>>,
+    rows: &mut Vec<RlpWitnessRow<Value<F>>>,
     data_type: RlpDataType,
-    prefix_tag: u8,
-    tag: u8,
+    tag: RlpTxTag,
     value: Address,
     mut idx: usize,
 ) -> usize {
     let value_bytes = value.as_fixed_bytes();
 
-    assert!(
-        rlp_data[idx] == 148,
-        "RLP data mismatch({:?}): value",
-        prefix_tag,
-    );
-    rows.push(RlpWitnessRow {
-        id,
-        index: idx + 1,
-        data_type,
-        value: 148,
-        value_acc: F::from(148),
-        tag: prefix_tag,
-        tag_length: 1,
-        tag_index: 1,
-        length_acc: 20,
-        ..Default::default()
-    });
-    idx += 1;
-
-    let mut value_acc = F::zero();
-    for (i, value_byte) in value_bytes.iter().enumerate() {
-        assert!(
-            rlp_data[idx] == *value_byte,
-            "RLP data mismatch({:?}): value[{}]",
-            tag,
-            i,
+    if value == Address::zero() {
+        assert_eq!(
+            rlp_data[idx], 0x80,
+            "RLP data mismatch({:?}): value = {}",
+            tag, rlp_data[idx]
         );
-        value_acc = value_acc * F::from(256) + F::from(*value_byte as u64);
         rows.push(RlpWitnessRow {
-            id,
+            tx_id,
             index: idx + 1,
             data_type,
-            value: *value_byte,
-            value_acc,
+            value: rlp_data[idx],
+            value_acc: Value::known(F::zero()),
+            value_rlc_acc: Value::known(F::zero()),
             tag,
-            tag_length: 20,
-            tag_index: 20 - i,
+            tag_length: 1,
+            tag_rindex: 1,
             length_acc: 0,
-            ..Default::default()
+        });
+    } else {
+        assert_eq!(
+            rlp_data[idx], 0x94,
+            "RLP data mismatch({:?}): value = {}",
+            tag, rlp_data[idx]
+        );
+        rows.push(RlpWitnessRow {
+            tx_id,
+            index: idx + 1,
+            data_type,
+            value: rlp_data[idx],
+            value_acc: Value::known(F::zero()),
+            value_rlc_acc: Value::known(F::zero()),
+            tag,
+            tag_length: 21,
+            tag_rindex: 21,
+            length_acc: 20,
         });
         idx += 1;
+        let mut value_acc = F::zero();
+        assert_eq!(value_bytes.len(), 20);
+        for (i, value_byte) in value_bytes.iter().enumerate() {
+            assert_eq!(
+                rlp_data[idx], *value_byte,
+                "RLP data mismatch({:?}): value[{}]",
+                tag, i
+            );
+            value_acc = value_acc * F::from(256) + F::from(*value_byte as u64);
+            rows.push(RlpWitnessRow {
+                tx_id,
+                index: idx + 1,
+                data_type,
+                value: *value_byte,
+                value_acc: Value::known(value_acc),
+                value_rlc_acc: Value::known(F::zero()),
+                tag,
+                tag_length: 21,
+                tag_rindex: 21 - (i + 1),
+                length_acc: 0,
+            });
+            idx += 1;
+        }
     }
 
     idx
@@ -344,167 +360,160 @@ pub fn handle_address<F: FieldExt>(
 
 #[allow(clippy::too_many_arguments)]
 pub fn handle_bytes<F: FieldExt>(
-    randomness: F,
-    id: usize,
+    randomness: Value<F>,
+    tx_id: usize,
     rlp_data: &[u8],
-    rows: &mut Vec<RlpWitnessRow<F>>,
+    rows: &mut Vec<RlpWitnessRow<Value<F>>>,
     data_type: RlpDataType,
-    prefix_tag: u8,
-    tag: u8,
+    prefix_tag: RlpTxTag,
+    tag: RlpTxTag,
     call_data: &[u8],
-    call_data_gas_cost: u64,
     mut idx: usize,
 ) -> usize {
     let length = call_data.len();
 
-    if length == 0 {
-        assert!(
-            rlp_data[idx] == 128,
-            "RLP data mismatch({:?}): len(call_data) == 0",
-            prefix_tag,
-        );
+    if length == 1 && call_data[0] < 0x80 {
+        assert_eq!(rlp_data[idx], call_data[0]);
         rows.push(RlpWitnessRow {
-            id,
+            tx_id,
             index: idx + 1,
             data_type,
-            value: 128,
-            value_acc: F::from(128),
-            value_acc_rlc: F::from(128),
-            tag: prefix_tag,
+            value: call_data[0],
+            value_acc: Value::known(F::from(call_data[0] as u64)),
+            value_rlc_acc: Value::known(F::from(call_data[0] as u64)),
+            tag,
             tag_length: 1,
-            tag_index: 1,
+            tag_rindex: 1,
             length_acc: 0,
-            ..Default::default()
         });
         idx += 1;
-        return idx;
-    }
-
-    if length < 56 {
-        assert!(
-            rlp_data[idx] as usize == 128 + length,
+    } else if length < 56 {
+        assert_eq!(
+            rlp_data[idx] as usize,
+            0x80 + length,
             "RLP data mismatch({:?}): len(call_data) + 128",
-            prefix_tag,
+            prefix_tag
         );
         rows.push(RlpWitnessRow {
-            id,
+            tx_id,
             index: idx + 1,
             data_type,
-            value: (128 + length) as u8,
-            value_acc: F::from((128 + length) as u64),
+            value: (0x80 + length) as u8,
+            value_acc: Value::known(F::from((128 + length) as u64)),
+            value_rlc_acc: Value::known(F::zero()),
             tag: prefix_tag,
             tag_length: 1,
-            tag_index: 1,
+            tag_rindex: 1,
             length_acc: length as u64,
-            ..Default::default()
         });
         idx += 1;
 
-        let mut value_acc_rlc = F::zero();
+        let mut value_acc_rlc = Value::known(F::zero());
         for (i, data_byte) in call_data.iter().enumerate() {
-            assert!(
-                rlp_data[idx] == *data_byte,
+            assert_eq!(
+                rlp_data[idx], *data_byte,
                 "RLP data mismatch({:?}): value[{}]",
-                tag,
-                i,
+                tag, i
             );
-            value_acc_rlc = value_acc_rlc * randomness + F::from(*data_byte as u64);
+            value_acc_rlc = value_acc_rlc
+                .zip(randomness)
+                .map(|(acc, rand)| acc * rand + F::from(*data_byte as u64));
             rows.push(RlpWitnessRow {
-                id,
+                tx_id,
                 index: idx + 1,
                 data_type,
                 value: *data_byte,
-                value_acc: F::from(*data_byte as u64),
-                value_acc_rlc,
+                value_acc: Value::known(F::from(*data_byte as u64)),
+                value_rlc_acc: value_acc_rlc,
                 tag,
                 tag_length: length,
-                tag_index: length - i,
+                tag_rindex: length - i,
                 length_acc: 0,
-                call_data_length: Some(call_data.len() as u64),
-                call_data_gas_cost: Some(call_data_gas_cost),
             });
             idx += 1;
         }
-        return idx;
-    }
-
-    // length > 55.
-    let length_of_length = 8 - length.leading_zeros() as usize / 8;
-    assert!(
-        rlp_data[idx] as usize == 183 + length_of_length,
-        "RLP data mismatch({:?}): len_of_len(call_data) + 183",
-        prefix_tag,
-    );
-    let tag_length = 1 + length_of_length;
-    rows.push(RlpWitnessRow {
-        id,
-        index: idx + 1,
-        data_type,
-        value: (183 + length_of_length) as u8,
-        value_acc: F::from((183 + length_of_length) as u64),
-        tag: prefix_tag,
-        tag_length,
-        tag_index: tag_length,
-        length_acc: 0,
-        ..Default::default()
-    });
-    idx += 1;
-
-    let length_bytes = length.to_be_bytes();
-    let length_bytes = length_bytes
-        .iter()
-        .skip_while(|b| b.is_zero())
-        .cloned()
-        .collect::<Vec<u8>>();
-    let mut length_acc = 0;
-    for (i, length_byte) in length_bytes.iter().enumerate() {
-        assert!(
-            rlp_data[idx] == *length_byte,
-            "RLP data mismatch({:?}): length[{}]",
-            prefix_tag,
-            i,
+    } else {
+        // length > 55.
+        let length_of_length = 8 - length.leading_zeros() as usize / 8;
+        assert_eq!(
+            rlp_data[idx] as usize,
+            0xb7 + length_of_length,
+            "RLP data mismatch({:?}): len_of_len(call_data) + 0xb7",
+            prefix_tag
         );
-        length_acc = length_acc * 256 + (*length_byte as u64);
+        let tag_length = 1 + length_of_length;
         rows.push(RlpWitnessRow {
-            id,
+            tx_id,
             index: idx + 1,
             data_type,
-            value: *length_byte,
-            value_acc: F::from(length_acc as u64),
+            value: rlp_data[idx],
+            value_acc: Value::known(F::zero()),
+            value_rlc_acc: Value::known(F::zero()),
             tag: prefix_tag,
             tag_length,
-            tag_index: tag_length - (1 + i),
-            length_acc,
-            ..Default::default()
+            tag_rindex: tag_length,
+            length_acc: 0,
         });
         idx += 1;
+
+        let length_bytes = length.to_be_bytes();
+        let length_bytes = length_bytes
+            .iter()
+            .skip_while(|b| b.is_zero())
+            .cloned()
+            .collect::<Vec<u8>>();
+        assert_eq!(length_bytes.len(), length_of_length);
+
+        let mut length_acc = 0;
+        for (i, length_byte) in length_bytes.iter().enumerate() {
+            assert_eq!(
+                rlp_data[idx], *length_byte,
+                "RLP data mismatch({:?}): length[{}]",
+                prefix_tag, i
+            );
+            length_acc = length_acc * 256 + (*length_byte as u64);
+            rows.push(RlpWitnessRow {
+                tx_id,
+                index: idx + 1,
+                data_type,
+                value: *length_byte,
+                value_acc: Value::known(F::from(length_acc as u64)),
+                value_rlc_acc: Value::known(F::zero()),
+                tag: prefix_tag,
+                tag_length,
+                tag_rindex: tag_length - (1 + i),
+                length_acc,
+            });
+            idx += 1;
+        }
+        assert_eq!(length_acc as usize, length);
+
+        let tag_length = call_data.len();
+        let mut value_rlc_acc = Value::known(F::zero());
+        for (i, data_byte) in call_data.iter().enumerate() {
+            assert_eq!(
+                rlp_data[idx], *data_byte,
+                "RLP data mismatch({:?}): data[{}]",
+                tag, i
+            );
+            value_rlc_acc = value_rlc_acc
+                .zip(randomness)
+                .map(|(acc, rand)| acc * rand + F::from(*data_byte as u64));
+            rows.push(RlpWitnessRow {
+                tx_id,
+                index: idx + 1,
+                data_type,
+                value: *data_byte,
+                value_acc: Value::known(F::from(*data_byte as u64)),
+                value_rlc_acc,
+                tag,
+                tag_length,
+                tag_rindex: tag_length - i,
+                length_acc: 0,
+            });
+            idx += 1;
+        }
     }
 
-    let tag_length = call_data.len();
-    let mut value_acc_rlc = F::zero();
-    for (i, data_byte) in call_data.iter().enumerate() {
-        assert!(
-            rlp_data[idx] == *data_byte,
-            "RLP data mismatch({:?}): data[{}]",
-            tag,
-            i,
-        );
-        value_acc_rlc = value_acc_rlc * randomness + F::from(*data_byte as u64);
-        rows.push(RlpWitnessRow {
-            id,
-            index: idx + 1,
-            data_type,
-            value: *data_byte,
-            value_acc: F::from(*data_byte as u64),
-            value_acc_rlc,
-            tag,
-            tag_length,
-            tag_index: tag_length - i,
-            length_acc: 0,
-            call_data_length: Some(call_data.len() as u64),
-            call_data_gas_cost: Some(call_data_gas_cost),
-        });
-        idx += 1;
-    }
     idx
 }

@@ -3,7 +3,7 @@ use crate::table::{AccountFieldTag, ProofType};
 use eth_types::{Address, Field, ToLittleEndian, ToScalar, Word};
 use halo2_proofs::circuit::Value;
 use itertools::Itertools;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// An MPT update whose validility is proved by the MptCircuit
 #[derive(Debug, Clone, Copy)]
@@ -15,9 +15,25 @@ pub struct MptUpdate {
     new_root: Word,
 }
 
+impl MptUpdate {
+    fn proof_type<F: Field>(&self) -> F {
+        let proof_type = match self.key {
+            Key::AccountStorage { .. } => {
+                if self.old_value.is_zero() && self.new_value.is_zero() {
+                    ProofType::StorageDoesNotExist
+                } else {
+                    ProofType::StorageChanged
+                }
+            }
+            Key::Account { field_tag, .. } => field_tag.into(),
+        };
+        F::from(proof_type as u64)
+    }
+}
+
 /// All the MPT updates in the MptCircuit, accessible by their key
-#[derive(Default, Clone)]
-pub struct MptUpdates(HashMap<Key, MptUpdate>);
+#[derive(Default, Clone, Debug)]
+pub struct MptUpdates(BTreeMap<Key, MptUpdate>);
 
 /// The field element encoding of an MPT update, which is used by the MptTable
 #[derive(Debug, Clone, Copy)]
@@ -29,7 +45,7 @@ impl MptUpdates {
     }
 
     pub(crate) fn mock_from(rows: &[Rw]) -> Self {
-        let map: HashMap<_, _> = rows
+        let map: BTreeMap<_, _> = rows
             .iter()
             .group_by(|row| key(row))
             .into_iter()
@@ -69,7 +85,7 @@ impl MptUpdates {
                 MptUpdateRow([
                     Value::known(update.key.address()),
                     randomness.map(|randomness| update.key.storage_key(randomness)),
-                    Value::known(update.key.proof_type()),
+                    Value::known(update.proof_type()),
                     new_root,
                     old_root,
                     new_value,
@@ -84,7 +100,7 @@ impl MptUpdate {
     pub(crate) fn value_assignments<F: Field>(&self, word_randomness: F) -> (F, F) {
         let assign = |x: Word| match self.key {
             Key::Account {
-                field_tag: AccountFieldTag::Nonce,
+                field_tag: AccountFieldTag::Nonce | AccountFieldTag::NonExisting,
                 ..
             } => x.to_scalar().unwrap(),
             _ => RandomLinearCombination::random_linear_combine(x.to_le_bytes(), word_randomness),
@@ -107,7 +123,7 @@ impl MptUpdate {
     }
 }
 
-#[derive(Eq, PartialEq, Hash, Clone, Debug, Copy)]
+#[derive(Eq, PartialEq, Hash, Clone, Debug, Copy, PartialOrd, Ord)]
 enum Key {
     Account {
         address: Address,
@@ -127,13 +143,6 @@ impl Key {
                 address.to_scalar().unwrap()
             }
         }
-    }
-    fn proof_type<F: Field>(&self) -> F {
-        let proof_type = match self {
-            Self::AccountStorage { .. } => ProofType::StorageChanged,
-            Self::Account { field_tag, .. } => (*field_tag).into(),
-        };
-        F::from(proof_type as u64)
     }
     fn storage_key<F: Field>(&self, randomness: F) -> F {
         match self {

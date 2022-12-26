@@ -13,6 +13,7 @@
 
 pub mod binary_number;
 pub mod comparator;
+pub mod comparison;
 pub mod evm_word;
 pub mod is_equal;
 pub mod is_zero;

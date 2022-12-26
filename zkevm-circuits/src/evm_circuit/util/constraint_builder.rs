@@ -12,6 +12,7 @@ use crate::{
     util::{build_tx_log_expression, Expr},
 };
 use eth_types::Field;
+use gadgets::util::{and, not};
 use halo2_proofs::{
     circuit::Value,
     plonk::{
@@ -26,8 +27,8 @@ use super::{rlc, CachedRegion, CellType, StoredExpression};
 // It aims to cap `extended_k` to 2, which allows constraint degree to 2^2+1,
 // but each ExecutionGadget has implicit selector degree 3, so here it only
 // allows 2^2+1-3 = 2.
-const MAX_DEGREE: usize = 5;
-const IMPLICIT_DEGREE: usize = 3;
+const MAX_DEGREE: usize = 9;
+const IMPLICIT_DEGREE: usize = 4;
 
 pub(crate) enum Transition<T> {
     Same,
@@ -639,14 +640,14 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
     pub(crate) fn block_lookup(
         &mut self,
         tag: Expression<F>,
-        number: Option<Expression<F>>,
+        number: Expression<F>,
         val: Expression<F>,
     ) {
         self.add_lookup(
             "Block lookup",
             Lookup::Block {
                 field_tag: tag,
-                number: number.unwrap_or_else(|| 0.expr()),
+                number,
                 value: val,
             },
         );
@@ -721,22 +722,33 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
 
         self.rw_lookup(name, true.expr(), tag, values.clone());
 
+        // Revert if is_persistent is 0
         if let Some(reversion_info) = reversion_info {
-            // Revert if is_persistent is 0
-            self.condition(1.expr() - reversion_info.is_persistent(), |cb| {
-                let name = format!("{} with reversion", name);
-                cb.rw_lookup_with_counter(
-                    &name,
-                    reversion_info.rw_counter_of_reversion(),
-                    true.expr(),
-                    tag,
-                    RwValues {
-                        value_prev: values.value,
-                        value: values.value_prev,
-                        ..values
-                    },
-                )
-            });
+            // To allow conditional reversible writes, we extract the pre-existing condition
+            // here if it exists, and then reset it afterwards.
+            let condition = self.condition.clone();
+            self.condition = None;
+            self.condition(
+                and::expr(&[
+                    condition.clone().unwrap_or_else(|| 1.expr()),
+                    not::expr(reversion_info.is_persistent()),
+                ]),
+                |cb| {
+                    let name = format!("{} with reversion", name);
+                    cb.rw_lookup_with_counter(
+                        &name,
+                        reversion_info.rw_counter_of_reversion(),
+                        true.expr(),
+                        tag,
+                        RwValues {
+                            value_prev: values.value,
+                            value: values.value_prev,
+                            ..values
+                        },
+                    )
+                },
+            );
+            self.condition = condition;
         }
     }
 
@@ -764,6 +776,29 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
                 0.expr(),
             ),
             reversion_info,
+        );
+    }
+
+    pub(crate) fn account_access_list_read(
+        &mut self,
+        tx_id: Expression<F>,
+        account_address: Expression<F>,
+        value: Expression<F>,
+    ) {
+        self.rw_lookup(
+            "account access list read",
+            false.expr(),
+            RwTableTag::TxAccessListAccount,
+            RwValues::new(
+                tx_id,
+                account_address,
+                0.expr(),
+                0.expr(),
+                value.clone(),
+                value,
+                0.expr(),
+                0.expr(),
+            ),
         );
     }
 
@@ -952,6 +987,16 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
         let cell = self.query_cell();
         self.call_context_lookup(false.expr(), call_id, field_tag, cell.expr());
         cell
+    }
+
+    pub(crate) fn call_context_as_word(
+        &mut self,
+        call_id: Option<Expression<F>>,
+        field_tag: CallContextFieldTag,
+    ) -> Word<F> {
+        let word = self.query_word();
+        self.call_context_lookup(false.expr(), call_id, field_tag, word.expr());
+        word
     }
 
     pub(crate) fn call_context_lookup(

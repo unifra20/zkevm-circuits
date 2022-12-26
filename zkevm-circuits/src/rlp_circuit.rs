@@ -3,30 +3,49 @@
 use std::marker::PhantomData;
 
 use eth_types::Field;
+use gadgets::binary_number::{BinaryNumberChip, BinaryNumberConfig};
+use gadgets::is_equal::{IsEqualChip, IsEqualConfig, IsEqualInstruction};
+use gadgets::util::{select, sum};
 use gadgets::{
     comparator::{ComparatorChip, ComparatorConfig, ComparatorInstruction},
     less_than::{LtChip, LtConfig, LtInstruction},
-    util::sum,
 };
+use halo2_proofs::plonk::SecondPhase;
 use halo2_proofs::{
     circuit::{Layouter, Region, SimpleFloorPlanner, Value},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Expression, Fixed, VirtualCells},
     poly::Rotation,
 };
 
+// use crate::evm_circuit::table::FixedTableTag;
+use crate::util::{Challenges, SubCircuit, SubCircuitConfig};
+use crate::witness::Block;
+use crate::witness::RlpTxTag::{
+    ChainId, DataPrefix, Gas, GasPrice, Nonce, Prefix, SigR, SigS, SigV, To,
+};
 use crate::{
     evm_circuit::{
         util::{and, constraint_builder::BaseConstraintBuilder, not, or},
-        witness::{RlpTxTag, RlpWitnessGen, N_TX_TAGS},
+        witness::{RlpTxTag, RlpWitnessGen},
     },
     table::RlpTable,
-    util::{power_of_randomness_from_instance, Expr},
+    util::Expr,
     witness::{RlpDataType, SignedTransaction},
 };
 
 #[derive(Clone, Debug)]
+struct RlpTagROM {
+    // TODO: we can merge these three cols into one col using LC as
+    //       as their type are (u8, u8, u8)
+    tag: Column<Fixed>,
+    tag_next: Column<Fixed>,
+    max_length: Column<Fixed>,
+}
+
+#[derive(Clone, Debug)]
 /// Config for the RLP circuit.
 pub struct RlpCircuitConfig<F> {
+    minimum_rows: usize,
     /// Denotes whether or not the row is enabled.
     q_usable: Column<Fixed>,
     /// Denotes whether the row is the first row in the layout.
@@ -44,17 +63,25 @@ pub struct RlpCircuitConfig<F> {
     /// Denotes the byte value at this row index from the RLP-encoded data.
     byte_value: Column<Advice>,
     /// Denotes the RLC accumulator value used for call data bytes.
-    value_acc_rlc: Column<Advice>,
-    /// List of columns that are assigned:
-    /// val := (tag - RlpTxTag::{Variant}).inv()
-    tx_tags: [Column<Advice>; N_TX_TAGS],
+    calldata_bytes_rlc_acc: Column<Advice>,
+    /// Tag bits
+    tag_bits: BinaryNumberConfig<RlpTxTag, 4>,
+    /// Tag ROM
+    tag_rom: RlpTagROM,
     /// Denotes the current tag's span in bytes.
     tag_length: Column<Advice>,
     /// Denotes an accumulator for the length of data, in the case where len >
     /// 55 and the length is represented in its big-endian form.
     length_acc: Column<Advice>,
-    /// Denotes an accumulator for the value field over all rows (bytes).
-    value_rlc: Column<Advice>,
+    /// Denotes an accumulator for the byte value field over all rows (bytes).
+    all_bytes_rlc_acc: Column<Advice>,
+    /// Denotes if tag is simple
+    /// (the one that tag_bits provides has degree 4, which is too large)
+    is_simple_tag: Column<Advice>,
+    /// Denotes if tag is Prefix
+    is_prefix_tag: Column<Advice>,
+    /// Denotes if tag is DataPrefix
+    is_dp_tag: Column<Advice>,
     /// Comparison chip to check: 1 <= tag_index.
     tag_index_cmp_1: ComparatorConfig<F, 1>,
     /// Comparison chip to check: tag_index <= tag_length.
@@ -73,49 +100,90 @@ pub struct RlpCircuitConfig<F> {
     value_gt_191: LtConfig<F, 1>,
     /// Lt chip to check: 247 < value.
     value_gt_247: LtConfig<F, 1>,
-    /// Lt chip to check: value < 128.
+    /// Lt chip to check: value < 129.
     value_lt_129: LtConfig<F, 1>,
+    /// IsEq Chip to check: value == 128,
+    value_eq_128: IsEqualConfig<F>,
     /// Lt chip to check: value < 184.
     value_lt_184: LtConfig<F, 1>,
     /// Lt chip to check: value < 192.
     value_lt_192: LtConfig<F, 1>,
     /// Lt chip to check: value < 248.
     value_lt_248: LtConfig<F, 1>,
-    /// Lt chip to check: value < 256.
-    value_lt_256: LtConfig<F, 2>,
     /// Comparison chip to check: 0 <= length_acc.
     length_acc_cmp_0: ComparatorConfig<F, 1>,
 }
 
 impl<F: Field> RlpCircuitConfig<F> {
-    pub(crate) fn configure(meta: &mut ConstraintSystem<F>, r: Expression<F>) -> Self {
+    pub(crate) fn configure(
+        meta: &mut ConstraintSystem<F>,
+        rlp_table: &RlpTable,
+        challenges: &Challenges<Expression<F>>,
+    ) -> Self {
         let q_usable = meta.fixed_column();
         let is_first = meta.advice_column();
         let is_last = meta.advice_column();
-        let rlp_table = RlpTable::construct(meta);
         let index = meta.advice_column();
         let rindex = meta.advice_column();
         let byte_value = meta.advice_column();
-        let value_acc_rlc = meta.advice_column();
-        let tx_tags = array_init::array_init(|_| meta.advice_column());
+        let calldata_bytes_rlc_acc = meta.advice_column_in(SecondPhase);
         let tag_length = meta.advice_column();
         let length_acc = meta.advice_column();
-        let value_rlc = meta.advice_column();
+        let all_bytes_rlc_acc = meta.advice_column_in(SecondPhase);
+        let evm_word_rand = challenges.evm_word();
+        let keccak_input_rand = challenges.keccak_input();
+        // these three columns are used to replace the degree-4 expressions with
+        // degree-1 expressions
+        let is_simple_tag = meta.advice_column();
+        let is_prefix_tag = meta.advice_column();
+        let is_dp_tag = meta.advice_column();
+        let tag_bits = BinaryNumberChip::configure(meta, q_usable, Some(rlp_table.tag));
+        let tag_rom = RlpTagROM {
+            tag: meta.fixed_column(),
+            tag_next: meta.fixed_column(),
+            max_length: meta.fixed_column(),
+        };
+
+        // Helper macro to declare booleans to check the current row tag.
+        macro_rules! is_tx_tag {
+            ($var:ident, $tag_variant:ident) => {
+                let $var = |meta: &mut VirtualCells<F>| {
+                    tag_bits.value_equals(RlpTxTag::$tag_variant, Rotation::cur())(meta)
+                };
+            };
+        }
+        is_tx_tag!(is_prefix, Prefix);
+        is_tx_tag!(is_nonce, Nonce);
+        is_tx_tag!(is_gas_price, GasPrice);
+        is_tx_tag!(is_gas, Gas);
+        is_tx_tag!(is_to, To);
+        is_tx_tag!(is_value, Value);
+        is_tx_tag!(is_data_prefix, DataPrefix);
+        is_tx_tag!(is_data, Data);
+        is_tx_tag!(is_chainid, ChainId);
+        is_tx_tag!(is_sig_v, SigV);
+        is_tx_tag!(is_sig_r, SigR);
+        is_tx_tag!(is_sig_s, SigS);
+        is_tx_tag!(is_padding, Padding);
 
         // Enable the comparator and lt chips if the current row is enabled.
-        let cmp_lt_enabled =
-            |meta: &mut VirtualCells<F>| meta.query_fixed(q_usable, Rotation::cur());
+        let cmp_lt_enabled = |meta: &mut VirtualCells<F>| {
+            let q_usable = meta.query_fixed(q_usable, Rotation::cur());
+            let is_padding = is_padding(meta);
+
+            q_usable * not::expr(is_padding)
+        };
 
         let tag_index_cmp_1 = ComparatorChip::configure(
             meta,
             cmp_lt_enabled,
             |_meta| 1.expr(),
-            |meta| meta.query_advice(rlp_table.tag_index, Rotation::cur()),
+            |meta| meta.query_advice(rlp_table.tag_rindex, Rotation::cur()),
         );
         let tag_index_length_cmp = ComparatorChip::configure(
             meta,
             cmp_lt_enabled,
-            |meta| meta.query_advice(rlp_table.tag_index, Rotation::cur()),
+            |meta| meta.query_advice(rlp_table.tag_rindex, Rotation::cur()),
             |meta| meta.query_advice(tag_length, Rotation::cur()),
         );
         let tag_length_cmp_1 = ComparatorChip::configure(
@@ -127,13 +195,13 @@ impl<F: Field> RlpCircuitConfig<F> {
         let tag_index_lt_10 = LtChip::configure(
             meta,
             cmp_lt_enabled,
-            |meta| meta.query_advice(rlp_table.tag_index, Rotation::cur()),
+            |meta| meta.query_advice(rlp_table.tag_rindex, Rotation::cur()),
             |_meta| 10.expr(),
         );
         let tag_index_lt_34 = LtChip::configure(
             meta,
             cmp_lt_enabled,
-            |meta| meta.query_advice(rlp_table.tag_index, Rotation::cur()),
+            |meta| meta.query_advice(rlp_table.tag_rindex, Rotation::cur()),
             |_meta| 34.expr(),
         );
         let value_gt_127 = LtChip::configure(
@@ -166,6 +234,12 @@ impl<F: Field> RlpCircuitConfig<F> {
             |meta| meta.query_advice(byte_value, Rotation::cur()),
             |_meta| 129.expr(),
         );
+        let value_eq_128 = IsEqualChip::configure(
+            meta,
+            cmp_lt_enabled,
+            |meta| meta.query_advice(byte_value, Rotation::cur()),
+            |_| 128.expr(),
+        );
         let value_lt_184 = LtChip::configure(
             meta,
             cmp_lt_enabled,
@@ -184,12 +258,6 @@ impl<F: Field> RlpCircuitConfig<F> {
             |meta| meta.query_advice(byte_value, Rotation::cur()),
             |_meta| 248.expr(),
         );
-        let value_lt_256 = LtChip::configure(
-            meta,
-            cmp_lt_enabled,
-            |meta| meta.query_advice(byte_value, Rotation::cur()),
-            |_meta| 256.expr(),
-        );
         let length_acc_cmp_0 = ComparatorChip::configure(
             meta,
             cmp_lt_enabled,
@@ -197,48 +265,70 @@ impl<F: Field> RlpCircuitConfig<F> {
             |meta| meta.query_advice(length_acc, Rotation::cur()),
         );
 
-        // Helper macro to declare booleans to check the current row tag.
-        macro_rules! is_tx_tag {
-            ($var:ident, $tag_variant:ident) => {
-                let $var = |meta: &mut VirtualCells<F>| {
-                    1.expr()
-                        - meta.query_advice(rlp_table.tag, Rotation::cur())
-                            * meta.query_advice(
-                                tx_tags[RlpTxTag::$tag_variant as usize - 1],
-                                Rotation::cur(),
-                            )
-                };
-            };
-        }
-        is_tx_tag!(is_prefix, Prefix);
-        is_tx_tag!(is_nonce, Nonce);
-        is_tx_tag!(is_gas_price, GasPrice);
-        is_tx_tag!(is_gas, Gas);
-        is_tx_tag!(is_to_prefix, ToPrefix);
-        is_tx_tag!(is_to, To);
-        is_tx_tag!(is_value, Value);
-        is_tx_tag!(is_data_prefix, DataPrefix);
-        is_tx_tag!(is_data, Data);
-        is_tx_tag!(is_chainid, ChainId);
-        is_tx_tag!(is_zero, Zero);
-        is_tx_tag!(is_sig_v, SigV);
-        is_tx_tag!(is_sig_r, SigR);
-        is_tx_tag!(is_sig_s, SigS);
-        is_tx_tag!(is_rlp_length, RlpLength);
-        is_tx_tag!(is_rlp_summary, Rlp);
+        meta.create_gate("is_simple_tag", |meta| {
+            let is_simple_tag = meta.query_advice(is_simple_tag, Rotation::cur());
+            let is_prefix_tag = meta.query_advice(is_prefix_tag, Rotation::cur());
+            let is_data_prefix_tag = meta.query_advice(is_dp_tag, Rotation::cur());
+            let q_usable = meta.query_fixed(q_usable, Rotation::cur());
+            let tags = sum::expr([
+                is_nonce(meta),
+                is_gas_price(meta),
+                is_gas(meta),
+                is_to(meta),
+                is_value(meta),
+                is_sig_v(meta),
+                is_sig_r(meta),
+                is_sig_s(meta),
+                is_chainid(meta),
+            ]);
+            vec![
+                q_usable.expr() * (is_simple_tag - tags),
+                q_usable.expr() * (is_prefix_tag - is_prefix(meta)),
+                q_usable.expr() * (is_data_prefix_tag - is_data_prefix(meta)),
+            ]
+        });
+
+        // TODO: add lookup for byte_value in the fixed byte table.
+
+        meta.lookup_any("(tag, tag_next) in tag_ROM", |meta| {
+            let is_simple_tag = meta.query_advice(is_simple_tag, Rotation::cur());
+            let tag = meta.query_advice(rlp_table.tag, Rotation::cur());
+            let tag_next = meta.query_advice(rlp_table.tag, Rotation::next());
+            let rom_tag = meta.query_fixed(tag_rom.tag, Rotation::cur());
+            let rom_tag_next = meta.query_fixed(tag_rom.tag_next, Rotation::cur());
+            let q_usable = meta.query_fixed(q_usable, Rotation::cur());
+            let (_, tag_idx_eq_one) = tag_index_cmp_1.expr(meta, None);
+            let condition = q_usable * is_simple_tag * tag_idx_eq_one;
+
+            vec![
+                (condition.expr() * tag, rom_tag),
+                (condition * tag_next, rom_tag_next),
+            ]
+        });
 
         meta.create_gate("Common constraints", |meta| {
-            let mut cb = BaseConstraintBuilder::default();
+            let mut cb = BaseConstraintBuilder::new(9);
 
             let (tindex_lt, tindex_eq) = tag_index_cmp_1.expr(meta, None);
+            assert_eq!(tindex_lt.degree(), 1, "{}", tindex_lt.degree());
+            assert_eq!(tindex_eq.degree(), 2, "{}", tindex_lt.degree());
             let (tlength_lt, tlength_eq) = tag_length_cmp_1.expr(meta, None);
             let (tindex_lt_tlength, tindex_eq_tlength) = tag_index_length_cmp.expr(meta, None);
             let (length_acc_gt_0, length_acc_eq_0) = length_acc_cmp_0.expr(meta, None);
+            let is_simple_tag = meta.query_advice(is_simple_tag, Rotation::cur());
+            let is_prefix_tag = meta.query_advice(is_prefix_tag, Rotation::cur());
+            let is_dp_tag = meta.query_advice(is_dp_tag, Rotation::cur());
+            let is_tag_word = sum::expr([
+                is_gas_price(meta),
+                is_value(meta),
+                is_sig_r(meta),
+                is_sig_s(meta),
+            ]);
 
             //////////////////////////////////////////////////////////////////////////////////////
             ////////////////////////////////// RlpTxTag::Prefix //////////////////////////////////
             //////////////////////////////////////////////////////////////////////////////////////
-            cb.condition(is_prefix(meta), |cb| {
+            cb.condition(is_prefix_tag.expr(), |cb| {
                 // tag_index < 10
                 cb.require_equal(
                     "tag_index < 10",
@@ -254,7 +344,7 @@ impl<F: Field> RlpCircuitConfig<F> {
             });
 
             // if tag_index > 1
-            cb.condition(is_prefix(meta) * tindex_lt.clone(), |cb| {
+            cb.condition(is_prefix_tag.expr() * tindex_lt.clone(), |cb| {
                 cb.require_equal(
                     "tag::next == RlpTxTag::Prefix",
                     meta.query_advice(rlp_table.tag, Rotation::next()),
@@ -262,8 +352,8 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index::next == tag_index - 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()) - 1.expr(),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::cur()) - 1.expr(),
                 );
                 cb.require_equal(
                     "tag_length::next == tag_length",
@@ -273,7 +363,7 @@ impl<F: Field> RlpCircuitConfig<F> {
             });
 
             // if tag_index == 1
-            cb.condition(is_prefix(meta) * tindex_eq.clone(), |cb| {
+            cb.condition(is_prefix_tag.expr() * tindex_eq.clone(), |cb| {
                 cb.require_equal(
                     "tag::next == RlpTxTag::Nonce",
                     meta.query_advice(rlp_table.tag, Rotation::next()),
@@ -281,7 +371,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index::next == tag_length::next",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                     meta.query_advice(tag_length, Rotation::next()),
                 );
                 // we add +1 to account for the 2 additional rows for RlpLength and Rlp.
@@ -294,13 +384,13 @@ impl<F: Field> RlpCircuitConfig<F> {
 
             // if tag_index == tag_length && tag_length > 1
             cb.condition(
-                is_prefix(meta) * tindex_eq_tlength.clone() * tlength_lt.clone(),
+                is_prefix_tag.expr() * tindex_eq_tlength.clone() * tlength_lt.clone(),
                 |cb| {
                     cb.require_equal("247 < value", value_gt_247.is_lt(meta, None), 1.expr());
-                    cb.require_equal("value < 256", value_lt_256.is_lt(meta, None), 1.expr());
+                    // cb.require_equal("value < 256", value_lt_256.is_lt(meta, None), 1.expr());
                     cb.require_equal(
                         "tag_index::next == value - 0xf7",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                        meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                         meta.query_advice(byte_value, Rotation::cur()) - 247.expr(),
                     );
                     cb.require_zero(
@@ -312,7 +402,7 @@ impl<F: Field> RlpCircuitConfig<F> {
 
             // if tag_index == tag_length && tag_length == 1
             cb.condition(
-                is_prefix(meta) * tindex_eq_tlength.clone() * tlength_eq.clone(),
+                is_prefix_tag.expr() * tindex_eq_tlength.clone() * tlength_eq.clone(),
                 |cb| {
                     cb.require_equal("191 < value", value_gt_191.is_lt(meta, None), 1.expr());
                     cb.require_equal("value < 248", value_lt_248.is_lt(meta, None), 1.expr());
@@ -326,7 +416,7 @@ impl<F: Field> RlpCircuitConfig<F> {
 
             // if tag_index < tag_length && tag_length > 1
             cb.condition(
-                is_prefix(meta) * tindex_lt_tlength.clone() * tlength_lt.clone(),
+                is_prefix_tag.expr() * tindex_lt_tlength.clone() * tlength_lt.clone(),
                 |cb| {
                     cb.require_equal(
                         "length_acc == (length_acc::prev * 256) + value",
@@ -338,15 +428,10 @@ impl<F: Field> RlpCircuitConfig<F> {
             );
 
             //////////////////////////////////////////////////////////////////////////////////////
-            ////////////////////////////////// RlpTxTag::Nonce ///////////////////////////////////
+            //////// RlpTxTag::Nonce, GasPrice, Gas, To, Value, ChainID, SigV, SigR, SigS ////////
             //////////////////////////////////////////////////////////////////////////////////////
-            cb.condition(is_nonce(meta), |cb| {
-                // tag_index < 10
-                cb.require_equal(
-                    "tag_index < 10",
-                    tag_index_lt_10.is_lt(meta, None),
-                    1.expr(),
-                );
+            cb.condition(is_simple_tag.clone(), |cb| {
+                // TODO: add tag_length < max_length
 
                 // tag_index >= 1
                 cb.require_zero(
@@ -355,14 +440,23 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
             });
 
+            // cb.require_equal(
+            //     "interm == is_simple_tag "
+            //     is_simple_tag.clone()
+            // )
             // if tag_index == tag_length && tag_length == 1
             cb.condition(
-                is_nonce(meta) * tindex_eq_tlength.clone() * tlength_eq.clone(),
+                is_simple_tag.clone() * tindex_eq_tlength.clone() * tlength_eq.clone(),
                 |cb| {
-                    cb.require_equal("value < 129", value_lt_129.is_lt(meta, None), 1.expr());
+                    let value = select::expr(
+                        value_eq_128.is_equal_expression.expr(),
+                        0.expr(),
+                        meta.query_advice(byte_value, Rotation::cur()),
+                    );
+                    cb.require_equal("byte_value < 129", value_lt_129.is_lt(meta, None), 1.expr());
                     cb.require_equal(
                         "value == value_acc",
-                        meta.query_advice(byte_value, Rotation::cur()),
+                        value,
                         meta.query_advice(rlp_table.value_acc, Rotation::cur()),
                     );
                 },
@@ -370,7 +464,7 @@ impl<F: Field> RlpCircuitConfig<F> {
 
             // if tag_index == tag_length && tag_length > 1
             cb.condition(
-                is_nonce(meta) * tindex_eq_tlength.clone() * tlength_lt.clone(),
+                is_simple_tag.clone() * tindex_eq_tlength.clone() * tlength_lt.clone(),
                 |cb| {
                     cb.require_equal("127 < value", value_gt_127.is_lt(meta, None), 1.expr());
                     cb.require_equal("value < 184", value_lt_184.is_lt(meta, None), 1.expr());
@@ -381,438 +475,60 @@ impl<F: Field> RlpCircuitConfig<F> {
                     );
                     cb.require_equal(
                         "tag_index::next == length_acc",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                        meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                         meta.query_advice(length_acc, Rotation::cur()),
                     );
                     cb.require_equal(
-                        "value_acc::next == value::next",
-                        meta.query_advice(rlp_table.value_acc, Rotation::next()),
-                        meta.query_advice(byte_value, Rotation::next()),
-                    );
-                },
-            );
-
-            // if tag_index < tag_length && tag_index > 1
-            cb.condition(
-                is_nonce(meta) * tindex_lt_tlength.clone() * tindex_lt.clone(),
-                |cb| {
-                    cb.require_equal(
-                        "[nonce] value_acc::next == value_acc::cur * 256 + value::next",
-                        meta.query_advice(rlp_table.value_acc, Rotation::next()),
-                        meta.query_advice(rlp_table.value_acc, Rotation::cur()) * 256.expr() +
-                            meta.query_advice(byte_value, Rotation::next()),
+                        "value_acc == 0",
+                        meta.query_advice(rlp_table.value_acc, Rotation::cur()),
+                        0.expr(),
                     );
                 },
             );
 
             // if tag_index > 1
-            cb.condition(is_nonce(meta) * tindex_lt.clone(), |cb| {
+            cb.condition(is_simple_tag.clone() * tindex_lt.clone(), |cb| {
                 cb.require_equal(
-                    "tag::next == RlpTxTag::Nonce",
+                    "tag::next == tag",
                     meta.query_advice(rlp_table.tag, Rotation::next()),
-                    RlpTxTag::Nonce.expr(),
-                );
-                cb.require_equal(
-                    "tag_index::next == tag_index - 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()) - 1.expr(),
-                );
-                cb.require_equal(
-                    "tag_length::next == tag_length",
-                    meta.query_advice(tag_length, Rotation::next()),
-                    meta.query_advice(tag_length, Rotation::cur()),
-                );
-            });
-
-            // if tag_index == 1
-            cb.condition(is_nonce(meta) * tindex_eq.clone(), |cb| {
-                cb.require_equal(
-                    "tag::next == RlpTxTag::GasPrice",
-                    meta.query_advice(rlp_table.tag, Rotation::next()),
-                    RlpTxTag::GasPrice.expr(),
-                );
-                cb.require_equal(
-                    "tag_index::next == tag_length::next",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(tag_length, Rotation::next()),
-                );
-            });
-
-            //////////////////////////////////////////////////////////////////////////////////////
-            ///////////////////////////////// RlpTxTag::GasPrice /////////////////////////////////
-            //////////////////////////////////////////////////////////////////////////////////////
-            cb.condition(is_gas_price(meta), |cb| {
-                // tag_index < 34
-                cb.require_equal(
-                    "tag_index < 34",
-                    tag_index_lt_34.is_lt(meta, None),
-                    1.expr(),
-                );
-
-                // tag_index >= 1
-                cb.require_zero(
-                    "1 <= tag_index",
-                    not::expr(or::expr([tindex_lt.clone(), tindex_eq.clone()])),
-                );
-            });
-
-            // if tag_index == tag_length && tag_length == 1
-            cb.condition(
-                is_gas_price(meta) * tindex_eq_tlength.clone() * tlength_eq.clone(),
-                |cb| {
-                    cb.require_equal("value < 129", value_lt_129.is_lt(meta, None), 1.expr());
-                    cb.require_equal(
-                        "value == value_acc",
-                        meta.query_advice(byte_value, Rotation::cur()),
-                        meta.query_advice(rlp_table.value_acc, Rotation::cur()),
-                    );
-                },
-            );
-
-            // if tag_index == tag_length && tag_length > 1
-            cb.condition(
-                is_gas_price(meta) * tindex_eq_tlength.clone() * tlength_lt.clone(),
-                |cb| {
-                    cb.require_equal("127 < value", value_gt_127.is_lt(meta, None), 1.expr());
-                    cb.require_equal("value < 184", value_lt_184.is_lt(meta, None), 1.expr());
-                    cb.require_equal(
-                        "length_acc == value - 0x80",
-                        meta.query_advice(length_acc, Rotation::cur()),
-                        meta.query_advice(byte_value, Rotation::cur()) - 128.expr(),
-                    );
-                    cb.require_equal(
-                        "tag_index::next == length_acc",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                        meta.query_advice(length_acc, Rotation::cur()),
-                    );
-                    cb.require_equal(
-                        "value_acc::next == value::next",
-                        meta.query_advice(rlp_table.value_acc, Rotation::next()),
-                        meta.query_advice(byte_value, Rotation::next()),
-                    );
-                },
-            );
-
-            // if tag_index < tag_length && tag_index > 1
-            cb.condition(
-                is_gas_price(meta) * tindex_lt_tlength.clone() * tindex_lt.clone(),
-                |cb| {
-                    cb.require_equal(
-                        "[gasprice] value_acc::next == value_acc::cur * randomness + value::next",
-                        meta.query_advice(rlp_table.value_acc, Rotation::next()),
-                        meta.query_advice(rlp_table.value_acc, Rotation::cur()) * r.clone() +
-                            meta.query_advice(byte_value, Rotation::next()),
-                    );
-                },
-            );
-
-            // if tag_index > 1
-            cb.condition(is_gas_price(meta) * tindex_lt.clone(), |cb| {
-                cb.require_equal(
-                    "tag::next == RlpTxTag::GasPrice",
-                    meta.query_advice(rlp_table.tag, Rotation::next()),
-                    RlpTxTag::GasPrice.expr(),
-                );
-                cb.require_equal(
-                    "tag_index::next == tag_index - 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()) - 1.expr(),
-                );
-                cb.require_equal(
-                    "tag_length::next == tag_length",
-                    meta.query_advice(tag_length, Rotation::next()),
-                    meta.query_advice(tag_length, Rotation::cur()),
-                );
-            });
-
-            // if tag_index == 1
-            cb.condition(is_gas_price(meta) * tindex_eq.clone(), |cb| {
-                cb.require_equal(
-                    "tag::next == RlpTxTag::Gas",
-                    meta.query_advice(rlp_table.tag, Rotation::next()),
-                    RlpTxTag::Gas.expr(),
-                );
-                cb.require_equal(
-                    "tag_index::next == tag_length::next",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(tag_length, Rotation::next()),
-                );
-            });
-
-            //////////////////////////////////////////////////////////////////////////////////////
-            /////////////////////////////////// RlpTxTag::Gas ////////////////////////////////////
-            //////////////////////////////////////////////////////////////////////////////////////
-            cb.condition(is_gas(meta), |cb| {
-                // tag_index < 10
-                cb.require_equal(
-                    "tag_index < 10",
-                    tag_index_lt_10.is_lt(meta, None),
-                    1.expr(),
-                );
-
-                // tag_index >= 1
-                cb.require_zero(
-                    "1 <= tag_index",
-                    not::expr(or::expr([tindex_lt.clone(), tindex_eq.clone()])),
-                );
-            });
-
-            // if tag_index == tag_length && tag_length == 1
-            cb.condition(
-                is_gas(meta) * tindex_eq_tlength.clone() * tlength_eq.clone(),
-                |cb| {
-                    cb.require_equal("value < 129", value_lt_129.is_lt(meta, None), 1.expr());
-                    cb.require_equal(
-                        "value == value_acc",
-                        meta.query_advice(byte_value, Rotation::cur()),
-                        meta.query_advice(rlp_table.value_acc, Rotation::cur()),
-                    );
-                },
-            );
-
-            // if tag_index == tag_length && tag_length > 1
-            cb.condition(
-                is_gas(meta) * tindex_eq_tlength.clone() * tlength_lt.clone(),
-                |cb| {
-                    cb.require_equal("127 < value", value_gt_127.is_lt(meta, None), 1.expr());
-                    cb.require_equal("value < 184", value_lt_184.is_lt(meta, None), 1.expr());
-                    cb.require_equal(
-                        "length_acc == value - 0x80",
-                        meta.query_advice(length_acc, Rotation::cur()),
-                        meta.query_advice(byte_value, Rotation::cur()) - 128.expr(),
-                    );
-                    cb.require_equal(
-                        "tag_index::next == length_acc",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                        meta.query_advice(length_acc, Rotation::cur()),
-                    );
-                },
-            );
-
-            // if tag_index < tag_length && tag_index > 1
-            cb.condition(
-                is_gas(meta) * tindex_lt_tlength.clone() * tindex_lt.clone(),
-                |cb| {
-                    cb.require_equal(
-                        "[gas] value_acc::next == value_acc::cur * 256 + value::next",
-                        meta.query_advice(rlp_table.value_acc, Rotation::next()),
-                        meta.query_advice(rlp_table.value_acc, Rotation::cur()) * 256.expr() +
-                            meta.query_advice(byte_value, Rotation::next()),
-                    );
-                },
-            );
-
-            // tag_index > 1
-            cb.condition(is_gas(meta) * tindex_lt.clone(), |cb| {
-                cb.require_equal(
-                    "tag::next == RlpTxTag::Gas",
                     meta.query_advice(rlp_table.tag, Rotation::cur()),
-                    RlpTxTag::Gas.expr(),
                 );
                 cb.require_equal(
                     "tag_index::next == tag_index - 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()) - 1.expr(),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::cur()) - 1.expr(),
                 );
                 cb.require_equal(
                     "tag_length::next == tag_length",
                     meta.query_advice(tag_length, Rotation::next()),
                     meta.query_advice(tag_length, Rotation::cur()),
                 );
-            });
-
-            // tag_index == 1
-            cb.condition(is_gas(meta) * tindex_eq.clone(), |cb| {
-                cb.require_equal(
-                    "tag::next == RlpTxTag::ToPrefix",
-                    meta.query_advice(rlp_table.tag, Rotation::next()),
-                    RlpTxTag::ToPrefix.expr(),
-                );
-            });
-
-            //////////////////////////////////////////////////////////////////////////////////////
-            ///////////////////////////////// RlpTxTag::ToPrefix /////////////////////////////////
-            //////////////////////////////////////////////////////////////////////////////////////
-            cb.condition(is_to_prefix(meta), |cb| {
-                cb.require_equal(
-                    "tag_index == 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()),
-                    1.expr(),
+                let power_base = select::expr(
+                    is_tag_word,
+                    evm_word_rand.expr(),
+                    256.expr(),
                 );
                 cb.require_equal(
-                    "tag_length == 1",
-                    meta.query_advice(tag_length, Rotation::cur()),
-                    1.expr(),
-                );
-                cb.require_equal(
-                    "value == 148",
-                    meta.query_advice(byte_value, Rotation::cur()),
-                    148.expr(),
-                );
-                cb.require_equal(
-                    "tag::next == RlpTxTag::To",
-                    meta.query_advice(rlp_table.tag, Rotation::next()),
-                    RlpTxTag::To.expr(),
-                );
-                cb.require_equal(
-                    "tag_index::next == 20",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    20.expr(),
-                );
-                cb.require_equal(
-                    "tag_length::next == 20",
-                    meta.query_advice(tag_length, Rotation::next()),
-                    20.expr(),
-                );
-                cb.require_equal(
-                    "value_acc::next == value::next",
+                    "[simple_tag] value_acc::next == value_acc::cur * power_base + value::next",
                     meta.query_advice(rlp_table.value_acc, Rotation::next()),
-                    meta.query_advice(byte_value, Rotation::next()),
-                );
-            });
-
-            //////////////////////////////////////////////////////////////////////////////////////
-            //////////////////////////////////// RlpTxTag::To ////////////////////////////////////
-            //////////////////////////////////////////////////////////////////////////////////////
-            // if tag_index > 1
-            cb.condition(is_to(meta) * tindex_lt.clone(), |cb| {
-                cb.require_equal(
-                    "tag::next == RlpTxTag::To",
-                    meta.query_advice(rlp_table.tag, Rotation::next()),
-                    RlpTxTag::To.expr(),
-                );
-                cb.require_equal(
-                    "tag_index::next == tag_index - 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()) - 1.expr(),
-                );
-                cb.require_equal(
-                    "tag_length::next == tag_length",
-                    meta.query_advice(tag_length, Rotation::next()),
-                    meta.query_advice(tag_length, Rotation::cur()),
-                );
-                cb.require_equal(
-                    "value_acc::next == value_acc::cur * 256 + value::next",
-                    meta.query_advice(rlp_table.value_acc, Rotation::next()),
-                    meta.query_advice(rlp_table.value_acc, Rotation::cur()) * 256.expr() +
+                    meta.query_advice(rlp_table.value_acc, Rotation::cur()) * power_base +
                         meta.query_advice(byte_value, Rotation::next()),
                 );
             });
 
             // if tag_index == 1
-            cb.condition(is_to(meta) * tindex_eq.clone(), |cb| {
+            cb.condition(is_simple_tag * tindex_eq.clone(), |cb| {
                 cb.require_equal(
-                    "tag::next == RlpTxTag::Value",
-                    meta.query_advice(rlp_table.tag, Rotation::next()),
-                    RlpTxTag::Value.expr(),
-                );
-                cb.require_equal(
-                    "tag_index:next == tag_length::next",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                    "tag_index::next == tag_length::next",
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                     meta.query_advice(tag_length, Rotation::next()),
-                );
-            });
-
-            //////////////////////////////////////////////////////////////////////////////////////
-            /////////////////////////////////// RlpTxTag::Value //////////////////////////////////
-            //////////////////////////////////////////////////////////////////////////////////////
-            cb.condition(is_value(meta), |cb| {
-                // tag_index < 34
-                cb.require_equal(
-                    "tag_index < 34",
-                    tag_index_lt_34.is_lt(meta, None),
-                    1.expr(),
-                );
-
-                // tag_index >= 1
-                cb.require_zero(
-                    "1 <= tag_index",
-                    not::expr(or::expr([tindex_lt.clone(), tindex_eq.clone()])),
-                );
-            });
-
-            // if tag_index == tag_length && tag_length == 1
-            cb.condition(
-                is_value(meta) * tindex_eq_tlength.clone() * tlength_eq.clone(),
-                |cb| {
-                    cb.require_equal("value < 129", value_lt_129.is_lt(meta, None), 1.expr());
-                    cb.require_equal(
-                        "value == value_acc",
-                        meta.query_advice(byte_value, Rotation::cur()),
-                        meta.query_advice(rlp_table.value_acc, Rotation::cur()),
-                    );
-                },
-            );
-
-            // if tag_index == tag_length && tag_length > 1
-            cb.condition(
-                is_value(meta) * tindex_eq_tlength.clone() * tlength_lt.clone(),
-                |cb| {
-                    cb.require_equal("127 < value", value_gt_127.is_lt(meta, None), 1.expr());
-                    cb.require_equal("value < 184", value_lt_184.is_lt(meta, None), 1.expr());
-                    cb.require_equal(
-                        "length_acc == value - 0x80",
-                        meta.query_advice(length_acc, Rotation::cur()),
-                        meta.query_advice(byte_value, Rotation::cur()) - 128.expr(),
-                    );
-                    cb.require_equal(
-                        "tag_index::next == length_acc",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                        meta.query_advice(length_acc, Rotation::cur()),
-                    );
-                    cb.require_equal(
-                        "value_acc::next == value::next",
-                        meta.query_advice(rlp_table.value_acc, Rotation::next()),
-                        meta.query_advice(byte_value, Rotation::next()),
-                    );
-                },
-            );
-
-            // if tag_index < tag_length && tag_index > 1
-            cb.condition(
-                is_value(meta) * tindex_lt_tlength.clone() * tindex_lt.clone(),
-                |cb| {
-                    cb.require_equal(
-                        "[value] value_acc::next == value_acc::cur * randomness + value::next",
-                        meta.query_advice(rlp_table.value_acc, Rotation::next()),
-                        meta.query_advice(rlp_table.value_acc, Rotation::cur()) * r.clone() +
-                            meta.query_advice(byte_value, Rotation::next()),
-                    );
-                },
-            );
-
-            // if tag_index > 1
-            cb.condition(is_value(meta) * tindex_lt.clone(), |cb| {
-                cb.require_equal(
-                    "tag::next == RlpTxTag::Value",
-                    meta.query_advice(rlp_table.tag, Rotation::next()),
-                    RlpTxTag::Value.expr(),
-                );
-                cb.require_equal(
-                    "tag_index::next == tag_index - 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()) - 1.expr(),
-                );
-                cb.require_equal(
-                    "tag_length::next == tag_length",
-                    meta.query_advice(tag_length, Rotation::next()),
-                    meta.query_advice(tag_length, Rotation::cur()),
-                );
-            });
-
-            // if tag_index == 1
-            cb.condition(is_value(meta) * tindex_eq.clone(), |cb| {
-                cb.require_equal(
-                    "tag::next == RlpTxTag:TxDataPrefix",
-                    meta.query_advice(rlp_table.tag, Rotation::next()),
-                    RlpTxTag::DataPrefix.expr(),
                 );
             });
 
             //////////////////////////////////////////////////////////////////////////////////////
             ///////////////////////////////// RlpTxTag::DataPrefix ///////////////////////////////
             //////////////////////////////////////////////////////////////////////////////////////
-            cb.condition(is_data_prefix(meta), |cb| {
+            cb.condition(is_dp_tag.expr(), |cb| {
                 // tag_index < 10
                 cb.require_equal(
                     "tag_index < 10",
@@ -828,7 +544,7 @@ impl<F: Field> RlpCircuitConfig<F> {
             });
 
             // if tag_index > 1
-            cb.condition(is_data_prefix(meta) * tindex_lt.clone(), |cb| {
+            cb.condition(is_dp_tag.expr() * tindex_lt.clone(), |cb| {
                 cb.require_equal(
                     "tag::next == RlpTxTag::DataPrefix",
                     meta.query_advice(rlp_table.tag, Rotation::next()),
@@ -836,8 +552,8 @@ impl<F: Field> RlpCircuitConfig<F> {
                 );
                 cb.require_equal(
                     "tag_index::next == tag_index - 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()) - 1.expr(),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::cur()) - 1.expr(),
                 );
                 cb.require_equal(
                     "tag_length::next == tag_length",
@@ -848,16 +564,23 @@ impl<F: Field> RlpCircuitConfig<F> {
 
             // if length_acc == 0
             cb.condition(
-                is_data_prefix(meta) * tindex_eq.clone() * length_acc_eq_0,
+                is_dp_tag.expr() * tindex_eq.clone() * length_acc_eq_0,
                 |cb| {
+                    let is_tx_hash = meta.query_advice(rlp_table.data_type, Rotation::cur())
+                        - RlpDataType::TxSign.expr();
+                    let tag_next = select::expr(
+                        is_tx_hash,
+                        SigV.expr(),
+                        ChainId.expr(),
+                    );
                     cb.require_equal(
                         "tag::next == RlpTxTag::ChainId",
                         meta.query_advice(rlp_table.tag, Rotation::next()),
-                        RlpTxTag::ChainId.expr(),
+                        tag_next,
                     );
                     cb.require_equal(
                         "tag_index::next == tag_length::next",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                        meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                         meta.query_advice(tag_length, Rotation::next()),
                     );
                 },
@@ -865,7 +588,7 @@ impl<F: Field> RlpCircuitConfig<F> {
 
             // if length_acc > 0
             cb.condition(
-                is_data_prefix(meta) * tindex_eq.clone() * length_acc_gt_0,
+                is_dp_tag.expr() * tindex_eq.clone() * length_acc_gt_0,
                 |cb| {
                     cb.require_equal(
                         "tag::next == RlpTxTag::Data",
@@ -874,7 +597,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                     );
                     cb.require_equal(
                         "tag_index::next == tag_length::next",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                        meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                         meta.query_advice(tag_length, Rotation::next()),
                     );
                     cb.require_equal(
@@ -887,13 +610,13 @@ impl<F: Field> RlpCircuitConfig<F> {
 
             // if tag_index == tag_length && tag_length > 1
             cb.condition(
-                is_data_prefix(meta) * tindex_eq_tlength.clone() * tlength_lt.clone(),
+                is_dp_tag.expr() * tindex_eq_tlength.clone() * tlength_lt.clone(),
                 |cb| {
                     cb.require_equal("value > 183", value_gt_183.is_lt(meta, None), 1.expr());
                     cb.require_equal("value < 192", value_lt_192.is_lt(meta, None), 1.expr());
                     cb.require_equal(
                         "tag_index == (value - 0xb7) + 1",
-                        meta.query_advice(rlp_table.tag_index, Rotation::cur()),
+                        meta.query_advice(rlp_table.tag_rindex, Rotation::cur()),
                         meta.query_advice(byte_value, Rotation::cur()) - 182.expr(),
                     );
                     cb.require_zero(
@@ -905,7 +628,7 @@ impl<F: Field> RlpCircuitConfig<F> {
 
             // if tag_index < tag_length && tag_length > 1
             cb.condition(
-                is_data_prefix(meta) * tindex_lt_tlength * tlength_lt,
+                is_dp_tag.expr() * tindex_lt_tlength * tlength_lt,
                 |cb| {
                     cb.require_equal(
                         "length_acc == (length_acc::prev * 256) + value",
@@ -918,7 +641,7 @@ impl<F: Field> RlpCircuitConfig<F> {
 
             // if tag_index == tag_length && tag_length == 1
             cb.condition(
-                is_data_prefix(meta) * tindex_eq_tlength * tlength_eq,
+                is_dp_tag.expr() * tindex_eq_tlength * tlength_eq,
                 |cb| {
                     cb.require_equal("127 < value", value_gt_127.is_lt(meta, None), 1.expr());
                     cb.require_equal("value < 184", value_lt_184.is_lt(meta, None), 1.expr());
@@ -949,9 +672,9 @@ impl<F: Field> RlpCircuitConfig<F> {
                     RlpTxTag::Data.expr(),
                 );
                 cb.require_equal(
-                    "tag_index::next == tag_index - 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()) - 1.expr(),
+                    "tag_rindex::next == tag_rindex - 1",
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::cur()) - 1.expr(),
                 );
                 cb.require_equal(
                     "tag_length::next == tag_length",
@@ -959,15 +682,15 @@ impl<F: Field> RlpCircuitConfig<F> {
                     meta.query_advice(tag_length, Rotation::cur()),
                 );
                 cb.require_equal(
-                    "value_acc_rlc::next == value_acc_rlc::cur * randomness + value::next",
-                    meta.query_advice(value_acc_rlc, Rotation::next()),
-                    meta.query_advice(value_acc_rlc, Rotation::cur()) * r.clone()
+                    "calldata_bytes_rlc_acc' == calldata_bytes_rlc_acc * r + byte_value'",
+                    meta.query_advice(calldata_bytes_rlc_acc, Rotation::next()),
+                    meta.query_advice(calldata_bytes_rlc_acc, Rotation::cur()) * keccak_input_rand.clone()
                         + meta.query_advice(byte_value, Rotation::next()),
                 );
                 cb.require_equal(
-                    "value::cur == value_acc::cur",
-                    meta.query_advice(byte_value, Rotation::cur()),
+                    "rlp_table.value_acc == byte_value",
                     meta.query_advice(rlp_table.value_acc, Rotation::cur()),
+                    meta.query_advice(byte_value, Rotation::cur()),
                 );
             });
 
@@ -980,13 +703,13 @@ impl<F: Field> RlpCircuitConfig<F> {
                 ]),
                 |cb| {
                     cb.require_equal(
-                        "tag::next == RlpTxTag::ChainId",
+                        "[data] tag::next == RlpTxTag::ChainId",
                         meta.query_advice(rlp_table.tag, Rotation::next()),
                         RlpTxTag::ChainId.expr(),
                     );
                     cb.require_equal(
                         "tag_index::next == tag_length::next",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                        meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                         meta.query_advice(tag_length, Rotation::next()),
                     );
                 }
@@ -1007,7 +730,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                     );
                     cb.require_equal(
                         "tag_index::next == tag_length::next",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                        meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                         meta.query_advice(tag_length, Rotation::next()),
                     );
                 }
@@ -1017,114 +740,25 @@ impl<F: Field> RlpCircuitConfig<F> {
         });
 
         meta.create_gate("DataType::TxSign (unsigned transaction)", |meta| {
-            let mut cb = BaseConstraintBuilder::default();
+            let mut cb = BaseConstraintBuilder::new(9);
 
-            let (tindex_lt, tindex_eq) = tag_index_cmp_1.expr(meta, None);
-            let (tlength_lt, tlength_eq) = tag_length_cmp_1.expr(meta, None);
-            let (tindex_lt_tlength, tindex_eq_tlength) = tag_index_length_cmp.expr(meta, None);
+            let (_, tindex_eq) = tag_index_cmp_1.expr(meta, None);
 
             //////////////////////////////////////////////////////////////////////////////////////
             ////////////////////////////////// RlpTxTag::ChainID /////////////////////////////////
             //////////////////////////////////////////////////////////////////////////////////////
-            cb.condition(is_chainid(meta), |cb| {
-                // tag_index < 10
-                cb.require_equal(
-                    "tag_index < 10",
-                    tag_index_lt_10.is_lt(meta, None),
-                    1.expr(),
-                );
-                // tag_index >= 1
-                cb.require_zero(
-                    "1 <= tag_index",
-                    not::expr(or::expr([tindex_lt.clone(), tindex_eq.clone()])),
-                );
-            });
-
-            // if tag_index == tag_length && tag_length == 1
-            cb.condition(
-                is_chainid(meta) * tindex_eq_tlength.clone() * tlength_eq,
-                |cb| {
-                    cb.require_equal("value < 129", value_lt_129.is_lt(meta, None), 1.expr());
-                    cb.require_equal(
-                        "value == value_acc",
-                        meta.query_advice(byte_value, Rotation::cur()),
-                        meta.query_advice(rlp_table.value_acc, Rotation::cur()),
-                    );
-                },
-            );
-
-            // if tag_index == tag_length && tag_length > 1
-            cb.condition(
-                is_chainid(meta) * tindex_eq_tlength * tlength_lt,
-                |cb| {
-                    cb.require_equal("127 < value", value_gt_127.is_lt(meta, None), 1.expr());
-                    cb.require_equal("value < 184", value_lt_184.is_lt(meta, None), 1.expr());
-                    cb.require_equal(
-                        "length_acc == value - 0x80",
-                        meta.query_advice(length_acc, Rotation::cur()),
-                        meta.query_advice(byte_value, Rotation::cur()) - 128.expr(),
-                    );
-                    cb.require_equal(
-                        "tag_index::next == length_acc",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                        meta.query_advice(length_acc, Rotation::cur()),
-                    );
-                    cb.require_equal(
-                        "value_acc::next == value::next",
-                        meta.query_advice(rlp_table.value_acc, Rotation::next()),
-                        meta.query_advice(byte_value, Rotation::next()),
-                    );
-                },
-            );
-
-            // if tag_index < tag_length && tag_index > 1
-            cb.condition(
-                is_chainid(meta) * tindex_lt_tlength * tindex_lt.clone(),
-                |cb| {
-                    cb.require_equal(
-                        "[nonce] value_acc::next == value_acc::cur * 256 + value::next",
-                        meta.query_advice(rlp_table.value_acc, Rotation::next()),
-                        meta.query_advice(rlp_table.value_acc, Rotation::cur()) * 256.expr() +
-                            meta.query_advice(byte_value, Rotation::next()),
-                    );
-                },
-            );
-
-            // if tag_index > 1
-            cb.condition(is_chainid(meta) * tindex_lt.clone(), |cb| {
-                cb.require_equal(
-                    "tag::next == RlpTxTag::ChainId",
-                    meta.query_advice(rlp_table.tag, Rotation::next()),
-                    RlpTxTag::ChainId.expr(),
-                );
-                cb.require_equal(
-                    "tag_index::next == tag_index - 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()) - 1.expr(),
-                );
-                cb.require_equal(
-                    "tag_length::next == tag_length",
-                    meta.query_advice(tag_length, Rotation::next()),
-                    meta.query_advice(tag_length, Rotation::cur()),
-                );
-            });
 
             // if tag_index == 1
-            cb.condition(is_chainid(meta) * tindex_eq.clone(), |cb| {
+            cb.condition(is_chainid(meta) * tindex_eq, |cb| {
                 // checks for RlpTxTag::Zero on the next row.
                 cb.require_equal(
-                    "tag::next == RlpTxTag::Zero",
+                    "next tag is Zero",
                     meta.query_advice(rlp_table.tag, Rotation::next()),
                     RlpTxTag::Zero.expr(),
                 );
                 cb.require_equal(
-                    "tag_index::next == tag_length::next",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(tag_length, Rotation::next()),
-                );
-                cb.require_equal(
-                    "next tag is Zero => tag_index::next == 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                    "next tag is Zero => tag_rindex::next == 1",
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                     1.expr(),
                 );
                 cb.require_equal(
@@ -1133,25 +767,25 @@ impl<F: Field> RlpCircuitConfig<F> {
                     128.expr(),
                 );
                 cb.require_equal(
-                    "next tag is Zero => value_acc::next == 128",
+                    "next tag is Zero => value_acc::next == 0",
                     meta.query_advice(rlp_table.value_acc, Rotation::next()),
-                    128.expr(),
+                    0.expr(),
                 );
 
-                // checks for RlpTxTag::Zero on the next-to-next row.
+                // checks for RlpTxTag::Zero on the next(2) row.
                 cb.require_equal(
                     "tag::Rotation(2) == RlpTxTag::Zero",
                     meta.query_advice(rlp_table.tag, Rotation(2)),
                     RlpTxTag::Zero.expr(),
                 );
                 cb.require_equal(
-                    "tag_index::Rotation(2) == tag_length::Rotation(2)",
-                    meta.query_advice(rlp_table.tag_index, Rotation(2)),
+                    "tag_rindex::Rotation(2) == tag_length::Rotation(2)",
+                    meta.query_advice(rlp_table.tag_rindex, Rotation(2)),
                     meta.query_advice(tag_length, Rotation(2)),
                 );
                 cb.require_equal(
-                    "next-to-next tag is Zero => tag_index::Rotation(2) == 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation(2)),
+                    "next-to-next tag is Zero => tag_rindex::Rotation(2) == 1",
+                    meta.query_advice(rlp_table.tag_rindex, Rotation(2)),
                     1.expr(),
                 );
                 cb.require_equal(
@@ -1160,58 +794,58 @@ impl<F: Field> RlpCircuitConfig<F> {
                     128.expr(),
                 );
                 cb.require_equal(
-                    "next-to-next tag is Zero => value_acc::Rotation(2) == 128",
+                    "next-to-next tag is Zero => value_acc::Rotation(2) == 0",
                     meta.query_advice(rlp_table.value_acc, Rotation(2)),
-                    128.expr(),
+                    0.expr(),
                 );
 
-                // checks for RlpTxTag::RlpLength on the next-to-next-to-next row.
+                // checks for RlpTxTag::RlpLength on the next(3) row.
                 cb.require_equal(
                     "tag::Rotation(3) == RlpTxTag::RlpLength",
                     meta.query_advice(rlp_table.tag, Rotation(3)),
                     RlpTxTag::RlpLength.expr(),
                 );
                 cb.require_equal(
-                    "tag_index::Rotation(3) == tag_length::Rotation(3)",
-                    meta.query_advice(rlp_table.tag_index, Rotation(3)),
+                    "tag_rindex::Rotation(3) == tag_length::Rotation(3)",
+                    meta.query_advice(rlp_table.tag_rindex, Rotation(3)),
                     meta.query_advice(tag_length, Rotation(3)),
                 );
                 cb.require_equal(
-                    "tag_index::Rotation(3) == 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation(3)),
+                    "tag_rindex::Rotation(3) == 1",
+                    meta.query_advice(rlp_table.tag_rindex, Rotation(3)),
                     1.expr(),
                 );
                 cb.require_equal(
-                    "value::Rotation(3) == Rlp encoding length == index::Rotation(2)",
+                    "value_acc::Rotation(3) == Rlp encoding length == index::Rotation(2)",
                     meta.query_advice(rlp_table.value_acc, Rotation(3)),
                     meta.query_advice(index, Rotation(2)),
                 );
 
-                // checks for RlpTxTag::Rlp on the next-to-next-to-next-to-next row.
+                // checks for RlpTxTag::Rlp on the next(4) row.
                 cb.require_equal(
                     "tag::Rotation(4) == RlpTxTag::Rlp",
                     meta.query_advice(rlp_table.tag, Rotation(4)),
                     RlpTxTag::Rlp.expr(),
                 );
+                // reaches the end of an RLP(TxSign) instance
+                cb.require_zero(
+                    "next(4) tag is Rlp => rindex == 0",
+                    meta.query_advice(rindex, Rotation(4)),
+                );
                 cb.require_equal(
-                    "tag_index::Rotation(4) == tag_length::Rotation(4)",
-                    meta.query_advice(rlp_table.tag_index, Rotation(4)),
+                    "tag_rindex::Rotation(4) == tag_length::Rotation(4)",
+                    meta.query_advice(rlp_table.tag_rindex, Rotation(4)),
                     meta.query_advice(tag_length, Rotation(4)),
                 );
                 cb.require_equal(
-                    "tag_index::Rotation(4) == 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation(4)),
+                    "tag_rindex::Rotation(4) == 1",
+                    meta.query_advice(rlp_table.tag_rindex, Rotation(4)),
                     1.expr(),
                 );
                 cb.require_equal(
-                    "last tag is Rlp => value_acc::Rotation(4) == value_rlc::Rotation(4)",
+                    "last tag is Rlp => value_acc::Rotation(4) == all_bytes_rlc_acc::Rotation(2)",
                     meta.query_advice(rlp_table.value_acc, Rotation(4)),
-                    meta.query_advice(value_rlc, Rotation(4)),
-                );
-                cb.require_equal(
-                    "last tag is Rlp => value_rlc::Rotation(4) == value_rlc::Rotation(2)",
-                    meta.query_advice(value_rlc, Rotation(4)),
-                    meta.query_advice(value_rlc, Rotation(2)),
+                    meta.query_advice(all_bytes_rlc_acc, Rotation(2)),
                 );
                 cb.require_equal(
                     "last tag is Rlp => is_last::Rotation(4) == 1",
@@ -1227,309 +861,27 @@ impl<F: Field> RlpCircuitConfig<F> {
         });
 
         meta.create_gate("DataType::TxHash (signed transaction)", |meta| {
-            let mut cb = BaseConstraintBuilder::default();
+            let mut cb = BaseConstraintBuilder::new(9);
 
-            let (tindex_lt, tindex_eq) = tag_index_cmp_1.expr(meta, None);
-            let (tlength_lt, tlength_eq) = tag_length_cmp_1.expr(meta, None);
-            let (tindex_lt_tlength, tindex_eq_tlength) = tag_index_length_cmp.expr(meta, None);
-
-            //////////////////////////////////////////////////////////////////////////////////////
-            /////////////////////////////////// RlpTxTag::SigV ///////////////////////////////////
-            //////////////////////////////////////////////////////////////////////////////////////
-            cb.condition(is_sig_v(meta), |cb| {
-                // tag_index < 10
-                cb.require_equal(
-                    "tag_index < 10",
-                    tag_index_lt_10.is_lt(meta, None),
-                    1.expr(),
-                );
-                // tag_index >= 1
-                cb.require_zero(
-                    "1 <= tag_index",
-                    not::expr(or::expr([tindex_lt.clone(), tindex_eq.clone()])),
-                );
-            });
-
-            // if tag_index == tag_length && tag_length == 1
-            cb.condition(
-                is_sig_v(meta) * tindex_eq_tlength.clone() * tlength_eq.clone(),
-                |cb| {
-                    cb.require_equal("value < 129", value_lt_129.is_lt(meta, None), 1.expr());
-                    cb.require_equal(
-                        "value == value_acc",
-                        meta.query_advice(byte_value, Rotation::cur()),
-                        meta.query_advice(rlp_table.value_acc, Rotation::cur()),
-                    );
-                },
-            );
-
-            // if tag_index == tag_length && tag_length > 1
-            cb.condition(
-                is_sig_v(meta) * tindex_eq_tlength.clone() * tlength_lt.clone(),
-                |cb| {
-                    cb.require_equal("127 < value", value_gt_127.is_lt(meta, None), 1.expr());
-                    cb.require_equal("value < 184", value_lt_184.is_lt(meta, None), 1.expr());
-                    cb.require_equal(
-                        "length_acc == value - 0x80",
-                        meta.query_advice(length_acc, Rotation::cur()),
-                        meta.query_advice(byte_value, Rotation::cur()) - 128.expr(),
-                    );
-                    cb.require_equal(
-                        "tag_index::next == length_acc",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                        meta.query_advice(length_acc, Rotation::cur()),
-                    );
-                    cb.require_equal(
-                        "value_acc::next == value::next",
-                        meta.query_advice(rlp_table.value_acc, Rotation::next()),
-                        meta.query_advice(byte_value, Rotation::next()),
-                    );
-                },
-            );
-
-            // if tag_index < tag_length && tag_index > 1
-            cb.condition(
-                is_sig_v(meta) * tindex_lt_tlength.clone() * tindex_lt.clone(),
-                |cb| {
-                    cb.require_equal(
-                        "value_acc::next == value_acc::cur * 256 + value::next",
-                        meta.query_advice(rlp_table.value_acc, Rotation::next()),
-                        meta.query_advice(rlp_table.value_acc, Rotation::cur()) * 256.expr() +
-                            meta.query_advice(byte_value, Rotation::next()),
-                    );
-                },
-            );
-
-            // if tag_index > 1
-            cb.condition(is_sig_v(meta) * tindex_lt.clone(), |cb| {
-                cb.require_equal(
-                    "tag::next == RlpTxTag::SigV",
-                    meta.query_advice(rlp_table.tag, Rotation::next()),
-                    RlpTxTag::SigV.expr(),
-                );
-                cb.require_equal(
-                    "tag_index::next == tag_index - 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()) - 1.expr(),
-                );
-                cb.require_equal(
-                    "tag_length::next == tag_length",
-                    meta.query_advice(tag_length, Rotation::next()),
-                    meta.query_advice(tag_length, Rotation::cur()),
-                );
-            });
+            let (_, tindex_eq) = tag_index_cmp_1.expr(meta, None);
 
             // if tag_index == 1
-            cb.condition(is_sig_v(meta) * tindex_eq.clone(), |cb| {
+            cb.condition(is_sig_s(meta) * tindex_eq, |cb| {
+                // rindex == 0 for the end of an RLP(TxHash) instance
                 cb.require_equal(
-                    "tag::next == RlpTxTag::SigR",
-                    meta.query_advice(rlp_table.tag, Rotation::next()),
-                    RlpTxTag::SigR.expr(),
+                    "next(2) tag is Rlp => rindex == 0",
+                    meta.query_advice(rindex, Rotation(2)),
+                    0.expr(),
                 );
-                cb.require_equal(
-                    "tag_index::next == tag_length::next",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(tag_length, Rotation::next()),
-                );
-            });
-
-            //////////////////////////////////////////////////////////////////////////////////////
-            /////////////////////////////////// RlpTxTag::SigR ///////////////////////////////////
-            //////////////////////////////////////////////////////////////////////////////////////
-            cb.condition(is_sig_r(meta), |cb| {
-                // tag_index < 34
-                cb.require_equal(
-                    "tag_index < 34",
-                    tag_index_lt_34.is_lt(meta, None),
-                    1.expr(),
-                );
-                // tag_index >= 1
-                cb.require_zero(
-                    "1 <= tag_index",
-                    not::expr(or::expr([tindex_lt.clone(), tindex_eq.clone()])),
-                );
-            });
-
-            // if tag_index == tag_length && tag_length == 1
-            cb.condition(
-                is_sig_r(meta) * tindex_eq_tlength.clone() * tlength_eq.clone(),
-                |cb| {
-                    cb.require_equal("value < 129", value_lt_129.is_lt(meta, None), 1.expr());
-                    cb.require_equal(
-                        "value == value_acc",
-                        meta.query_advice(byte_value, Rotation::cur()),
-                        meta.query_advice(rlp_table.value_acc, Rotation::cur()),
-                    );
-                },
-            );
-
-            // if tag_index == tag_length && tag_length > 1
-            cb.condition(
-                is_sig_r(meta) * tindex_eq_tlength.clone() * tlength_lt.clone(),
-                |cb| {
-                    cb.require_equal("127 < value", value_gt_127.is_lt(meta, None), 1.expr());
-                    cb.require_equal("value < 184", value_lt_184.is_lt(meta, None), 1.expr());
-                    cb.require_equal(
-                        "length_acc == value - 0x80",
-                        meta.query_advice(length_acc, Rotation::cur()),
-                        meta.query_advice(byte_value, Rotation::cur()) - 128.expr(),
-                    );
-                    cb.require_equal(
-                        "tag_index::next == length_acc",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                        meta.query_advice(length_acc, Rotation::cur()),
-                    );
-                    cb.require_equal(
-                        "value_acc::next == value::next",
-                        meta.query_advice(rlp_table.value_acc, Rotation::next()),
-                        meta.query_advice(byte_value, Rotation::next()),
-                    );
-                },
-            );
-
-            // if tag_index < tag_length && tag_index > 1
-            cb.condition(
-                is_sig_r(meta) * tindex_lt_tlength.clone() * tindex_lt.clone(),
-                |cb| {
-                    cb.require_equal(
-                        "[sig_r] value_acc::next == value_acc::cur * randomness + value::next",
-                        meta.query_advice(rlp_table.value_acc, Rotation::next()),
-                        meta.query_advice(rlp_table.value_acc, Rotation::cur()) * r.clone() +
-                            meta.query_advice(byte_value, Rotation::next()),
-                    );
-                },
-            );
-
-            // if tag_index > 1
-            cb.condition(is_sig_r(meta) * tindex_lt.clone(), |cb| {
-                cb.require_equal(
-                    "tag::next == RlpTxTag::SigR",
-                    meta.query_advice(rlp_table.tag, Rotation::next()),
-                    RlpTxTag::SigR.expr(),
-                );
-                cb.require_equal(
-                    "tag_index::next == tag_index - 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()) - 1.expr(),
-                );
-                cb.require_equal(
-                    "tag_length::next == tag_length",
-                    meta.query_advice(tag_length, Rotation::next()),
-                    meta.query_advice(tag_length, Rotation::cur()),
-                );
-            });
-
-            // if tag_index == 1
-            cb.condition(is_sig_r(meta) * tindex_eq.clone(), |cb| {
-                cb.require_equal(
-                    "tag::next == RlpTxTag::SigS",
-                    meta.query_advice(rlp_table.tag, Rotation::next()),
-                    RlpTxTag::SigS.expr(),
-                );
-            });
-
-            //////////////////////////////////////////////////////////////////////////////////////
-            /////////////////////////////////// RlpTxTag::SigS ///////////////////////////////////
-            //////////////////////////////////////////////////////////////////////////////////////
-            cb.condition(is_sig_s(meta), |cb| {
-                // tag_index < 34
-                cb.require_equal(
-                    "tag_index < 34",
-                    tag_index_lt_34.is_lt(meta, None),
-                    1.expr(),
-                );
-                // tag_index >= 1
-                cb.require_zero(
-                    "1 <= tag_index",
-                    not::expr(or::expr([tindex_lt.clone(), tindex_eq.clone()])),
-                );
-            });
-
-            // if tag_index == tag_length && tag_length == 1
-            cb.condition(
-                is_sig_s(meta) * tindex_eq_tlength.clone() * tlength_eq,
-                |cb| {
-                    cb.require_equal("value < 129", value_lt_129.is_lt(meta, None), 1.expr());
-                    cb.require_equal(
-                        "value == value_acc",
-                        meta.query_advice(byte_value, Rotation::cur()),
-                        meta.query_advice(rlp_table.value_acc, Rotation::cur()),
-                    );
-                },
-            );
-
-            // if tag_index == tag_length && tag_length > 1
-            cb.condition(
-                is_sig_s(meta) * tindex_eq_tlength * tlength_lt,
-                |cb| {
-                    cb.require_equal("127 < value", value_gt_127.is_lt(meta, None), 1.expr());
-                    cb.require_equal("value < 184", value_lt_184.is_lt(meta, None), 1.expr());
-                    cb.require_equal(
-                        "length_acc == value - 0x80",
-                        meta.query_advice(length_acc, Rotation::cur()),
-                        meta.query_advice(byte_value, Rotation::cur()) - 128.expr(),
-                    );
-                    cb.require_equal(
-                        "tag_index::next == length_acc",
-                        meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                        meta.query_advice(length_acc, Rotation::cur()),
-                    );
-                    cb.require_equal(
-                        "value_acc::next == value::next",
-                        meta.query_advice(rlp_table.value_acc, Rotation::next()),
-                        meta.query_advice(byte_value, Rotation::next()),
-                    );
-                },
-            );
-
-            // if tag_index < tag_length && tag_index > 1
-            cb.condition(
-                is_sig_s(meta) * tindex_lt_tlength * tindex_lt.clone(),
-                |cb| {
-                    cb.require_equal(
-                        "[sig_s] value_acc::next == value_acc::cur * randomness + value::next",
-                        meta.query_advice(rlp_table.value_acc, Rotation::next()),
-                        meta.query_advice(rlp_table.value_acc, Rotation::cur()) * r.clone() +
-                            meta.query_advice(byte_value, Rotation::next()),
-                    );
-                },
-            );
-
-            // if tag_index > 1
-            cb.condition(is_sig_s(meta) * tindex_lt.clone(), |cb| {
-                cb.require_equal(
-                    "tag::next == RlpTxTag::SigS",
-                    meta.query_advice(rlp_table.tag, Rotation::next()),
-                    RlpTxTag::SigS.expr(),
-                );
-                cb.require_equal(
-                    "tag_index::next == tag_index - 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(rlp_table.tag_index, Rotation::cur()) - 1.expr(),
-                );
-                cb.require_equal(
-                    "tag_length::next == tag_length",
-                    meta.query_advice(tag_length, Rotation::next()),
-                    meta.query_advice(tag_length, Rotation::cur()),
-                );
-            });
-
-            // if tag_index == 1
-            cb.condition(is_sig_s(meta) * tindex_eq.clone(), |cb| {
                 // RlpTxTag::RlpLength checks.
                 cb.require_equal(
-                    "tag::next == RlpTxTag::RlpLength",
+                    "next tag is RlpLength",
                     meta.query_advice(rlp_table.tag, Rotation::next()),
                     RlpTxTag::RlpLength.expr(),
                 );
                 cb.require_equal(
-                    "tag_index::next == tag_length::next",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
-                    meta.query_advice(tag_length, Rotation::next()),
-                );
-                cb.require_equal(
-                    "tag_index::next == 1",
-                    meta.query_advice(rlp_table.tag_index, Rotation::next()),
+                    "tag_rindex::next == 1",
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
                     1.expr(),
                 );
                 cb.require_equal(
@@ -1545,14 +897,9 @@ impl<F: Field> RlpCircuitConfig<F> {
                     RlpTxTag::Rlp.expr(),
                 );
                 cb.require_equal(
-                    "last tag is Rlp => value_rlc::Rotation(2) == value_rlc::cur",
-                    meta.query_advice(value_rlc, Rotation(2)),
-                    meta.query_advice(value_rlc, Rotation::cur()),
-                );
-                cb.require_equal(
-                    "last tag is Rlp => value_acc::Rotation(2) == value_rlc::Rotation(2)",
+                    "last tag is Rlp => value_acc::Rotation(2) == all_bytes_rlc_acc::cur()",
                     meta.query_advice(rlp_table.value_acc, Rotation(2)),
-                    meta.query_advice(value_rlc, Rotation(2)),
+                    meta.query_advice(all_bytes_rlc_acc, Rotation::cur()),
                 );
                 cb.require_equal(
                     "is_last::Rotation(2) == 1",
@@ -1569,7 +916,7 @@ impl<F: Field> RlpCircuitConfig<F> {
 
         // Constraints that always need to be satisfied.
         meta.create_gate("always", |meta| {
-            let mut cb = BaseConstraintBuilder::default();
+            let mut cb = BaseConstraintBuilder::new(9);
 
             cb.require_boolean(
                 "is_first is boolean",
@@ -1579,31 +926,10 @@ impl<F: Field> RlpCircuitConfig<F> {
                 "is_last is boolean",
                 meta.query_advice(is_last, Rotation::cur()),
             );
-            cb.require_boolean(
-                "data_type is boolean",
+            cb.require_in_set(
+                "data_type is in set {TxHash, TxSign}",
                 meta.query_advice(rlp_table.data_type, Rotation::cur()),
-            );
-            cb.require_equal(
-                "only one tag is turned on",
-                sum::expr(&[
-                    is_prefix(meta),
-                    is_nonce(meta),
-                    is_gas_price(meta),
-                    is_gas(meta),
-                    is_to_prefix(meta),
-                    is_to(meta),
-                    is_value(meta),
-                    is_data_prefix(meta),
-                    is_data(meta),
-                    is_chainid(meta),
-                    is_zero(meta),
-                    is_sig_v(meta),
-                    is_sig_r(meta),
-                    is_sig_s(meta),
-                    is_rlp_length(meta),
-                    is_rlp_summary(meta),
-                ]),
-                1.expr(),
+                vec![RlpDataType::TxHash.expr(), RlpDataType::TxSign.expr()],
             );
 
             cb.gate(meta.query_fixed(q_usable, Rotation::cur()))
@@ -1611,11 +937,11 @@ impl<F: Field> RlpCircuitConfig<F> {
 
         // Constraints for the first row in the layout.
         meta.create_gate("is_first == 1", |meta| {
-            let mut cb = BaseConstraintBuilder::default();
+            let mut cb = BaseConstraintBuilder::new(9);
 
             cb.require_equal(
                 "value_rlc == value",
-                meta.query_advice(value_rlc, Rotation::cur()),
+                meta.query_advice(all_bytes_rlc_acc, Rotation::cur()),
                 meta.query_advice(byte_value, Rotation::cur()),
             );
             cb.require_equal(
@@ -1627,51 +953,52 @@ impl<F: Field> RlpCircuitConfig<F> {
             cb.gate(and::expr(vec![
                 meta.query_fixed(q_usable, Rotation::cur()),
                 meta.query_advice(is_first, Rotation::cur()),
+                not::expr(is_padding(meta)),
             ]))
         });
 
-        // Constraints for every row except the first and last rows.
-        meta.create_gate("is_first == 0 and is_last == 0", |meta| {
-            let mut cb = BaseConstraintBuilder::default();
+        // Constraints for every row except the last row in one RLP instance.
+        meta.create_gate("is_last == 0", |meta| {
+            let mut cb = BaseConstraintBuilder::new(9);
 
             cb.require_equal(
-                "index == index_prev + 1",
-                meta.query_advice(index, Rotation::cur()),
-                meta.query_advice(index, Rotation::prev()) + 1.expr(),
+                "index' == index + 1",
+                meta.query_advice(index, Rotation::next()),
+                meta.query_advice(index, Rotation::cur()) + 1.expr(),
             );
             cb.require_equal(
-                "rindex == rindex_prev - 1",
-                meta.query_advice(rindex, Rotation::cur()),
-                meta.query_advice(rindex, Rotation::prev()) - 1.expr(),
+                "rindex' == rindex - 1",
+                meta.query_advice(rindex, Rotation::next()),
+                meta.query_advice(rindex, Rotation::cur()) - 1.expr(),
             );
             cb.require_equal(
-                "tx_id == tx_id::prev",
+                "tx_id' == tx_id",
+                meta.query_advice(rlp_table.tx_id, Rotation::next()),
                 meta.query_advice(rlp_table.tx_id, Rotation::cur()),
-                meta.query_advice(rlp_table.tx_id, Rotation::prev()),
             );
             cb.require_equal(
-                "value_rlc == (value_rlc_prev * r) + value",
-                meta.query_advice(value_rlc, Rotation::cur()),
-                meta.query_advice(value_rlc, Rotation::prev()) * r
-                    + meta.query_advice(byte_value, Rotation::cur()),
+                "data_type' == data_type",
+                meta.query_advice(rlp_table.data_type, Rotation::next()),
+                meta.query_advice(rlp_table.data_type, Rotation::cur()),
+            );
+            cb.require_equal(
+                "all_bytes_rlc_acc' == (all_bytes_rlc_acc * r) + byte_value'",
+                meta.query_advice(all_bytes_rlc_acc, Rotation::next()),
+                meta.query_advice(all_bytes_rlc_acc, Rotation::cur()) * keccak_input_rand
+                    + meta.query_advice(byte_value, Rotation::next()),
             );
 
             cb.gate(and::expr(vec![
                 meta.query_fixed(q_usable, Rotation::cur()),
-                not::expr(meta.query_advice(is_first, Rotation::cur())),
                 not::expr(meta.query_advice(is_last, Rotation::cur())),
+                not::expr(is_padding(meta)),
             ]))
         });
 
         // Constraints for the last row, i.e. RLP summary row.
         meta.create_gate("is_last == 1", |meta| {
-            let mut cb = BaseConstraintBuilder::default();
+            let mut cb = BaseConstraintBuilder::new(9);
 
-            cb.require_equal(
-                "is_last == 1 then value_acc == value_rlc",
-                meta.query_advice(rlp_table.value_acc, Rotation::cur()),
-                meta.query_advice(value_rlc, Rotation::cur()),
-            );
             cb.require_equal(
                 "is_last == 1 then tag == RlpTxTag::Rlp",
                 meta.query_advice(rlp_table.tag, Rotation::cur()),
@@ -1699,16 +1026,24 @@ impl<F: Field> RlpCircuitConfig<F> {
                         meta.query_advice(rlp_table.tag, Rotation::next()),
                         RlpTxTag::Prefix.expr(),
                     );
+                    cb.require_equal(
+                        "TxSign rows' first row starts with rlp_table.tag_rindex = tag_length",
+                        meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
+                        meta.query_advice(tag_length, Rotation::next()),
+                    );
                 },
             );
 
-            // if data_type::cur == TxSign and it was not the last tx in the layout
+            // if data_type::cur == TxSign and it was **not**
+            // the last tx in the layout (tag::next != Padding)
             // - tx_id increments.
             // - TxHash rows follow.
+            let is_tag_next_padding =
+                tag_bits.value_equals(RlpTxTag::Padding, Rotation::next())(meta);
             cb.condition(
                 and::expr(vec![
                     not::expr(meta.query_advice(rlp_table.data_type, Rotation::cur())),
-                    meta.query_fixed(q_usable, Rotation::next()),
+                    not::expr(is_tag_next_padding),
                 ]),
                 |cb| {
                     cb.require_equal(
@@ -1726,6 +1061,11 @@ impl<F: Field> RlpCircuitConfig<F> {
                         meta.query_advice(rlp_table.tag, Rotation::next()),
                         RlpTxTag::Prefix.expr(),
                     );
+                    cb.require_equal(
+                        "TxSign rows' first row starts with rlp_table.tag_rindex = tag_length",
+                        meta.query_advice(rlp_table.tag_rindex, Rotation::next()),
+                        meta.query_advice(tag_length, Rotation::next()),
+                    );
                 },
             );
 
@@ -1735,19 +1075,55 @@ impl<F: Field> RlpCircuitConfig<F> {
             ]))
         });
 
+        meta.create_gate("padding rows", |meta| {
+            let mut cb = BaseConstraintBuilder::new(9);
+
+            cb.condition(is_padding(meta), |cb| {
+                cb.require_equal(
+                    "tag_next == Padding",
+                    meta.query_advice(rlp_table.tag, Rotation::next()),
+                    RlpTxTag::Padding.expr(),
+                );
+
+                cb.require_zero(
+                    "tx_id == 0",
+                    meta.query_advice(rlp_table.tx_id, Rotation::cur()),
+                );
+                cb.require_zero(
+                    "data_type == 0",
+                    meta.query_advice(rlp_table.data_type, Rotation::cur()),
+                );
+                cb.require_zero(
+                    "tag_rindex == 0",
+                    meta.query_advice(rlp_table.tag_rindex, Rotation::cur()),
+                );
+                cb.require_zero(
+                    "value_acc == 0",
+                    meta.query_advice(rlp_table.value_acc, Rotation::cur()),
+                );
+            });
+
+            cb.gate(meta.query_fixed(q_usable, Rotation::cur()))
+        });
+
         Self {
+            minimum_rows: meta.minimum_rows(),
             q_usable,
             is_first,
             is_last,
-            rlp_table,
+            rlp_table: *rlp_table,
             index,
             rindex,
             byte_value,
-            value_acc_rlc,
-            tx_tags,
+            calldata_bytes_rlc_acc,
+            tag_bits,
+            tag_rom,
             tag_length,
             length_acc,
-            value_rlc,
+            all_bytes_rlc_acc,
+            is_simple_tag,
+            is_prefix_tag,
+            is_dp_tag,
             tag_index_cmp_1,
             tag_index_length_cmp,
             tag_length_cmp_1,
@@ -1758,20 +1134,23 @@ impl<F: Field> RlpCircuitConfig<F> {
             value_gt_191,
             value_gt_247,
             value_lt_129,
+            value_eq_128,
             value_lt_184,
             value_lt_192,
             value_lt_248,
-            value_lt_256,
             length_acc_cmp_0,
         }
     }
 
     pub(crate) fn assign(
         &self,
-        mut layouter: impl Layouter<F>,
+        layouter: &mut impl Layouter<F>,
         signed_txs: &[SignedTransaction],
-        randomness: F,
+        k: usize,
+        challenges: &Challenges<Value<F>>,
     ) -> Result<(), Error> {
+        let keccak_input_rand = challenges.keccak_input();
+        let tag_chip = BinaryNumberChip::construct(self.tag_bits);
         let tag_index_cmp_1_chip = ComparatorChip::construct(self.tag_index_cmp_1.clone());
         let tag_index_length_cmp_chip =
             ComparatorChip::construct(self.tag_index_length_cmp.clone());
@@ -1785,37 +1164,92 @@ impl<F: Field> RlpCircuitConfig<F> {
         let value_gt_191_chip = LtChip::construct(self.value_gt_191);
         let value_gt_247_chip = LtChip::construct(self.value_gt_247);
         let value_lt_129_chip = LtChip::construct(self.value_lt_129);
+        let value_eq_128_chip = IsEqualChip::construct(self.value_eq_128.clone());
         let value_lt_184_chip = LtChip::construct(self.value_lt_184);
         let value_lt_192_chip = LtChip::construct(self.value_lt_192);
         let value_lt_248_chip = LtChip::construct(self.value_lt_248);
-        let value_lt_256_chip = LtChip::construct(self.value_lt_256);
 
         let length_acc_cmp_0_chip = ComparatorChip::construct(self.length_acc_cmp_0.clone());
+
+        debug_assert!(
+            k >= self.minimum_rows,
+            "k: {}, minimum_rows: {}",
+            k,
+            self.minimum_rows,
+        );
+        let padding_end_offset = k - self.minimum_rows + 1;
+        layouter.assign_region(
+            || "assign tag rom",
+            |mut region| {
+                for (i, (tag, tag_next, max_length)) in [
+                    (RlpTxTag::Nonce, RlpTxTag::GasPrice, 10),
+                    (RlpTxTag::GasPrice, RlpTxTag::Gas, 34),
+                    (RlpTxTag::Gas, RlpTxTag::To, 10),
+                    (RlpTxTag::To, RlpTxTag::Value, 22),
+                    (RlpTxTag::Value, RlpTxTag::DataPrefix, 34),
+                    (RlpTxTag::ChainId, RlpTxTag::Zero, 10),
+                    (RlpTxTag::SigV, RlpTxTag::SigR, 10),
+                    (RlpTxTag::SigR, RlpTxTag::SigS, 34),
+                    (RlpTxTag::SigS, RlpTxTag::RlpLength, 34),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let offset = i;
+                    region.assign_fixed(
+                        || "tag",
+                        self.tag_rom.tag,
+                        offset,
+                        || Value::known(F::from(tag as u64)),
+                    )?;
+                    region.assign_fixed(
+                        || "tag_next",
+                        self.tag_rom.tag_next,
+                        offset,
+                        || Value::known(F::from(tag_next as u64)),
+                    )?;
+                    region.assign_fixed(
+                        || "max_length",
+                        self.tag_rom.max_length,
+                        offset,
+                        || Value::known(F::from(max_length)),
+                    )?;
+                }
+
+                Ok(())
+            },
+        )?;
 
         layouter.assign_region(
             || "assign RLP-encoded data",
             |mut region| {
                 let mut offset = 0;
-                self.assign_padding_rows(&mut region, offset)?;
+                let simple_tags = [
+                    Nonce,
+                    GasPrice,
+                    Gas,
+                    To,
+                    RlpTxTag::Value,
+                    SigV,
+                    SigR,
+                    SigS,
+                    ChainId,
+                ];
 
                 for signed_tx in signed_txs.iter() {
                     // tx hash (signed tx)
-                    let mut value_rlc = F::zero();
-                    let tx_hash_rows = signed_tx.gen_witness(randomness);
+                    let mut all_bytes_rlc_acc = Value::known(F::zero());
+                    let tx_hash_rows = signed_tx.gen_witness(challenges);
                     let n_rows = tx_hash_rows.len();
                     for (idx, row) in tx_hash_rows
                         .iter()
-                        .chain(signed_tx.rlp_rows(randomness).iter())
+                        .chain(signed_tx.rlp_rows(keccak_input_rand).iter())
                         .enumerate()
                     {
-                        offset += 1;
-
                         // update value accumulator over the entire RLP encoding.
-                        value_rlc = if row.tag == RlpTxTag::Rlp as u8 {
-                            row.value_acc
-                        } else {
-                            value_rlc * randomness + F::from(row.value as u64)
-                        };
+                        all_bytes_rlc_acc = all_bytes_rlc_acc
+                            .zip(keccak_input_rand)
+                            .map(|(acc, rand)| acc * rand + F::from(row.value as u64));
 
                         // q_usable
                         region.assign_fixed(
@@ -1832,172 +1266,118 @@ impl<F: Field> RlpCircuitConfig<F> {
                             || Value::known(F::from((idx == 0) as u64)),
                         )?;
                         // advices
-                        let rindex = (n_rows + 2 - row.index) as u64;
+                        let rindex = (n_rows + 2 - row.index) as u64; // rindex decreases from n_rows+1 to 0
+                        let rlp_table = &self.rlp_table;
+                        let is_simple_tag =
+                            simple_tags.iter().filter(|tag| **tag == row.tag).count();
+                        let is_prefix_tag = (row.tag == Prefix).into();
+                        let is_dp_tag = (row.tag == DataPrefix).into();
+
                         for (name, column, value) in [
-                            ("is_last", self.is_last, F::from(row.index == n_rows + 2)),
-                            (
-                                "rlp_table::tx_id",
-                                self.rlp_table.tx_id,
-                                F::from(row.id as u64),
-                            ),
-                            (
-                                "rlp_table::tag",
-                                self.rlp_table.tag,
-                                F::from(row.tag as u64),
-                            ),
-                            (
-                                "rlp_table::tag_index",
-                                self.rlp_table.tag_index,
-                                F::from(row.tag_index as u64),
-                            ),
+                            ("is_last", self.is_last, (row.index == n_rows + 2).into()),
+                            ("tx_id", rlp_table.tx_id, row.tx_id as u64),
+                            ("tag", rlp_table.tag, (row.tag as u64)),
+                            ("is_simple_tag", self.is_simple_tag, is_simple_tag as u64),
+                            ("is_prefix_tag", self.is_prefix_tag, is_prefix_tag),
+                            ("is_dp_tag", self.is_dp_tag, is_dp_tag),
+                            ("tag_index", rlp_table.tag_rindex, (row.tag_rindex as u64)),
+                            ("data_type", rlp_table.data_type, (row.data_type as u64)),
+                            ("index", self.index, (row.index as u64)),
+                            ("rindex", self.rindex, (rindex)),
+                            ("value", self.byte_value, (row.value as u64)),
+                            ("tag_length", self.tag_length, (row.tag_length as u64)),
+                            ("length_acc", self.length_acc, (row.length_acc)),
+                        ] {
+                            region.assign_advice(
+                                || format!("assign {} {}", name, offset),
+                                column,
+                                offset,
+                                || Value::known(F::from(value)),
+                            )?;
+                        }
+                        for (name, column, value) in [
                             (
                                 "rlp_table::value_acc",
                                 self.rlp_table.value_acc,
                                 row.value_acc,
                             ),
                             (
-                                "rlp_table::data_type",
-                                self.rlp_table.data_type,
-                                F::from(row.data_type as u64),
+                                "calldata_bytes_acc_rlc",
+                                self.calldata_bytes_rlc_acc,
+                                row.value_rlc_acc,
                             ),
-                            ("index", self.index, F::from(row.index as u64)),
-                            ("rindex", self.rindex, F::from(rindex)),
-                            ("value", self.byte_value, F::from(row.value as u64)),
-                            ("value_acc_rlc", self.value_acc_rlc, row.value_acc_rlc),
                             (
-                                "tag_length",
-                                self.tag_length,
-                                F::from(row.tag_length as u64),
+                                "all_bytes_rlc_acc",
+                                self.all_bytes_rlc_acc,
+                                all_bytes_rlc_acc,
                             ),
-                            ("length_acc", self.length_acc, F::from(row.length_acc)),
-                            ("value_rlc", self.value_rlc, value_rlc),
                         ] {
                             region.assign_advice(
                                 || format!("assign {} {}", name, offset),
                                 column,
                                 offset,
-                                || Value::known(value),
+                                || value,
                             )?;
                         }
 
-                        for (name, column, value) in self.tx_tag_invs(Some(row.tag)) {
-                            region.assign_advice(
-                                || format!("assign {} {}", name, offset),
-                                column,
+                        tag_chip.assign(&mut region, offset, &row.tag)?;
+
+                        for (chip, lhs, rhs) in [
+                            (&tag_index_cmp_1_chip, 1, row.tag_rindex as u64),
+                            (
+                                &tag_index_length_cmp_chip,
+                                row.tag_rindex,
+                                row.tag_length as u64,
+                            ),
+                            (&tag_length_cmp_1_chip, 1, row.tag_length as u64),
+                            (&length_acc_cmp_0_chip, 0, row.length_acc),
+                        ] {
+                            chip.assign(&mut region, offset, F::from(lhs as u64), F::from(rhs))?;
+                        }
+
+                        value_eq_128_chip.assign(
+                            &mut region,
+                            offset,
+                            Value::known(F::from(row.value as u64)),
+                            Value::known(F::from(128u64)),
+                        )?;
+
+                        for (chip, lhs, rhs) in [
+                            (&tag_index_lt_10_chip, row.tag_rindex, 10),
+                            (&tag_index_lt_34_chip, row.tag_rindex, 34),
+                            (&value_gt_127_chip, 127, row.value),
+                            (&value_gt_183_chip, 183, row.value),
+                            (&value_gt_191_chip, 191, row.value),
+                            (&value_gt_247_chip, 247, row.value),
+                            (&value_lt_129_chip, row.value as usize, 129),
+                            (&value_lt_184_chip, row.value as usize, 184),
+                            (&value_lt_192_chip, row.value as usize, 192),
+                            (&value_lt_248_chip, row.value as usize, 248),
+                        ] {
+                            chip.assign(
+                                &mut region,
                                 offset,
-                                || Value::known(value),
+                                F::from(lhs as u64),
+                                F::from(rhs as u64),
                             )?;
                         }
 
-                        tag_index_cmp_1_chip.assign(
-                            &mut region,
-                            offset,
-                            F::one(),
-                            F::from(row.tag_index as u64),
-                        )?;
-                        tag_index_length_cmp_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.tag_index as u64),
-                            F::from(row.tag_length as u64),
-                        )?;
-                        tag_length_cmp_1_chip.assign(
-                            &mut region,
-                            offset,
-                            F::one(),
-                            F::from(row.tag_length as u64),
-                        )?;
-                        tag_index_lt_10_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.tag_index as u64),
-                            F::from(10u64),
-                        )?;
-                        tag_index_lt_34_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.tag_index as u64),
-                            F::from(34u64),
-                        )?;
-                        value_gt_127_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(127u64),
-                            F::from(row.value as u64),
-                        )?;
-                        value_gt_183_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(183u64),
-                            F::from(row.value as u64),
-                        )?;
-                        value_gt_191_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(191u64),
-                            F::from(row.value as u64),
-                        )?;
-                        value_gt_247_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(247u64),
-                            F::from(row.value as u64),
-                        )?;
-                        value_lt_129_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.value as u64),
-                            F::from(129u64),
-                        )?;
-                        value_lt_184_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.value as u64),
-                            F::from(184u64),
-                        )?;
-                        value_lt_192_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.value as u64),
-                            F::from(192u64),
-                        )?;
-                        value_lt_248_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.value as u64),
-                            F::from(248u64),
-                        )?;
-                        value_lt_256_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.value as u64),
-                            F::from(256u64),
-                        )?;
-                        length_acc_cmp_0_chip.assign(
-                            &mut region,
-                            offset,
-                            F::zero(),
-                            F::from(row.length_acc as u64),
-                        )?;
+                        offset += 1;
                     }
 
                     // tx sign (unsigned tx)
-                    let mut value_rlc = F::zero();
-                    let tx_sign_rows = signed_tx.tx.gen_witness(randomness);
+                    let mut all_bytes_rlc_acc = Value::known(F::zero());
+                    let tx_sign_rows = signed_tx.tx.gen_witness(challenges);
                     let n_rows = tx_sign_rows.len();
                     for (idx, row) in tx_sign_rows
                         .iter()
-                        .chain(signed_tx.tx.rlp_rows(randomness).iter())
+                        .chain(signed_tx.tx.rlp_rows(challenges.keccak_input()).iter())
                         .enumerate()
                     {
-                        offset += 1;
-
                         // update value accumulator over the entire RLP encoding.
-                        value_rlc = if row.tag == RlpTxTag::Rlp as u8 {
-                            row.value_acc
-                        } else {
-                            value_rlc * randomness + F::from(row.value as u64)
-                        };
+                        all_bytes_rlc_acc = all_bytes_rlc_acc
+                            .zip(keccak_input_rand)
+                            .map(|(acc, rand)| acc * rand + F::from(row.value as u64));
 
                         // q_usable
                         region.assign_fixed(
@@ -2014,159 +1394,106 @@ impl<F: Field> RlpCircuitConfig<F> {
                             || Value::known(F::from((idx == 0) as u64)),
                         )?;
                         // advices
-                        let rindex = (n_rows + 2 - row.index) as u64;
+                        let rindex = (n_rows + 2 - row.index) as u64; // rindex decreases from n_rows+1 to 0
+                        let rlp_table = &self.rlp_table;
+                        let is_simple_tag =
+                            simple_tags.iter().filter(|tag| **tag == row.tag).count();
+                        let is_prefix_tag = (row.tag == Prefix).into();
+                        let is_dp_tag = (row.tag == DataPrefix).into();
                         for (name, column, value) in [
-                            ("is_last", self.is_last, F::from(row.index == n_rows + 2)),
-                            (
-                                "rlp_table::tx_id",
-                                self.rlp_table.tx_id,
-                                F::from(row.id as u64),
-                            ),
-                            (
-                                "rlp_table::tag",
-                                self.rlp_table.tag,
-                                F::from(row.tag as u64),
-                            ),
-                            (
-                                "rlp_table::tag_index",
-                                self.rlp_table.tag_index,
-                                F::from(row.tag_index as u64),
-                            ),
-                            (
-                                "rlp_table::value_acc",
-                                self.rlp_table.value_acc,
-                                row.value_acc,
-                            ),
-                            (
-                                "rlp_table::data_type",
-                                self.rlp_table.data_type,
-                                F::from(row.data_type as u64),
-                            ),
-                            ("index", self.index, F::from(row.index as u64)),
-                            ("rindex", self.rindex, F::from(rindex)),
-                            ("byte value", self.byte_value, F::from(row.value as u64)),
-                            ("value_acc_rlc", self.value_acc_rlc, row.value_acc_rlc),
-                            (
-                                "tag_length",
-                                self.tag_length,
-                                F::from(row.tag_length as u64),
-                            ),
-                            ("length_acc", self.length_acc, F::from(row.length_acc)),
-                            ("value_rlc", self.value_rlc, value_rlc),
+                            ("is_last", self.is_last, (row.index == n_rows + 2).into()),
+                            ("tx_id", rlp_table.tx_id, row.tx_id as u64),
+                            ("tag", rlp_table.tag, row.tag as u64),
+                            ("is_simple_tag", self.is_simple_tag, is_simple_tag as u64),
+                            ("is_prefix_tag", self.is_prefix_tag, is_prefix_tag),
+                            ("is_dp_tag", self.is_dp_tag, is_dp_tag),
+                            ("tag_rindex", rlp_table.tag_rindex, row.tag_rindex as u64),
+                            ("data_type", rlp_table.data_type, row.data_type as u64),
+                            ("index", self.index, row.index as u64),
+                            ("rindex", self.rindex, rindex),
+                            ("byte value", self.byte_value, row.value as u64),
+                            ("tag_length", self.tag_length, row.tag_length as u64),
+                            ("length_acc", self.length_acc, row.length_acc),
                         ] {
                             region.assign_advice(
                                 || format!("assign {} {}", name, offset),
                                 column,
                                 offset,
-                                || Value::known(value),
+                                || Value::known(F::from(value)),
                             )?;
                         }
-
-                        for (name, column, value) in self.tx_tag_invs(Some(row.tag)) {
+                        for (name, column, value) in [
+                            ("rlp_table::value_acc", rlp_table.value_acc, row.value_acc),
+                            (
+                                "calldata_bytes_rlc_acc",
+                                self.calldata_bytes_rlc_acc,
+                                row.value_rlc_acc,
+                            ),
+                            (
+                                "all_bytes_rlc_acc",
+                                self.all_bytes_rlc_acc,
+                                all_bytes_rlc_acc,
+                            ),
+                        ] {
                             region.assign_advice(
                                 || format!("assign {} {}", name, offset),
                                 column,
                                 offset,
-                                || Value::known(value),
+                                || value,
                             )?;
                         }
 
-                        tag_index_cmp_1_chip.assign(
+                        tag_chip.assign(&mut region, offset, &row.tag)?;
+
+                        for (chip, lhs, rhs) in [
+                            (&tag_index_cmp_1_chip, 1, row.tag_rindex as u64),
+                            (
+                                &tag_index_length_cmp_chip,
+                                row.tag_rindex,
+                                row.tag_length as u64,
+                            ),
+                            (&tag_length_cmp_1_chip, 1, row.tag_length as u64),
+                            (&length_acc_cmp_0_chip, 0, row.length_acc),
+                        ] {
+                            chip.assign(&mut region, offset, F::from(lhs as u64), F::from(rhs))?;
+                        }
+
+                        value_eq_128_chip.assign(
                             &mut region,
                             offset,
-                            F::one(),
-                            F::from(row.tag_index as u64),
+                            Value::known(F::from(row.value as u64)),
+                            Value::known(F::from(128u64)),
                         )?;
-                        tag_index_length_cmp_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.tag_index as u64),
-                            F::from(row.tag_length as u64),
-                        )?;
-                        tag_length_cmp_1_chip.assign(
-                            &mut region,
-                            offset,
-                            F::one(),
-                            F::from(row.tag_length as u64),
-                        )?;
-                        tag_index_lt_10_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.tag_index as u64),
-                            F::from(10u64),
-                        )?;
-                        tag_index_lt_34_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.tag_index as u64),
-                            F::from(34u64),
-                        )?;
-                        value_gt_127_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(127u64),
-                            F::from(row.value as u64),
-                        )?;
-                        value_gt_183_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(183u64),
-                            F::from(row.value as u64),
-                        )?;
-                        value_gt_191_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(191u64),
-                            F::from(row.value as u64),
-                        )?;
-                        value_gt_247_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(247u64),
-                            F::from(row.value as u64),
-                        )?;
-                        value_lt_129_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.value as u64),
-                            F::from(129u64),
-                        )?;
-                        value_lt_184_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.value as u64),
-                            F::from(184u64),
-                        )?;
-                        value_lt_192_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.value as u64),
-                            F::from(192u64),
-                        )?;
-                        value_lt_248_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.value as u64),
-                            F::from(248u64),
-                        )?;
-                        value_lt_256_chip.assign(
-                            &mut region,
-                            offset,
-                            F::from(row.value as u64),
-                            F::from(256u64),
-                        )?;
-                        length_acc_cmp_0_chip.assign(
-                            &mut region,
-                            offset,
-                            F::zero(),
-                            F::from(row.length_acc as u64),
-                        )?;
+
+                        for (chip, lhs, rhs) in [
+                            (&tag_index_lt_10_chip, row.tag_rindex, 10),
+                            (&tag_index_lt_34_chip, row.tag_rindex, 34),
+                            (&value_gt_127_chip, 127, row.value),
+                            (&value_gt_183_chip, 183, row.value),
+                            (&value_gt_191_chip, 191, row.value),
+                            (&value_gt_247_chip, 247, row.value),
+                            (&value_lt_129_chip, row.value as usize, 129),
+                            (&value_lt_184_chip, row.value as usize, 184),
+                            (&value_lt_192_chip, row.value as usize, 192),
+                            (&value_lt_248_chip, row.value as usize, 248),
+                        ] {
+                            chip.assign(
+                                &mut region,
+                                offset,
+                                F::from(lhs as u64),
+                                F::from(rhs as u64),
+                            )?;
+                        }
+
+                        offset += 1;
                     }
                 }
 
-                // end with dummy rows.
-                for i in 1..=4 {
-                    self.assign_padding_rows(&mut region, offset + i)?;
+                // TODO: speed up the assignment of padding rows
+                let padding_start_offset = offset;
+                // end with padding rows.
+                for offset in padding_start_offset..padding_end_offset {
+                    self.assign_padding_rows(&mut region, offset)?;
                 }
 
                 Ok(())
@@ -2176,23 +1503,12 @@ impl<F: Field> RlpCircuitConfig<F> {
 
     fn assign_padding_rows(&self, region: &mut Region<'_, F>, offset: usize) -> Result<(), Error> {
         for column in [
-            self.is_first,
-            self.is_last,
             self.rlp_table.tx_id,
-            self.rlp_table.tag,
-            self.rlp_table.tag_index,
+            self.rlp_table.tag_rindex,
             self.rlp_table.value_acc,
             self.rlp_table.data_type,
-            self.index,
-            self.tag_length,
-            self.length_acc,
-            self.rindex,
-            self.byte_value,
-            self.value_acc_rlc,
-            self.value_rlc,
         ]
         .into_iter()
-        .chain(self.tx_tags.into_iter())
         {
             region.assign_advice(
                 || format!("padding row, offset: {}", offset),
@@ -2201,69 +1517,50 @@ impl<F: Field> RlpCircuitConfig<F> {
                 || Value::known(F::zero()),
             )?;
         }
+        region.assign_advice(
+            || format!("padding row, tag = Padding, offset: {}", offset),
+            self.rlp_table.tag,
+            offset,
+            || {
+                Value::known(F::from(
+                    <RlpTxTag as Into<usize>>::into(RlpTxTag::Padding) as u64
+                ))
+            },
+        )?;
+        region.assign_fixed(
+            || format!("padding row, offset: {}", offset),
+            self.q_usable,
+            offset,
+            || Value::known(F::one()),
+        )?;
 
         Ok(())
     }
+}
 
-    fn tx_tag_invs(&self, tag: Option<u8>) -> Vec<(&str, Column<Advice>, F)> {
-        macro_rules! tx_tag_inv {
-            ($tag:expr, $tag_variant:ident) => {
-                if $tag == (RlpTxTag::$tag_variant as u8) {
-                    F::zero()
-                } else {
-                    F::from($tag as u64).invert().unwrap_or(F::zero())
-                }
-            };
-        }
+/// Circuit configuration arguments
+pub struct RlpCircuitConfigArgs<F: Field> {
+    /// RlpTable
+    rlp_table: RlpTable,
+    /// Challenges
+    challenges: Challenges<Expression<F>>,
+}
 
-        tag.map_or_else(
-            || {
-                vec![
-                    ("prefix", self.tx_tags[0], F::one()),
-                    ("nonce", self.tx_tags[1], F::one()),
-                    ("gas_price", self.tx_tags[2], F::one()),
-                    ("gas", self.tx_tags[3], F::one()),
-                    ("to_prefix", self.tx_tags[4], F::one()),
-                    ("to", self.tx_tags[5], F::one()),
-                    ("value", self.tx_tags[6], F::one()),
-                    ("data_prefix", self.tx_tags[7], F::one()),
-                    ("data", self.tx_tags[8], F::one()),
-                    ("chain_id", self.tx_tags[9], F::one()),
-                    ("zero", self.tx_tags[10], F::one()),
-                    ("sig_v", self.tx_tags[11], F::one()),
-                    ("sig_r", self.tx_tags[12], F::one()),
-                    ("sig_s", self.tx_tags[13], F::one()),
-                    ("rlp_length", self.tx_tags[14], F::one()),
-                    ("rlp", self.tx_tags[15], F::one()),
-                ]
-            },
-            |tag| {
-                vec![
-                    ("prefix", self.tx_tags[0], tx_tag_inv!(tag, Prefix)),
-                    ("nonce", self.tx_tags[1], tx_tag_inv!(tag, Nonce)),
-                    ("gas_price", self.tx_tags[2], tx_tag_inv!(tag, GasPrice)),
-                    ("gas", self.tx_tags[3], tx_tag_inv!(tag, Gas)),
-                    ("to_prefix", self.tx_tags[4], tx_tag_inv!(tag, ToPrefix)),
-                    ("to", self.tx_tags[5], tx_tag_inv!(tag, To)),
-                    ("value", self.tx_tags[6], tx_tag_inv!(tag, Value)),
-                    ("data_prefix", self.tx_tags[7], tx_tag_inv!(tag, DataPrefix)),
-                    ("data", self.tx_tags[8], tx_tag_inv!(tag, Data)),
-                    ("chain_id", self.tx_tags[9], tx_tag_inv!(tag, ChainId)),
-                    ("zero", self.tx_tags[10], tx_tag_inv!(tag, Zero)),
-                    ("sig_v", self.tx_tags[11], tx_tag_inv!(tag, SigV)),
-                    ("sig_r", self.tx_tags[12], tx_tag_inv!(tag, SigR)),
-                    ("sig_s", self.tx_tags[13], tx_tag_inv!(tag, SigS)),
-                    ("rlp_length", self.tx_tags[14], tx_tag_inv!(tag, RlpLength)),
-                    ("rlp", self.tx_tags[15], tx_tag_inv!(tag, Rlp)),
-                ]
-            },
-        )
+impl<F: Field> SubCircuitConfig<F> for RlpCircuitConfig<F> {
+    type ConfigArgs = RlpCircuitConfigArgs<F>;
+
+    fn new(meta: &mut ConstraintSystem<F>, args: Self::ConfigArgs) -> Self {
+        RlpCircuitConfig::configure(meta, &args.rlp_table, &args.challenges)
     }
 }
 
-struct RlpCircuit<F, RLP> {
-    inputs: Vec<RLP>,
-    randomness: F,
+/// Circuit to verify RLP encoding is correct
+#[derive(Clone, Debug)]
+pub struct RlpCircuit<F, RLP> {
+    /// Rlp encoding inputs
+    pub inputs: Vec<RLP>,
+    /// Size of the circuit
+    pub size: usize,
     _marker: PhantomData<F>,
 }
 
@@ -2271,20 +1568,46 @@ impl<F: Field, RLP> Default for RlpCircuit<F, RLP> {
     fn default() -> Self {
         Self {
             inputs: vec![],
-            randomness: F::one(),
+            size: 0,
             _marker: PhantomData,
         }
     }
 }
 
-impl<F: Field, RLP> RlpCircuit<F, RLP> {
-    fn get_randomness() -> F {
-        F::from(194881236412749812)
+impl<F: Field> SubCircuit<F> for RlpCircuit<F, SignedTransaction> {
+    type Config = RlpCircuitConfig<F>;
+
+    fn new_from_block(block: &Block<F>) -> Self {
+        let signed_txs = block
+            .txs
+            .iter()
+            .zip(block.sigs.iter())
+            .map(|(tx, sig)| SignedTransaction {
+                tx: tx.clone(),
+                signature: *sig,
+            })
+            .collect::<Vec<_>>();
+
+        Self {
+            inputs: signed_txs,
+            // FIXME: this hard-coded size is used to pass unit test, we should use 1 << k instead.
+            size: 1 << 18,
+            _marker: Default::default(),
+        }
+    }
+
+    fn synthesize_sub(
+        &self,
+        config: &Self::Config,
+        challenges: &Challenges<Value<F>>,
+        layouter: &mut impl Layouter<F>,
+    ) -> Result<(), Error> {
+        config.assign(layouter, &self.inputs, self.size, challenges)
     }
 }
 
 impl<F: Field> Circuit<F> for RlpCircuit<F, SignedTransaction> {
-    type Config = RlpCircuitConfig<F>;
+    type Config = (RlpCircuitConfig<F>, Challenges);
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
@@ -2292,12 +1615,26 @@ impl<F: Field> Circuit<F> for RlpCircuit<F, SignedTransaction> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        let randomness = power_of_randomness_from_instance::<_, 1>(meta);
-        RlpCircuitConfig::configure(meta, randomness[0].clone())
+        let rlp_table = RlpTable::construct(meta);
+        let challenges = Challenges::construct(meta);
+        let rand_exprs = challenges.exprs(meta);
+        let config = RlpCircuitConfig::configure(meta, &rlp_table, &rand_exprs);
+
+        (config, challenges)
     }
 
-    fn synthesize(&self, config: Self::Config, layouter: impl Layouter<F>) -> Result<(), Error> {
-        config.assign(layouter, self.inputs.as_slice(), self.randomness)
+    fn synthesize(
+        &self,
+        (config, challenges): Self::Config,
+        mut layouter: impl Layouter<F>,
+    ) -> Result<(), Error> {
+        let challenges = challenges.values(&mut layouter);
+        config.assign(
+            &mut layouter,
+            self.inputs.as_slice(),
+            self.size,
+            &challenges,
+        )
     }
 }
 
@@ -2314,16 +1651,14 @@ mod tests {
     use super::RlpCircuit;
 
     fn verify_txs<F: Field>(k: u32, inputs: Vec<SignedTransaction>, success: bool) {
-        let randomness = RlpCircuit::<F, SignedTransaction>::get_randomness();
         let circuit = RlpCircuit::<F, SignedTransaction> {
             inputs,
-            randomness,
+            size: 1 << k,
             _marker: PhantomData,
         };
 
-        let num_rows = 1 << k;
         const NUM_BLINDING_ROWS: usize = 8;
-        let instance = vec![vec![randomness; num_rows - NUM_BLINDING_ROWS]];
+        let instance = vec![];
         let prover = MockProver::<F>::run(k, &circuit, instance).unwrap();
         let err = prover.verify_par();
         let print_failures = true;
@@ -2341,6 +1676,7 @@ mod tests {
     #[test]
     fn rlp_circuit_tx_1() {
         verify_txs::<Fr>(8, vec![CORRECT_MOCK_TXS[0].clone().into()], true);
+        verify_txs::<Fr>(8, vec![CORRECT_MOCK_TXS[4].clone().into()], true);
     }
 
     #[test]

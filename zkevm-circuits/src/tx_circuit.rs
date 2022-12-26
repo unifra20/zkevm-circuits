@@ -8,7 +8,8 @@ pub mod sign_verify;
 
 use crate::evm_circuit::util::constraint_builder::BaseConstraintBuilder;
 use crate::table::{KeccakTable, LookupTable, RlpTable, TxFieldTag, TxTable};
-use crate::util::{random_linear_combine_word as rlc, Challenges};
+use crate::util::{random_linear_combine_word as rlc, Challenges, SubCircuit, SubCircuitConfig};
+use crate::witness;
 use crate::witness::{signed_tx_from_geth_tx, RlpDataType, RlpTxTag};
 use bus_mapping::circuit_input_builder::keccak_inputs_tx_circuit;
 use eth_types::{
@@ -21,12 +22,12 @@ use gadgets::util::{and, not, or, Expr};
 use halo2_proofs::poly::Rotation;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Region, SimpleFloorPlanner, Value},
-    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Expression, Fixed},
+    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Expression},
 };
 use itertools::Itertools;
 use log::error;
 use num::Zero;
-use sign_verify::{SignVerifyChip, SignVerifyConfig};
+use sign_verify::{AssignedSignatureVerify, SignVerifyChip, SignVerifyConfig};
 use std::marker::PhantomData;
 
 pub use halo2_proofs::halo2curves::{
@@ -37,6 +38,7 @@ pub use halo2_proofs::halo2curves::{
     },
     secp256k1::{self, Secp256k1Affine, Secp256k1Compressed},
 };
+use halo2_proofs::plonk::Fixed;
 
 /// Config for TxCircuit
 #[derive(Clone, Debug)]
@@ -70,19 +72,36 @@ pub struct TxCircuitConfig<F: Field> {
 
     sign_verify: SignVerifyConfig,
     tx_table: TxTable,
-    keccak_table: KeccakTable,
     rlp_table: RlpTable,
     _marker: PhantomData<F>,
+    // External tables
+    keccak_table: KeccakTable,
 }
 
-impl<F: Field> TxCircuitConfig<F> {
+/// Circuit configuration arguments
+pub struct TxCircuitConfigArgs<F: Field> {
+    /// TxTable
+    pub tx_table: TxTable,
+    /// KeccakTable
+    pub keccak_table: KeccakTable,
+    /// RlpTable
+    pub rlp_table: RlpTable,
+    /// Challenges
+    pub challenges: Challenges<Expression<F>>,
+}
+
+impl<F: Field> SubCircuitConfig<F> for TxCircuitConfig<F> {
+    type ConfigArgs = TxCircuitConfigArgs<F>;
+
     /// Return a new TxCircuitConfig
-    pub fn new(
+    fn new(
         meta: &mut ConstraintSystem<F>,
-        tx_table: TxTable,
-        keccak_table: KeccakTable,
-        rlp_table: RlpTable,
-        challenges: Challenges<Expression<F>>,
+        Self::ConfigArgs {
+            tx_table,
+            keccak_table,
+            rlp_table,
+            challenges,
+        }: Self::ConfigArgs,
     ) -> Self {
         let q_enable = meta.fixed_column();
         let is_usable = meta.advice_column();
@@ -137,12 +156,12 @@ impl<F: Field> TxCircuitConfig<F> {
             tx_sign_data_len,
             tx_sign_data_rlc,
             &value_is_zero,
-            tx_table,
-            keccak_table,
+            tx_table.clone(),
+            keccak_table.clone(),
             rlp_table,
         );
 
-        let sign_verify = SignVerifyConfig::new(meta, keccak_table, challenges);
+        let sign_verify = SignVerifyConfig::new(meta, keccak_table.clone(), challenges);
 
         meta.create_gate("tx call data bytes", |meta| {
             let mut cb = BaseConstraintBuilder::default();
@@ -279,7 +298,7 @@ impl<F: Field> TxCircuitConfig<F> {
 
             cb.require_equal(
                 "tag equality (fixed tag == binary number config's tag",
-                meta.query_fixed(tx_table.tag, Rotation::cur()),
+                meta.query_advice(tx_table.tag, Rotation::cur()),
                 tag.value(Rotation::cur())(meta),
             );
 
@@ -308,9 +327,11 @@ impl<F: Field> TxCircuitConfig<F> {
             _marker: PhantomData,
         }
     }
+}
 
+impl<F: Field> TxCircuitConfig<F> {
     /// Load ECDSA RangeChip table.
-    pub fn load(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
+    pub fn load_aux_tables(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         self.sign_verify.load_range(layouter)
     }
 
@@ -349,7 +370,7 @@ impl<F: Field> TxCircuitConfig<F> {
             offset,
             || Value::known(F::from(tx_id as u64)),
         )?;
-        region.assign_fixed(
+        region.assign_advice(
             || "tag",
             self.tx_table.tag,
             offset,
@@ -849,7 +870,7 @@ impl<F: Field> TxCircuitConfig<F> {
             .zip(
                 vec![
                     meta.query_advice(tx_table.tx_id, Rotation::cur()),
-                    meta.query_fixed(tx_table.tag, Rotation::cur()),
+                    meta.query_advice(tx_table.tag, Rotation::cur()),
                     meta.query_advice(tx_table.index, Rotation::cur()),
                     meta.query_advice(is_final, Rotation::cur()),
                 ]
@@ -981,62 +1002,38 @@ impl<F: Field> TxCircuitConfig<F> {
 
 /// Tx Circuit for verifying transaction signatures
 #[derive(Clone, Default, Debug)]
-pub struct TxCircuit<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize> {
+pub struct TxCircuit<F: Field> {
+    /// Max number of supported transactions
+    pub max_txs: usize,
+    /// Max number of supported calldata bytes
+    pub max_calldata: usize,
     /// SignVerify chip
-    pub sign_verify: SignVerifyChip<F, MAX_TXS>,
+    pub sign_verify: SignVerifyChip<F>,
     /// List of Transactions
     pub txs: Vec<Transaction>,
     /// Chain ID
     pub chain_id: u64,
-    /// Randomness.
-    pub randomness: F,
 }
 
-impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize>
-    TxCircuit<F, MAX_TXS, MAX_CALLDATA>
-{
+impl<F: Field> TxCircuit<F> {
     /// Return a new TxCircuit
-    pub fn new(
-        aux_generator: Secp256k1Affine,
-        chain_id: u64,
-        txs: Vec<Transaction>,
-        randomness: F,
-    ) -> Self {
-        TxCircuit::<F, MAX_TXS, MAX_CALLDATA> {
-            sign_verify: SignVerifyChip {
-                aux_generator,
-                window_size: 2,
-                _marker: PhantomData,
-            },
+    pub fn new(max_txs: usize, max_calldata: usize, chain_id: u64, txs: Vec<Transaction>) -> Self {
+        TxCircuit::<F> {
+            max_txs,
+            max_calldata,
+            sign_verify: SignVerifyChip::new(max_txs),
             txs,
             chain_id,
-            randomness,
         }
     }
 
-    /// Make the assignments to the TxCircuit
-    pub fn assign(
+    fn assign_tx_table(
         &self,
         config: &TxCircuitConfig<F>,
-        layouter: &mut impl Layouter<F>,
         challenges: &Challenges<Value<F>>,
+        layouter: &mut impl Layouter<F>,
+        assigned_sig_verifs: Vec<AssignedSignatureVerify<F>>,
     ) -> Result<(), Error> {
-        assert!(self.txs.len() <= MAX_TXS);
-        let sign_datas: Vec<SignData> = self
-            .txs
-            .iter()
-            .map(|tx| {
-                tx.sign_data(self.chain_id).map_err(|e| {
-                    error!("tx_to_sign_data error for tx {:?}", e);
-                    Error::Synthesis
-                })
-            })
-            .try_collect()?;
-
-        let assigned_sig_verifs =
-            self.sign_verify
-                .assign(&config.sign_verify, layouter, &sign_datas, challenges)?;
-
         layouter.assign_region(
             || "tx table",
             |mut region| {
@@ -1240,7 +1237,7 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize>
                     let mut calldata_gas_cost = 0;
                     let calldata_length = tx.call_data.len();
                     for (index, byte) in tx.call_data.0.iter().enumerate() {
-                        assert!(calldata_count < MAX_CALLDATA);
+                        assert!(calldata_count < self.max_calldata);
                         let (tx_id_next, is_final) = if index == calldata_length - 1 {
                             if i == self.txs.len() - 1 {
                                 (0, true)
@@ -1277,7 +1274,7 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize>
                         calldata_count += 1;
                     }
                 }
-                for _ in calldata_count..MAX_CALLDATA {
+                for _ in calldata_count..self.max_calldata {
                     config.assign_row(
                         &mut region,
                         offset,
@@ -1295,20 +1292,60 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize>
                 }
                 Ok(())
             },
-        )?;
-        Ok(())
-    }
-
-    /// Dev randomness
-    pub fn get_randomness() -> F {
-        F::from(123456789u64)
+        )
     }
 }
 
-impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize> Circuit<F>
-    for TxCircuit<F, MAX_TXS, MAX_CALLDATA>
-{
+impl<F: Field> SubCircuit<F> for TxCircuit<F> {
     type Config = TxCircuitConfig<F>;
+
+    fn new_from_block(block: &witness::Block<F>) -> Self {
+        Self::new(
+            block.circuits_params.max_txs,
+            block.circuits_params.max_calldata,
+            block.context.chain_id().as_u64(),
+            block
+                .context
+                .first()
+                .eth_block
+                .transactions
+                .iter()
+                .map(|tx| tx.into())
+                .collect(),
+        )
+    }
+
+    /// Make the assignments to the TxCircuit
+    fn synthesize_sub(
+        &self,
+        config: &Self::Config,
+        challenges: &Challenges<Value<F>>,
+        layouter: &mut impl Layouter<F>,
+    ) -> Result<(), Error> {
+        assert!(self.txs.len() <= self.max_txs);
+        let sign_datas: Vec<SignData> = self
+            .txs
+            .iter()
+            .map(|tx| {
+                tx.sign_data(self.chain_id).map_err(|e| {
+                    error!("tx_to_sign_data error for tx {:?}", e);
+                    Error::Synthesis
+                })
+            })
+            .try_collect()?;
+
+        config.load_aux_tables(layouter)?;
+        let assigned_sig_verifs =
+            self.sign_verify
+                .assign(&config.sign_verify, layouter, &sign_datas, challenges)?;
+        self.assign_tx_table(config, challenges, layouter, assigned_sig_verifs)?;
+        Ok(())
+    }
+}
+
+#[cfg(any(feature = "test", test))]
+impl<F: Field> Circuit<F> for TxCircuit<F> {
+    type Config = (TxCircuitConfig<F>, Challenges);
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
@@ -1319,23 +1356,31 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize> Circuit<F>
         let tx_table = TxTable::construct(meta);
         let keccak_table = KeccakTable::construct(meta);
         let rlp_table = RlpTable::construct(meta);
-        let challenges = Challenges::mock(
-            Expression::Constant(Self::get_randomness()),
-            Expression::Constant(Self::get_randomness()),
-        );
-        TxCircuitConfig::new(meta, tx_table, keccak_table, rlp_table, challenges)
+        let challenges = Challenges::construct(meta);
+
+        let config = {
+            let challenges = challenges.exprs(meta);
+            TxCircuitConfig::new(
+                meta,
+                TxCircuitConfigArgs {
+                    tx_table,
+                    keccak_table,
+                    rlp_table,
+                    challenges,
+                },
+            )
+        };
+
+        (config, challenges)
     }
 
     fn synthesize(
         &self,
-        config: Self::Config,
+        (config, challenges): Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
-        let challenges =
-            Challenges::mock(Value::known(self.randomness), Value::known(self.randomness));
+        let challenges = challenges.values(&mut layouter);
 
-        config.load(&mut layouter)?;
-        self.assign(&config, &mut layouter, &challenges)?;
         config.keccak_table.dev_load(
             &mut layouter,
             &keccak_inputs_tx_circuit(&self.txs[..], self.chain_id).map_err(|e| {
@@ -1347,8 +1392,9 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize> Circuit<F>
         config.rlp_table.dev_load(
             &mut layouter,
             signed_tx_from_geth_tx(self.txs.as_slice(), self.chain_id),
-            self.randomness,
-        )
+            &challenges,
+        )?;
+        self.synthesize_sub(&config, &challenges, &mut layouter)
     }
 }
 
@@ -1357,35 +1403,21 @@ mod tx_circuit_tests {
     use super::*;
     use eth_types::address;
     use halo2_proofs::{
-        arithmetic::CurveAffine,
         dev::{MockProver, VerifyFailure},
-        halo2curves::{bn256::Fr, group::Group},
+        halo2curves::bn256::Fr,
     };
     use mock::AddrOrWallet;
     use pretty_assertions::assert_eq;
-    use rand::SeedableRng;
-    use rand_chacha::ChaCha20Rng;
 
-    fn run<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize>(
+    fn run<F: Field>(
         k: u32,
         txs: Vec<Transaction>,
         chain_id: u64,
+        max_txs: usize,
+        max_calldata: usize,
     ) -> Result<(), Vec<VerifyFailure>> {
-        let mut rng = ChaCha20Rng::seed_from_u64(2);
-        let aux_generator =
-            <Secp256k1Affine as CurveAffine>::CurveExt::random(&mut rng).to_affine();
-
         // SignVerifyChip -> ECDSAChip -> MainGate instance column
-        let circuit = TxCircuit::<F, MAX_TXS, MAX_CALLDATA> {
-            sign_verify: SignVerifyChip {
-                aux_generator,
-                window_size: 2,
-                _marker: PhantomData,
-            },
-            txs,
-            chain_id,
-            randomness: TxCircuit::<F, MAX_TXS, MAX_CALLDATA>::get_randomness(),
-        };
+        let circuit = TxCircuit::<F>::new(max_txs, max_calldata, chain_id, txs);
 
         let prover = match MockProver::run(k, &circuit, vec![vec![]]) {
             Ok(prover) => prover,
@@ -1402,7 +1434,7 @@ mod tx_circuit_tests {
 
         let k = 19;
         assert_eq!(
-            run::<Fr, MAX_TXS, MAX_CALLDATA>(
+            run::<Fr>(
                 k,
                 [
                     mock::CORRECT_MOCK_TXS[1].clone(),
@@ -1411,7 +1443,9 @@ mod tx_circuit_tests {
                 .iter()
                 .map(|tx| Transaction::from(tx.clone()))
                 .collect_vec(),
-                mock::MOCK_CHAIN_ID.as_u64()
+                mock::MOCK_CHAIN_ID.as_u64(),
+                MAX_TXS,
+                MAX_CALLDATA
             ),
             Ok(())
         );
@@ -1428,7 +1462,7 @@ mod tx_circuit_tests {
 
         let k = 19;
         assert_eq!(
-            run::<Fr, MAX_TXS, MAX_CALLDATA>(k, vec![tx], chain_id),
+            run::<Fr>(k, vec![tx], chain_id, MAX_TXS, MAX_CALLDATA),
             Ok(())
         );
     }
@@ -1443,9 +1477,13 @@ mod tx_circuit_tests {
         tx.from = AddrOrWallet::from(address!("0x1230000000000000000000000000000000000456"));
 
         let k = 19;
-        assert!(
-            run::<Fr, MAX_TXS, MAX_CALLDATA>(k, vec![tx.into()], mock::MOCK_CHAIN_ID.as_u64())
-                .is_err(),
-        );
+        assert!(run::<Fr>(
+            k,
+            vec![tx.into()],
+            mock::MOCK_CHAIN_ID.as_u64(),
+            MAX_TXS,
+            MAX_CALLDATA
+        )
+        .is_err(),);
     }
 }

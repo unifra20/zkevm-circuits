@@ -19,8 +19,9 @@ mod tests {
     use rand_chacha::ChaCha20Rng;
     use rand_xorshift::XorShiftRng;
     use std::env::var;
-    use zkevm_circuits::pi_circuit::{PiCircuit, PublicData};
+    use zkevm_circuits::pi_circuit::{PiCircuit, PiTestCircuit, PublicData};
     use zkevm_circuits::test_util::rand_tx;
+    use zkevm_circuits::util::SubCircuit;
 
     #[cfg_attr(not(feature = "benches"), ignore)]
     #[test]
@@ -35,9 +36,12 @@ mod tests {
 
         let mut rng = ChaCha20Rng::seed_from_u64(2);
         let public_data = generate_publicdata::<MAX_TXS, MAX_CALLDATA>();
-        let circuit =
-            PiCircuit::<Fr, MAX_TXS, MAX_CALLDATA>::new(public_data);
-        let public_inputs = circuit.instance();
+        let circuit = PiTestCircuit::<Fr, MAX_TXS, MAX_CALLDATA>(PiCircuit::<Fr>::new(
+            MAX_TXS,
+            MAX_CALLDATA,
+            public_data,
+        ));
+        let public_inputs = circuit.0.instance();
         let instance: Vec<&[Fr]> = public_inputs.iter().map(|input| &input[..]).collect();
         let instances = &[&instance[..]][..];
 
@@ -68,7 +72,7 @@ mod tests {
             Challenge255<G1Affine>,
             XorShiftRng,
             Blake2bWrite<Vec<u8>, G1Affine, Challenge255<G1Affine>>,
-            PiCircuit<Fr, MAX_TXS, MAX_CALLDATA>,
+            PiTestCircuit<Fr, MAX_TXS, MAX_CALLDATA>,
         >(
             &general_params,
             &pk,
@@ -111,8 +115,8 @@ mod tests {
 
         let n_tx = MAX_TXS;
         for _ in 0..n_tx {
-            let eth_tx = eth_types::Transaction::from(&rand_tx(&mut rng, chain_id));
-            public_data.eth_block.transactions.push(eth_tx);
+            let eth_tx = eth_types::Transaction::from(&rand_tx(&mut rng, chain_id, true));
+            public_data.transactions.push(eth_tx);
         }
         public_data
     }
