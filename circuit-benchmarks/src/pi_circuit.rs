@@ -3,7 +3,6 @@
 mod tests {
     use ark_std::{end_timer, start_timer};
     use eth_types::Word;
-    use halo2_proofs::arithmetic::Field;
     use halo2_proofs::plonk::{create_proof, keygen_pk, keygen_vk, verify_proof};
     use halo2_proofs::poly::kzg::commitment::{KZGCommitmentScheme, ParamsKZG, ParamsVerifierKZG};
     use halo2_proofs::poly::kzg::multiopen::{ProverSHPLONK, VerifierSHPLONK};
@@ -34,7 +33,6 @@ mod tests {
         const MAX_TXS: usize = 10;
         const MAX_CALLDATA: usize = 128;
 
-        let mut rng = ChaCha20Rng::seed_from_u64(2);
         let public_data = generate_publicdata::<MAX_TXS, MAX_CALLDATA>();
         let circuit = PiTestCircuit::<Fr, MAX_TXS, MAX_CALLDATA>(PiCircuit::<Fr>::new(
             MAX_TXS,
