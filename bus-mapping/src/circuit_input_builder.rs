@@ -36,8 +36,8 @@ use hex::decode_to_slice;
 
 pub use input_state_ref::CircuitInputStateRef;
 use itertools::Itertools;
-use std::collections::HashMap;
 use log::warn;
+use std::collections::HashMap;
 pub use transaction::{Transaction, TransactionContext};
 
 /// Circuit Setup Parameters
@@ -533,7 +533,8 @@ pub fn keccak_inputs_tx_circuit(
                 true
             }
         })
-        .map(|(_, tx)| tx.sign_data(chain_id)).try_collect()?;
+        .map(|(_, tx)| tx.sign_data(chain_id))
+        .try_collect()?;
     // Keccak inputs from SignVerify Chip
     let sign_verify_inputs = keccak_inputs_sign_verify(&sign_datas);
     inputs.extend_from_slice(&sign_verify_inputs);
