@@ -128,6 +128,8 @@ pub struct PiCircuitConfig<F: Field> {
     max_txs: usize,
     /// Max number of supported calldata bytes
     max_calldata: usize,
+    /// Max number of supported inner blocks in a batch
+    max_inner_blocks: usize,
 
     raw_public_inputs: Column<Advice>, // block, extra, tx hashes
     rpi_field_bytes: Column<Advice>,   // rpi in bytes
@@ -161,6 +163,8 @@ pub struct PiCircuitConfigArgs {
     pub max_txs: usize,
     /// Max number of supported calldata bytes
     pub max_calldata: usize,
+    /// Max number of supported blocks in a batch
+    pub max_inner_blocks: usize,
     /// TxTable
     pub tx_table: TxTable,
     /// BlockTable
@@ -180,6 +184,7 @@ impl<F: Field> SubCircuitConfig<F> for PiCircuitConfig<F> {
         Self::ConfigArgs {
             max_txs,
             max_calldata,
+            max_inner_blocks,
             block_table,
             tx_table,
             keccak_table,
@@ -311,6 +316,7 @@ impl<F: Field> SubCircuitConfig<F> for PiCircuitConfig<F> {
         Self {
             max_txs,
             max_calldata,
+            max_inner_blocks,
             block_table,
             tx_table,
             keccak_table,
@@ -802,6 +808,7 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize> Circuit<F>
                 PiCircuitConfigArgs {
                     max_txs: MAX_TXS,
                     max_calldata: MAX_CALLDATA,
+                    max_inner_blocks: 128,
                     block_table,
                     keccak_table,
                     tx_table,
