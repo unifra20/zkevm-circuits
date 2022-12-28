@@ -2,7 +2,9 @@
 #[cfg(test)]
 mod tests {
     use ark_std::{end_timer, start_timer};
-    use eth_types::Word;
+    use bus_mapping::mock::BlockData;
+    use eth_types::bytecode;
+    use eth_types::geth_types::GethData;
     use halo2_proofs::plonk::{create_proof, keygen_pk, keygen_vk, verify_proof};
     use halo2_proofs::poly::kzg::commitment::{KZGCommitmentScheme, ParamsKZG, ParamsVerifierKZG};
     use halo2_proofs::poly::kzg::multiopen::{ProverSHPLONK, VerifierSHPLONK};
@@ -14,13 +16,13 @@ mod tests {
             Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
         },
     };
+    use mock::TestContext;
     use rand::SeedableRng;
-    use rand_chacha::ChaCha20Rng;
     use rand_xorshift::XorShiftRng;
     use std::env::var;
-    use zkevm_circuits::pi_circuit::{PiCircuit, PiTestCircuit, PublicData};
-    use zkevm_circuits::test_util::rand_tx;
+    use zkevm_circuits::pi_circuit::{PiCircuit, PiTestCircuit};
     use zkevm_circuits::util::SubCircuit;
+    use zkevm_circuits::witness::{block_convert, Block};
 
     #[cfg_attr(not(feature = "benches"), ignore)]
     #[test]
@@ -33,11 +35,11 @@ mod tests {
         const MAX_TXS: usize = 10;
         const MAX_CALLDATA: usize = 128;
 
-        let public_data = generate_publicdata::<MAX_TXS, MAX_CALLDATA>();
+        let block = generate_block::<MAX_TXS, MAX_CALLDATA>();
         let circuit = PiTestCircuit::<Fr, MAX_TXS, MAX_CALLDATA>(PiCircuit::<Fr>::new(
             MAX_TXS,
             MAX_CALLDATA,
-            public_data,
+            &block,
         ));
         let public_inputs = circuit.0.instance();
         let instance: Vec<&[Fr]> = public_inputs.iter().map(|input| &input[..]).collect();
@@ -105,17 +107,16 @@ mod tests {
         end_timer!(start3);
     }
 
-    fn generate_publicdata<const MAX_TXS: usize, const MAX_CALLDATA: usize>() -> PublicData {
-        let mut rng = ChaCha20Rng::seed_from_u64(2);
-        let mut public_data = PublicData::default();
-        let chain_id = 1337u64;
-        public_data.chain_id = Word::from(chain_id);
-
-        let n_tx = MAX_TXS;
-        for _ in 0..n_tx {
-            let eth_tx = eth_types::Transaction::from(&rand_tx(&mut rng, chain_id, true));
-            public_data.transactions.push(eth_tx);
-        }
-        public_data
+    fn generate_block<const MAX_TXS: usize, const MAX_CALLDATA: usize>() -> Block<Fr> {
+        let test_ctx = TestContext::<2, 1>::simple_ctx_with_bytecode(bytecode! {
+            STOP
+        })
+        .unwrap();
+        let block: GethData = test_ctx.into();
+        let mut builder = BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
+        builder
+            .handle_block(&block.eth_block, &block.geth_traces)
+            .unwrap();
+        block_convert(&builder.block, &builder.code_db).unwrap()
     }
 }

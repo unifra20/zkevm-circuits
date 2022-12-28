@@ -497,14 +497,14 @@ impl<F: Field> PiCircuitConfig<F> {
             .into_iter()
             .zip(block_copy_offsets.into_iter())
         {
-            for (i, block_cell) in block_cells.into_iter().enumerate() {
+            for (i, block_cell) in block_cells.iter().enumerate() {
                 let row_offset = offset + i;
                 region.constrain_equal(
                     block_cell.cell(),
                     Cell {
                         region_index: RegionIndex(0), // FIXME: this is not safe
                         row_offset,
-                        column: self.block_table.value.clone().into(),
+                        column: self.block_table.value.into(),
                     },
                 )?;
             }
@@ -515,7 +515,7 @@ impl<F: Field> PiCircuitConfig<F> {
                 Cell {
                     region_index: RegionIndex(1), // FIXME: this is not safe
                     row_offset: i * 11 + 10,
-                    column: self.tx_table.value.clone().into(),
+                    column: self.tx_table.value.into(),
                 },
             )?;
         }
@@ -707,6 +707,7 @@ impl<F: Field> PiCircuit<F> {
         }
     }
 
+    /// Return txs
     pub fn txs(&self) -> &[Transaction] {
         &self.public_data.transactions
     }
