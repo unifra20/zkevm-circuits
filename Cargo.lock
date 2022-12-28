@@ -1851,7 +1851,9 @@ dependencies = [
 name = "geth-utils"
 version = "0.1.0"
 dependencies = [
+ "env_logger",
  "gobuild",
+ "log",
 ]
 
 [[package]]
@@ -2383,10 +2385,12 @@ dependencies = [
 name = "keccak256"
 version = "0.1.0"
 dependencies = [
+ "env_logger",
  "eth-types",
  "halo2_proofs",
  "itertools",
  "lazy_static",
+ "log",
  "num-bigint",
  "num-traits",
  "plotters",

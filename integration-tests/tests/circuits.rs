@@ -1,23 +1,26 @@
-#![cfg(feature = "circuits")]
-
 use bus_mapping::circuit_input_builder::{keccak_inputs, BuilderClient, CircuitsParams};
 use halo2_proofs::circuit::Value;
 use halo2_proofs::dev::MockProver;
 use halo2_proofs::halo2curves::bn256::Fr;
 use integration_tests::{get_client, log_init};
-use integration_tests::{END_BLOCK, START_BLOCK, TX_ID};
+use integration_tests::{CIRCUIT, END_BLOCK, START_BLOCK, TX_ID};
 use zkevm_circuits::evm_circuit::EvmCircuit;
-use zkevm_circuits::evm_circuit::{test::run_test_circuit, witness::block_convert};
+use zkevm_circuits::evm_circuit::{
+    test::get_test_cicuit_from_block, test::get_test_degree, test::run_test_circuit,
+    witness::block_convert,
+};
 use zkevm_circuits::keccak_circuit::keccak_packed_multi::multi_keccak;
+use zkevm_circuits::rlp_circuit::RlpCircuit;
+use zkevm_circuits::state_circuit::StateCircuit;
 use zkevm_circuits::super_circuit::SuperCircuit;
 use zkevm_circuits::tx_circuit::TxCircuit;
 use zkevm_circuits::util::{Challenges, SubCircuit};
 
 const CIRCUITS_PARAMS: CircuitsParams = CircuitsParams {
-    max_rws: 0,
-    max_txs: 10,
-    max_calldata: 4000,
-    max_bytecode: 4000,
+    max_rws: 30000,
+    max_txs: 20,
+    max_calldata: 30000,
+    max_bytecode: 30000,
     keccak_padding: None,
 };
 
@@ -25,13 +28,13 @@ const CIRCUITS_PARAMS: CircuitsParams = CircuitsParams {
 async fn test_mock_prove_tx() {
     log_init();
     let tx_id: &str = &TX_ID;
-    log::info!("test evm circuit, tx: {}", tx_id);
+    log::info!("test {} circuit, tx: {}", *CIRCUIT, tx_id);
     if tx_id.is_empty() {
         return;
     }
     let cli = get_client();
     let params = CircuitsParams {
-        max_rws: 50000,
+        max_rws: 100000,
         max_txs: 10,
         max_calldata: 40000,
         max_bytecode: 40000,
@@ -47,7 +50,32 @@ async fn test_mock_prove_tx() {
     }
 
     let block = block_convert(&builder.block, &builder.code_db).unwrap();
-    run_test_circuit(block).unwrap();
+    let prover = if *CIRCUIT == "evm" {
+        let k = get_test_degree(&block);
+        let circuit = get_test_cicuit_from_block(block);
+        let instance = vec![];
+        MockProver::<Fr>::run(k, &circuit, instance).unwrap()
+    } else if *CIRCUIT == "rlp" {
+        let k = 18;
+        let circuit = RlpCircuit::new_from_block(&block);
+        let instance = vec![];
+        MockProver::<Fr>::run(k, &circuit, instance).unwrap()
+    } else if *CIRCUIT == "state" {
+        let k = 18;
+        let circuit = StateCircuit::new_from_block(&block);
+        let instance = vec![];
+        MockProver::<Fr>::run(k, &circuit, instance).unwrap()
+    } else {
+        unimplemented!()
+    };
+
+    let result = prover.verify_par();
+    let errs = result.err().unwrap_or_default();
+    for err in &errs {
+        log::error!("ERR: {}", err);
+    }
+    println!("err num: {}", errs.len());
+
     log::info!("prove done");
 }
 
@@ -62,10 +90,10 @@ async fn test_super_circuit_all_block() {
         let cli = get_client();
         // target k = 19
         let params = CircuitsParams {
-            max_rws: 500_000,
-            max_txs: 15,
-            max_calldata: 500_000,
-            max_bytecode: 500_000,
+            max_rws: 4_000_000,
+            max_txs: 500,
+            max_calldata: 2_000_000,
+            max_bytecode: 2_000_000,
             keccak_padding: None,
         };
         let cli = BuilderClient::new(cli, params).await.unwrap();
@@ -77,19 +105,20 @@ async fn test_super_circuit_all_block() {
         }
 
         let (k, circuit, instance) =
-            SuperCircuit::<Fr, 15, 500_000, 500_000>::build_from_circuit_input_builder(&builder)
-                .unwrap();
+            SuperCircuit::<Fr, 500, 2_000_000, 2_000_000>::build_from_circuit_input_builder(
+                &builder,
+            )
+            .unwrap();
         let prover = MockProver::<Fr>::run(k, &circuit, instance).unwrap();
         let result = prover.verify_par();
+        let errs = result.err().unwrap_or_default();
         log::info!(
-            "test super circuit, block number: {} result {:?}",
+            "test super circuit, block number: {} err num {:?}",
             block_num,
-            result
+            errs.len(),
         );
-        if let Err(errs) = result {
-            for err in errs {
-                log::error!("circuit err: {}", err);
-            }
+        for err in errs {
+            log::error!("circuit err: {}", err);
         }
     }
 }

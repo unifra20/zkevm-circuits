@@ -21,10 +21,10 @@ pub use access::{Access, AccessSet, AccessValue, CodeSource};
 pub use block::{Block, BlockContext};
 pub use call::{Call, CallContext, CallKind};
 use core::fmt::Debug;
-use eth_types::evm_types::GasCost;
+use eth_types::evm_types::{GasCost, OpcodeId};
+use eth_types::geth_types;
 use eth_types::sign_types::{pk_bytes_le, pk_bytes_swap_endianness, SignData};
-use eth_types::{self, geth_types, Address, GethExecStep, GethExecTrace, Word, H256};
-use eth_types::{ToWord, U256};
+use eth_types::{self, Address, GethExecStep, GethExecTrace, ToWord, Word, H256, U256};
 use ethers_core::k256::ecdsa::SigningKey;
 use ethers_core::types::transaction::eip2718::TypedTransaction;
 use ethers_core::types::{Bytes, Signature, TransactionRequest};
@@ -228,30 +228,6 @@ impl<'a> CircuitInputBuilder {
                 continue;
             }
             let geth_trace = &geth_traces[tx_index];
-            if geth_trace.struct_logs.is_empty() {
-                // only update state
-                self.sdb.increase_nonce(&tx.from);
-                let (_, to_acc) = self.sdb.get_account_mut(&tx.to.unwrap());
-                to_acc.balance += tx.value;
-                let (_, from_acc) = self.sdb.get_account_mut(&tx.from);
-                from_acc.balance -= tx.value;
-                let gas_cost = U256::from(geth_trace.gas.0) * tx.gas_price.unwrap();
-                debug_assert!(
-                    from_acc.balance >= gas_cost,
-                    "pay gas failed. tx {:?}, from_acc {:?}",
-                    tx,
-                    from_acc
-                );
-                from_acc.balance -= gas_cost;
-                log::trace!(
-                    "native transfer: from {} to {}, value {} fee {}",
-                    tx.from,
-                    tx.to.unwrap(),
-                    tx.value,
-                    gas_cost
-                );
-                continue;
-            }
             log::info!(
                 "handling {}th(inner idx: {}) tx {:?}",
                 tx.transaction_index.unwrap_or_default(),
@@ -259,6 +235,7 @@ impl<'a> CircuitInputBuilder {
                 tx.hash
             );
             let mut tx = tx.clone();
+            // needed for multi block feature
             tx.transaction_index = Some(self.block.txs.len().into());
             self.handle_tx(
                 &tx,
@@ -356,14 +333,18 @@ impl<'a> CircuitInputBuilder {
         // - op: None
         // Generate BeginTx step
         let mut begin_tx_step = gen_begin_tx_ops(&mut self.state_ref(&mut tx, &mut tx_ctx))?;
-        begin_tx_step.gas_cost = GasCost(tx.gas - geth_trace.struct_logs[0].gas.0);
+        begin_tx_step.gas_cost = if geth_trace.struct_logs.is_empty() {
+            GasCost(geth_trace.gas.0)
+        } else {
+            GasCost(tx.gas - geth_trace.struct_logs[0].gas.0)
+        };
         log::trace!("begin_tx_step {:?}", begin_tx_step);
         tx.steps_mut().push(begin_tx_step);
 
         for (index, geth_step) in geth_trace.struct_logs.iter().enumerate() {
             let mut state_ref = self.state_ref(&mut tx, &mut tx_ctx);
             log::trace!(
-                "handle {}th tx depth {} {}th opcode {:?} pc: {} gas_left: {} rwc: {} call_id: {} args: {}",
+                "handle {}th tx depth {} {}th opcode {:?} pc: {} gas_left: {} rwc: {} call_id: {} msize: {} args: {}",
                 eth_tx.transaction_index.unwrap_or_default(),
                 geth_step.depth,
                 index,
@@ -372,6 +353,7 @@ impl<'a> CircuitInputBuilder {
                 geth_step.gas.0,
                 state_ref.block_ctx.rwc.0,
                 state_ref.call().map(|c| c.call_id).unwrap_or(0),
+                state_ref.call_ctx()?.memory.len(),
                 if geth_step.op.is_push() {
                     match geth_step.stack.last() {
                         Ok(w) => format!("{:?}", w),
@@ -397,6 +379,17 @@ impl<'a> CircuitInputBuilder {
                         geth_step.stack.nth_last(4),
                         geth_step.stack.nth_last(5),
                         geth_step.stack.nth_last(6),
+                    )
+                } else if matches!(geth_step.op, OpcodeId::MLOAD) {
+                    format!(
+                        "{:?}",
+                        geth_step.stack.nth_last(0),
+                    )
+                } else if matches!(geth_step.op, OpcodeId::MSTORE | OpcodeId::MSTORE8) {
+                    format!(
+                        "{:?} {:?}",
+                        geth_step.stack.nth_last(0),
+                        geth_step.stack.nth_last(1),
                     )
                 } else {
                     "".to_string()
