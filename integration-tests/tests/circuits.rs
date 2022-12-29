@@ -108,7 +108,7 @@ async fn test_super_circuit_all_block() {
         }
 
         let (k, circuit, instance) =
-            SuperCircuit::<Fr, 500, 2_000_000, 2_000_000>::build_from_circuit_input_builder(
+            SuperCircuit::<Fr, 500, 2_000_000, 64, 2_000_000>::build_from_circuit_input_builder(
                 &builder,
             )
             .unwrap();

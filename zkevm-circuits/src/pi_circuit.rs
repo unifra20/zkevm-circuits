@@ -5,11 +5,11 @@ use std::marker::PhantomData;
 
 use crate::table::TxTable;
 use crate::table::{BlockTable, KeccakTable};
-use bus_mapping::circuit_input_builder::get_dummy_tx;
+use bus_mapping::circuit_input_builder::get_dummy_tx_hash;
 use eth_types::H256;
 use eth_types::{Field, ToBigEndian, Word};
 use ethers_core::utils::keccak256;
-use halo2_proofs::plonk::{Fixed, Instance, SecondPhase};
+use halo2_proofs::plonk::{Expression, Fixed, Instance, SecondPhase};
 
 use crate::evm_circuit::util::constraint_builder::BaseConstraintBuilder;
 use crate::util::{Challenges, SubCircuit, SubCircuitConfig};
@@ -150,8 +150,6 @@ pub struct PiCircuitConfig<F: Field> {
     q_not_end: Selector,
     q_keccak: Selector,
 
-    challenges: Challenges,
-
     pi: Column<Instance>, // hi(keccak(rpi)), lo(keccak(rpi))
 
     // External tables
@@ -163,7 +161,7 @@ pub struct PiCircuitConfig<F: Field> {
 }
 
 /// Circuit configuration arguments
-pub struct PiCircuitConfigArgs {
+pub struct PiCircuitConfigArgs<F: Field> {
     /// Max number of supported transactions
     pub max_txs: usize,
     /// Max number of supported calldata bytes
@@ -177,11 +175,11 @@ pub struct PiCircuitConfigArgs {
     /// Keccak Table
     pub keccak_table: KeccakTable,
     /// Challenges
-    pub challenges: Challenges,
+    pub challenges: Challenges<Expression<F>>,
 }
 
 impl<F: Field> SubCircuitConfig<F> for PiCircuitConfig<F> {
-    type ConfigArgs = PiCircuitConfigArgs;
+    type ConfigArgs = PiCircuitConfigArgs<F>;
 
     /// Return a new PiCircuitConfig
     fn new(
@@ -222,8 +220,6 @@ impl<F: Field> SubCircuitConfig<F> for PiCircuitConfig<F> {
         meta.enable_equality(tx_table.value); // copy tx hashes to rpi
         meta.enable_equality(pi);
 
-        let challenge_exprs = challenges.exprs(meta);
-
         // field bytes
         meta.create_gate(
             "rpi_bytes_acc[i+1] = rpi_bytes_acc[i] * t + rpi_bytes[i+1]",
@@ -232,10 +228,9 @@ impl<F: Field> SubCircuitConfig<F> for PiCircuitConfig<F> {
                 let bytes_acc_next = meta.query_advice(rpi_bytes_acc, Rotation::next());
                 let bytes_acc = meta.query_advice(rpi_bytes_acc, Rotation::cur());
                 let bytes_next = meta.query_advice(rpi_bytes, Rotation::next());
-                let is_field_rlc = meta.query_fixed(is_field_rlc, Rotation::cur());
-                let evm_rand = challenge_exprs.evm_word();
-                let t = is_field_rlc.expr() * evm_rand
-                    + (1.expr() - is_field_rlc) * BYTE_POW_BASE.expr();
+                let is_field_rlc = meta.query_fixed(is_field_rlc, Rotation::next());
+                let evm_rand = challenges.evm_word();
+                let t = select::expr(is_field_rlc, evm_rand, BYTE_POW_BASE.expr());
 
                 vec![q_field_step * (bytes_acc_next - (bytes_acc * t + bytes_next))]
             },
@@ -275,7 +270,7 @@ impl<F: Field> SubCircuitConfig<F> for PiCircuitConfig<F> {
                 let is_rpi_padding = meta.query_advice(is_rpi_padding, Rotation::next());
                 let rpi_rlc_acc_cur = meta.query_advice(rpi_rlc_acc, Rotation::cur());
                 let rpi_bytes_next = meta.query_advice(rpi_bytes, Rotation::next());
-                let keccak_rand = challenge_exprs.keccak_input();
+                let keccak_rand = challenges.keccak_input();
 
                 cb.require_equal(
                     "rpi_rlc_acc' = is_rpi_padding ? rpi_rlc_acc : rpi_rlc_acc * r + rpi_bytes'",
@@ -383,7 +378,6 @@ impl<F: Field> SubCircuitConfig<F> for PiCircuitConfig<F> {
             q_start,
             q_not_end,
             q_keccak,
-            challenges,
             pi,
             _marker: PhantomData,
         }
@@ -951,6 +945,7 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_INNER_
         let tx_table = TxTable::construct(meta);
         let keccak_table = KeccakTable::construct(meta);
         let challenges = Challenges::construct(meta);
+        let challenge_exprs = challenges.exprs(meta);
         (
             PiCircuitConfig::new(
                 meta,
@@ -961,10 +956,10 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_INNER_
                     block_table,
                     keccak_table,
                     tx_table,
-                    challenges,
+                    challenges: challenge_exprs,
                 },
             ),
-            Challenges::construct(meta),
+            challenges,
         )
     }
 
@@ -1000,17 +995,6 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_INNER_
 
         Ok(())
     }
-}
-
-/// Get the tx hash of the dummy tx (nonce=0, gas=0, gas_price=0, to=0, value=0,
-/// data="") for any chain_id
-fn get_dummy_tx_hash(chain_id: u64) -> H256 {
-    let (tx, sig) = get_dummy_tx(chain_id);
-
-    let tx_hash = keccak256(tx.rlp_signed(&sig));
-    log::debug!("tx hash: {}", hex::encode(tx_hash));
-
-    H256(tx_hash)
 }
 
 #[cfg(test)]
