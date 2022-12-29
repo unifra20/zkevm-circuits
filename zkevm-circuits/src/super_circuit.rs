@@ -329,9 +329,13 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: u
         );
         let rws = &self.state_circuit.rows;
 
-        config
-            .block_table
-            .load(&mut layouter, &block.context, &block.txs, &challenges)?;
+        config.block_table.load(
+            &mut layouter,
+            &block.context,
+            &block.txs,
+            block.circuits_params.max_inner_blocks,
+            &challenges,
+        )?;
 
         config.mpt_table.load(
             &mut layouter,
@@ -386,6 +390,7 @@ impl<const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_RWS: usize>
             CircuitsParams {
                 max_txs: MAX_TXS,
                 max_calldata: MAX_CALLDATA,
+                max_inner_blocks: 64,
                 max_rws: MAX_RWS,
                 max_bytecode: 512,
                 keccak_padding: None,

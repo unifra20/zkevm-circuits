@@ -34,13 +34,12 @@ mod tests {
 
         const MAX_TXS: usize = 10;
         const MAX_CALLDATA: usize = 128;
+        const MAX_INNER_BLOCKS: usize = 64;
 
         let block = generate_block::<MAX_TXS, MAX_CALLDATA>();
-        let circuit = PiTestCircuit::<Fr, MAX_TXS, MAX_CALLDATA>(PiCircuit::<Fr>::new(
-            MAX_TXS,
-            MAX_CALLDATA,
-            &block,
-        ));
+        let circuit = PiTestCircuit::<Fr, MAX_TXS, MAX_CALLDATA, MAX_INNER_BLOCKS>(
+            PiCircuit::<Fr>::new(MAX_TXS, MAX_CALLDATA, MAX_INNER_BLOCKS, &block),
+        );
         let public_inputs = circuit.0.instance();
         let instance: Vec<&[Fr]> = public_inputs.iter().map(|input| &input[..]).collect();
         let instances = &[&instance[..]][..];
@@ -72,7 +71,7 @@ mod tests {
             Challenge255<G1Affine>,
             XorShiftRng,
             Blake2bWrite<Vec<u8>, G1Affine, Challenge255<G1Affine>>,
-            PiTestCircuit<Fr, MAX_TXS, MAX_CALLDATA>,
+            PiTestCircuit<Fr, MAX_TXS, MAX_CALLDATA, MAX_INNER_BLOCKS>,
         >(
             &general_params,
             &pk,

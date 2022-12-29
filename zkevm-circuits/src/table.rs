@@ -7,8 +7,8 @@ use crate::impl_expr;
 use crate::util::build_tx_log_address;
 use crate::util::Challenges;
 use crate::witness::{
-    Block, BlockContexts, Bytecode, MptUpdateRow, MptUpdates, RlpWitnessGen, Rw, RwMap, RwRow,
-    SignedTransaction, Transaction,
+    Block, BlockContext, BlockContexts, Bytecode, MptUpdateRow, MptUpdates, RlpWitnessGen, Rw,
+    RwMap, RwRow, SignedTransaction, Transaction,
 };
 use bus_mapping::circuit_input_builder::{
     get_dummy_tx, CopyDataType, CopyEvent, CopyStep, ExpEvent,
@@ -172,7 +172,9 @@ impl TxTable {
                 )?;
                 offset += 1;
 
-                let (dummy_tx, dummy_sig) = get_dummy_tx(txs[0].chain_id);
+                // FIXME: remove this hardcoded default chain_id
+                let chain_id = if !txs.is_empty() { txs[0].chain_id } else { 1 };
+                let (dummy_tx, dummy_sig) = get_dummy_tx(chain_id);
                 let dummy_tx_hash = keccak256(dummy_tx.rlp_signed(&dummy_sig));
 
                 let padding_txs: Vec<Transaction> = (txs.len()..max_txs)
@@ -737,6 +739,7 @@ impl BlockTable {
         layouter: &mut impl Layouter<F>,
         block_ctxs: &BlockContexts,
         txs: &[Transaction],
+        max_inner_blocks: usize,
         challenges: &Challenges<Value<F>>,
     ) -> Result<(), Error> {
         layouter.assign_region(
@@ -755,7 +758,11 @@ impl BlockTable {
                 offset += 1;
 
                 let mut cum_num_txs = 0usize;
-                for block_ctx in block_ctxs.ctxs.values() {
+                let padding_blocks = (block_ctxs.ctxs.len()..max_inner_blocks)
+                    .into_iter()
+                    .map(|_| BlockContext::default())
+                    .collect::<Vec<_>>();
+                for block_ctx in block_ctxs.ctxs.values().chain(padding_blocks.iter()) {
                     let num_txs = txs
                         .iter()
                         .filter(|tx| tx.block_number == block_ctx.number.as_u64())

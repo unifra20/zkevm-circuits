@@ -11,9 +11,10 @@ use eth_types::{Field, ToBigEndian, Word};
 use ethers_core::utils::keccak256;
 use halo2_proofs::plonk::{Fixed, Instance, SecondPhase};
 
+use crate::evm_circuit::util::constraint_builder::BaseConstraintBuilder;
 use crate::util::{Challenges, SubCircuit, SubCircuitConfig};
-use crate::witness::{Block, BlockContexts, Transaction};
-use gadgets::util::Expr;
+use crate::witness::{Block, BlockContext, BlockContexts, Transaction};
+use gadgets::util::{not, select, Expr};
 use halo2_proofs::circuit::{Cell, RegionIndex};
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Region, SimpleFloorPlanner, Value},
@@ -131,10 +132,14 @@ pub struct PiCircuitConfig<F: Field> {
     /// Max number of supported inner blocks in a batch
     max_inner_blocks: usize,
 
-    raw_public_inputs: Column<Advice>, // block, extra, tx hashes
+    raw_public_inputs: Column<Advice>, // block, history_hashes, states, tx hashes
     rpi_field_bytes: Column<Advice>,   // rpi in bytes
     rpi_field_bytes_acc: Column<Advice>,
     rpi_rlc_acc: Column<Advice>, // RLC(rpi) as the input to Keccak table
+    rpi_length_acc: Column<Advice>,
+
+    is_rpi_padding: Column<Advice>,
+    real_rpi: Column<Advice>,
 
     q_field_start: Selector,
     q_field_step: Selector,
@@ -195,6 +200,9 @@ impl<F: Field> SubCircuitConfig<F> for PiCircuitConfig<F> {
         let rpi_bytes = meta.advice_column();
         let rpi_bytes_acc = meta.advice_column_in(SecondPhase);
         let rpi_rlc_acc = meta.advice_column_in(SecondPhase);
+        let rpi_length_acc = meta.advice_column();
+        let is_rpi_padding = meta.advice_column();
+        let real_rpi = meta.advice_column_in(SecondPhase);
 
         let pi = meta.instance_column();
 
@@ -208,6 +216,7 @@ impl<F: Field> SubCircuitConfig<F> for PiCircuitConfig<F> {
         let q_keccak = meta.complex_selector();
 
         meta.enable_equality(rpi);
+        meta.enable_equality(real_rpi);
         meta.enable_equality(rpi_rlc_acc);
         meta.enable_equality(block_table.value); // copy block to rpi
         meta.enable_equality(tx_table.value); // copy tx hashes to rpi
@@ -257,17 +266,35 @@ impl<F: Field> SubCircuitConfig<F> for PiCircuitConfig<F> {
         meta.create_gate(
             "rpi_rlc_acc[i+1] = keccak_rand * rpi_rlc_acc[i] + rpi_bytes[i+1]",
             |meta| {
-                // q_not_end * row_next.rpi_rlc_acc ==
-                // (q_not_end * row.rpi_rlc_acc * keccak_rand + row_next.rpi_bytes)
-                let q_not_end = meta.query_selector(q_not_end);
+                // if is_rpi_padding is true, then
+                //   q_not_end * row_next.rpi_rlc_acc ==
+                //   (q_not_end * row.rpi_rlc_acc * keccak_rand + row_next.rpi_bytes)
+                // else,
+                //   q_not_end * row_next.rpi_rlc_acc == q_not_end * row.rpi_rlc_acc
+                let mut cb = BaseConstraintBuilder::default();
+                let is_rpi_padding = meta.query_advice(is_rpi_padding, Rotation::next());
                 let rpi_rlc_acc_cur = meta.query_advice(rpi_rlc_acc, Rotation::cur());
-                let rpi_rlc_acc_next = meta.query_advice(rpi_rlc_acc, Rotation::next());
-                let keccak_rand = challenge_exprs.keccak_input();
                 let rpi_bytes_next = meta.query_advice(rpi_bytes, Rotation::next());
+                let keccak_rand = challenge_exprs.keccak_input();
 
-                vec![
-                    q_not_end * (rpi_rlc_acc_cur * keccak_rand + rpi_bytes_next - rpi_rlc_acc_next),
-                ]
+                cb.require_equal(
+                    "rpi_rlc_acc' = is_rpi_padding ? rpi_rlc_acc : rpi_rlc_acc * r + rpi_bytes'",
+                    meta.query_advice(rpi_rlc_acc, Rotation::next()),
+                    select::expr(
+                        is_rpi_padding.expr(),
+                        rpi_rlc_acc_cur.expr(),
+                        rpi_rlc_acc_cur * keccak_rand + rpi_bytes_next,
+                    ),
+                );
+
+                cb.require_equal(
+                    "rpi_length_acc' = rpi_length_acc + (is_rpi_padding ? 0 : 1)",
+                    meta.query_advice(rpi_length_acc, Rotation::next()),
+                    meta.query_advice(rpi_length_acc, Rotation::cur())
+                        + select::expr(is_rpi_padding, 0.expr(), 1.expr()),
+                );
+
+                cb.gate(meta.query_selector(q_not_end))
             },
         );
         meta.create_gate("rpi_rlc_acc[0] = rpi_bytes[0]", |meta| {
@@ -276,6 +303,23 @@ impl<F: Field> SubCircuitConfig<F> for PiCircuitConfig<F> {
             let rpi_bytes = meta.query_advice(rpi_bytes, Rotation::cur());
 
             vec![q_start * (rpi_rlc_acc - rpi_bytes)]
+        });
+        meta.create_gate("real rpi", |meta| {
+            let mut cb = BaseConstraintBuilder::default();
+
+            cb.require_boolean(
+                "is_rpi_padding is boolean",
+                meta.query_advice(is_rpi_padding, Rotation::cur()),
+            );
+
+            cb.require_equal(
+                "real_rpi == not(is_rpi_padding) * rpi",
+                meta.query_advice(real_rpi, Rotation::cur()),
+                not::expr(meta.query_advice(is_rpi_padding, Rotation::cur()))
+                    * meta.query_advice(rpi, Rotation::cur()),
+            );
+
+            cb.gate(meta.query_selector(q_not_end))
         });
 
         meta.lookup_any("keccak(rpi)", |meta| {
@@ -286,6 +330,7 @@ impl<F: Field> SubCircuitConfig<F> for PiCircuitConfig<F> {
             let q_keccak = meta.query_selector(q_keccak);
 
             let rpi_rlc = meta.query_advice(rpi, Rotation::cur());
+            let rpi_length = meta.query_advice(rpi_length_acc, Rotation::cur());
             let output = meta.query_advice(rpi_rlc_acc, Rotation::cur());
 
             vec![
@@ -293,7 +338,8 @@ impl<F: Field> SubCircuitConfig<F> for PiCircuitConfig<F> {
                 (q_keccak.expr() * rpi_rlc, input_rlc),
                 (
                     q_keccak.expr()
-                        * (BLOCK_HEADER_BYTES_NUM + max_txs * KECCAK_DIGEST_SIZE).expr(),
+                        // * (BLOCK_HEADER_BYTES_NUM + max_txs * KECCAK_DIGEST_SIZE).expr(),
+                        * rpi_length,
                     input_len,
                 ),
                 (q_keccak * output, output_rlc),
@@ -324,6 +370,9 @@ impl<F: Field> SubCircuitConfig<F> for PiCircuitConfig<F> {
             rpi_field_bytes: rpi_bytes,
             rpi_field_bytes_acc: rpi_bytes_acc,
             rpi_rlc_acc,
+            rpi_length_acc,
+            is_rpi_padding,
+            real_rpi,
             q_field_start,
             q_field_step,
             is_field_rlc,
@@ -354,6 +403,7 @@ impl<F: Field> PiCircuitConfig<F> {
             .collect::<Vec<H256>>();
 
         let mut offset = 0;
+        let mut rpi_length_acc = 0u64;
         let mut block_copy_cells = vec![];
         let mut block_copy_offsets = vec![];
         let mut tx_copy_cells = vec![];
@@ -362,7 +412,19 @@ impl<F: Field> PiCircuitConfig<F> {
         let dummy_tx_hash = get_dummy_tx_hash(public_data.chain_id.as_u64());
 
         self.q_start.enable(region, offset)?;
-        for (_, block) in block_values.ctxs.iter() {
+
+        for (i, block) in block_values
+            .ctxs
+            .iter()
+            .map(|(_, block)| block.clone())
+            .chain(
+                (block_values.ctxs.len()..self.max_inner_blocks)
+                    .into_iter()
+                    .map(|_| BlockContext::default()),
+            )
+            .enumerate()
+        {
+            let is_rpi_padding = i >= block_values.ctxs.len();
             block_copy_offsets.push(block_table_offset);
             let num_txs = public_data
                 .transactions
@@ -376,6 +438,9 @@ impl<F: Field> PiCircuitConfig<F> {
                 &mut offset,
                 &block.coinbase.to_fixed_bytes(),
                 &mut rpi_rlc_acc,
+                &mut rpi_length_acc,
+                true,
+                is_rpi_padding,
                 challenges,
                 false,
             )?;
@@ -388,6 +453,9 @@ impl<F: Field> PiCircuitConfig<F> {
                 &mut offset,
                 &block.timestamp.as_u64().to_be_bytes(),
                 &mut rpi_rlc_acc,
+                &mut rpi_length_acc,
+                true,
+                is_rpi_padding,
                 challenges,
                 false,
             )?;
@@ -399,6 +467,9 @@ impl<F: Field> PiCircuitConfig<F> {
                 &mut offset,
                 &block.number.as_u64().to_be_bytes(),
                 &mut rpi_rlc_acc,
+                &mut rpi_length_acc,
+                true,
+                is_rpi_padding,
                 challenges,
                 false,
             )?;
@@ -410,6 +481,9 @@ impl<F: Field> PiCircuitConfig<F> {
                 &mut offset,
                 &block.difficulty.to_be_bytes(),
                 &mut rpi_rlc_acc,
+                &mut rpi_length_acc,
+                true,
+                is_rpi_padding,
                 challenges,
                 false,
             )?;
@@ -421,6 +495,9 @@ impl<F: Field> PiCircuitConfig<F> {
                 &mut offset,
                 &block.gas_limit.to_be_bytes(),
                 &mut rpi_rlc_acc,
+                &mut rpi_length_acc,
+                true,
+                is_rpi_padding,
                 challenges,
                 false,
             )?;
@@ -432,6 +509,9 @@ impl<F: Field> PiCircuitConfig<F> {
                 &mut offset,
                 &block.base_fee.to_be_bytes(),
                 &mut rpi_rlc_acc,
+                &mut rpi_length_acc,
+                true,
+                is_rpi_padding,
                 challenges,
                 false,
             )?;
@@ -443,6 +523,9 @@ impl<F: Field> PiCircuitConfig<F> {
                 &mut offset,
                 &block.chain_id.to_be_bytes(),
                 &mut rpi_rlc_acc,
+                &mut rpi_length_acc,
+                true,
+                is_rpi_padding,
                 challenges,
                 false,
             )?;
@@ -454,6 +537,9 @@ impl<F: Field> PiCircuitConfig<F> {
                 &mut offset,
                 &num_txs.to_be_bytes(),
                 &mut rpi_rlc_acc,
+                &mut rpi_length_acc,
+                true,
+                is_rpi_padding,
                 challenges,
                 false,
             )?;
@@ -461,7 +547,7 @@ impl<F: Field> PiCircuitConfig<F> {
 
             block_table_offset += 9 + block.history_hashes.len();
         }
-        debug_assert_eq!(offset, BLOCK_HEADER_BYTES_NUM * block_values.ctxs.len());
+        debug_assert_eq!(offset, BLOCK_HEADER_BYTES_NUM * self.max_inner_blocks);
 
         // assign tx hashes
         let num_txs = tx_hashes.len();
@@ -476,6 +562,9 @@ impl<F: Field> PiCircuitConfig<F> {
                 &mut offset,
                 &tx_hash.to_fixed_bytes(),
                 &mut rpi_rlc_acc,
+                &mut rpi_length_acc,
+                false,
+                false,
                 challenges,
                 false,
             )?;
@@ -485,7 +574,7 @@ impl<F: Field> PiCircuitConfig<F> {
 
         debug_assert_eq!(
             offset,
-            BLOCK_HEADER_BYTES_NUM * block_values.ctxs.len() + self.max_txs * KECCAK_DIGEST_SIZE
+            BLOCK_HEADER_BYTES_NUM * self.max_inner_blocks + KECCAK_DIGEST_SIZE * self.max_txs
         );
 
         for i in 0..(offset - 1) {
@@ -537,6 +626,12 @@ impl<F: Field> PiCircuitConfig<F> {
                     acc.zip(challenges.evm_word())
                         .and_then(|(acc, rand)| Value::known(acc * rand + F::from(*byte as u64)))
                 });
+        region.assign_advice(
+            || "rpi_length_acc",
+            self.rpi_length_acc,
+            keccak_row,
+            || Value::known(F::from(rpi_length_acc)),
+        )?;
         let keccak_output_cell = region.assign_advice(
             || "keccak(rpi)_output",
             self.rpi_rlc_acc,
@@ -554,6 +649,9 @@ impl<F: Field> PiCircuitConfig<F> {
             &mut offset,
             &keccak.to_fixed_bytes()[..16],
             &mut rpi_rlc_acc,
+            &mut rpi_length_acc,
+            false,
+            false,
             challenges,
             true,
         )?;
@@ -565,6 +663,9 @@ impl<F: Field> PiCircuitConfig<F> {
             &mut offset,
             &keccak.to_fixed_bytes()[16..],
             &mut rpi_rlc_acc,
+            &mut rpi_length_acc,
+            false,
+            false,
             challenges,
             true,
         )?;
@@ -578,12 +679,16 @@ impl<F: Field> PiCircuitConfig<F> {
         Ok((keccak_hi_cell, keccak_lo_cell))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn assign_field_in_pi(
         &self,
         region: &mut Region<'_, F>,
         offset: &mut usize,
         value_bytes: &[u8],
         rpi_rlc_acc: &mut Value<F>,
+        rpi_length_acc: &mut u64,
+        is_block: bool,
+        is_padding: bool,
         challenges: &Challenges<Value<F>>,
         keccak_hi_lo: bool,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
@@ -611,14 +716,22 @@ impl<F: Field> PiCircuitConfig<F> {
         for (i, byte) in value_bytes.iter().enumerate() {
             let row_offset = *offset + i;
 
+            let real_value = if is_padding {
+                Value::known(F::zero())
+            } else {
+                value
+            };
+            *rpi_length_acc += if is_padding { 0 } else { 1 };
             // calculate acc
             value_bytes_acc = value_bytes_acc
                 .zip(t)
                 .and_then(|(acc, t)| Value::known(acc * t + F::from(*byte as u64)));
 
-            *rpi_rlc_acc = rpi_rlc_acc
-                .zip(r)
-                .and_then(|(acc, rand)| Value::known(acc * rand + F::from(*byte as u64)));
+            if !is_padding {
+                *rpi_rlc_acc = rpi_rlc_acc
+                    .zip(r)
+                    .and_then(|(acc, rand)| Value::known(acc * rand + F::from(*byte as u64)));
+            }
 
             // set field-related selectors
             if i == 0 {
@@ -660,9 +773,27 @@ impl<F: Field> PiCircuitConfig<F> {
                 row_offset,
                 || *rpi_rlc_acc,
             )?;
+            region.assign_advice(
+                || "is_rpi_padding",
+                self.is_rpi_padding,
+                row_offset,
+                || Value::known(F::from(is_padding as u64)),
+            )?;
+            let real_rpi_cell =
+                region.assign_advice(|| "real_rpi", self.real_rpi, row_offset, || real_value)?;
+            region.assign_advice(
+                || "rpi_length_acc",
+                self.rpi_length_acc,
+                row_offset,
+                || Value::known(F::from(*rpi_length_acc)),
+            )?;
 
             if i == len - 1 {
-                cells[RPI_CELL_IDX] = Some(rpi_cell);
+                cells[RPI_CELL_IDX] = if is_block {
+                    Some(real_rpi_cell)
+                } else {
+                    Some(rpi_cell)
+                };
                 cells[RPI_RLC_ACC_CELL_IDX] = Some(rpi_rlc_cell);
             }
         }
@@ -677,6 +808,7 @@ impl<F: Field> PiCircuitConfig<F> {
 pub struct PiCircuit<F: Field> {
     max_txs: usize,
     max_calldata: usize,
+    max_inner_blocks: usize,
     /// PublicInputs data known by the verifier
     pub public_data: PublicData,
 
@@ -685,7 +817,12 @@ pub struct PiCircuit<F: Field> {
 
 impl<F: Field> PiCircuit<F> {
     /// Creates a new PiCircuit
-    pub fn new(max_txs: usize, max_calldata: usize, block: &Block<F>) -> Self {
+    pub fn new(
+        max_txs: usize,
+        max_calldata: usize,
+        max_inner_blocks: usize,
+        block: &Block<F>,
+    ) -> Self {
         let context = block
             .context
             .ctxs
@@ -703,6 +840,7 @@ impl<F: Field> PiCircuit<F> {
             public_data,
             max_txs,
             max_calldata,
+            max_inner_blocks,
             _marker: PhantomData,
         }
     }
@@ -720,6 +858,7 @@ impl<F: Field> SubCircuit<F> for PiCircuit<F> {
         PiCircuit::new(
             block.circuits_params.max_txs,
             block.circuits_params.max_calldata,
+            block.circuits_params.max_inner_blocks,
             block,
         )
     }
@@ -783,13 +922,16 @@ impl<F: Field> SubCircuit<F> for PiCircuit<F> {
 /// Test Circuit for PiCircuit
 #[cfg(any(feature = "test", test))]
 #[derive(Default)]
-pub struct PiTestCircuit<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize>(
-    pub PiCircuit<F>,
-);
+pub struct PiTestCircuit<
+    F: Field,
+    const MAX_TXS: usize,
+    const MAX_CALLDATA: usize,
+    const MAX_INNER_BLOCKS: usize,
+>(pub PiCircuit<F>);
 
 #[cfg(any(feature = "test", test))]
-impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize> Circuit<F>
-    for PiTestCircuit<F, MAX_TXS, MAX_CALLDATA>
+impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize, const MAX_INNER_BLOCKS: usize>
+    Circuit<F> for PiTestCircuit<F, MAX_TXS, MAX_CALLDATA, MAX_INNER_BLOCKS>
 {
     type Config = (PiCircuitConfig<F>, Challenges);
     type FloorPlanner = SimpleFloorPlanner;
@@ -809,7 +951,7 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize> Circuit<F>
                 PiCircuitConfigArgs {
                     max_txs: MAX_TXS,
                     max_calldata: MAX_CALLDATA,
-                    max_inner_blocks: 128,
+                    max_inner_blocks: MAX_INNER_BLOCKS,
                     block_table,
                     keccak_table,
                     tx_table,
@@ -832,6 +974,7 @@ impl<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize> Circuit<F>
             &mut layouter,
             &self.0.public_data.block_ctxs,
             &self.0.public_data.transactions,
+            self.0.max_inner_blocks,
             &challenges,
         )?;
         // assign tx table
@@ -879,13 +1022,19 @@ mod pi_circuit_test {
     use mock::TestContext;
     use pretty_assertions::assert_eq;
 
-    fn run<F: Field, const MAX_TXS: usize, const MAX_CALLDATA: usize>(
+    fn run<
+        F: Field,
+        const MAX_TXS: usize,
+        const MAX_CALLDATA: usize,
+        const MAX_INNER_BLOCKS: usize,
+    >(
         k: u32,
         block: Block<F>,
     ) -> Result<(), Vec<VerifyFailure>> {
-        let circuit = PiTestCircuit::<F, MAX_TXS, MAX_CALLDATA>(PiCircuit::new(
+        let circuit = PiTestCircuit::<F, MAX_TXS, MAX_CALLDATA, MAX_INNER_BLOCKS>(PiCircuit::new(
             MAX_TXS,
             MAX_CALLDATA,
+            MAX_INNER_BLOCKS,
             &block,
         ));
         let public_inputs = circuit.0.instance();
@@ -911,6 +1060,7 @@ mod pi_circuit_test {
     fn test_simple_pi() {
         const MAX_TXS: usize = 4;
         const MAX_CALLDATA: usize = 20;
+        const MAX_INNER_BLOCKS: usize = 64;
 
         let test_ctx = TestContext::<2, 1>::simple_ctx_with_bytecode(bytecode! {
             STOP
@@ -924,6 +1074,9 @@ mod pi_circuit_test {
         let block = block_convert(&builder.block, &builder.code_db).unwrap();
 
         let k = 16;
-        assert_eq!(run::<Fr, MAX_TXS, MAX_CALLDATA>(k, block), Ok(()));
+        assert_eq!(
+            run::<Fr, MAX_TXS, MAX_CALLDATA, MAX_INNER_BLOCKS>(k, block),
+            Ok(())
+        );
     }
 }

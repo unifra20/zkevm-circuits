@@ -52,6 +52,8 @@ pub struct CircuitsParams {
     pub max_txs: usize,
     /// Maximum number of bytes from all txs calldata in the Tx Circuit
     pub max_calldata: usize,
+    /// Maximum number of inner blocks in a batch
+    pub max_inner_blocks: usize,
     /// Maximum number of bytes supported in the Bytecode Circuit
     pub max_bytecode: usize,
     // TODO: Rename for consistency
@@ -67,6 +69,7 @@ impl Default for CircuitsParams {
             max_rws: 1000,
             max_txs: 1,
             max_calldata: 256,
+            max_inner_blocks: 64,
             max_bytecode: 512,
             keccak_padding: None,
         }
