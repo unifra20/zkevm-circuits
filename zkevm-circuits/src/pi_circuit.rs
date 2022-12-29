@@ -359,6 +359,9 @@ impl<F: Field> SubCircuitConfig<F> for PiCircuitConfig<F> {
         // | lo  |    ...    |      ...      |     ...     |
         // | lo  |     b0    | b15*2^120+... | b31*r^31+...|
 
+        // TODO: add constraints on block_table.value for tag = 'CumNumTxs'.
+        //       cur_block.cum_num_txs = prev_block.cum_num_txs + cur_block.num_txs
+
         Self {
             max_txs,
             max_calldata,
@@ -903,6 +906,9 @@ impl<F: Field> SubCircuit<F> for PiCircuit<F> {
                 Ok(vec![keccak_hi_cell, keccak_lo_cell])
             },
         )?;
+        // TODO: add copy constraints between block_table.index and
+        //       block_table.value (tag = 'Number') for tags except
+        //       history_hashes
 
         // Constrain raw_public_input cells to public inputs
         for (i, pi_cell) in pi_cells.iter().enumerate() {
