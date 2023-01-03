@@ -236,4 +236,6 @@ pub mod mock;
 pub mod operation;
 pub mod rpc;
 pub mod state_db;
+pub(crate) mod precompile;
+
 pub use error::Error;
