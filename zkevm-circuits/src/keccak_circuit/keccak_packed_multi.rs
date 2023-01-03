@@ -2122,6 +2122,7 @@ pub fn multi_keccak<F: Field>(
         .flat_map_iter(|bytes| keccak_rows(bytes, challenges))
         .collect();
     rows.extend(keccak_rows.into_iter());
+    debug!("keccak rows len without padding: {}", rows.len());
     if let Some(capacity) = capacity {
         // Pad with no data hashes to the expected capacity
         while rows.len() < (1 + capacity * (NUM_ROUNDS + 1)) * get_num_rows_per_round() {
