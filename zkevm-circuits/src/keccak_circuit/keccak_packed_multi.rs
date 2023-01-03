@@ -21,7 +21,7 @@ use halo2_proofs::{
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Expression, Fixed, TableColumn},
     poly::Rotation,
 };
-use log::{debug, info};
+use log::{debug, trace};
 use std::{env::var, marker::PhantomData, vec};
 
 const MAX_DEGREE: usize = 9;
@@ -947,9 +947,9 @@ impl<F: Field> SubCircuitConfig<F> for KeccakCircuitConfig<F> {
             decode::expr(absorb_res),
             absorb_result.expr(),
         );
-        info!("- Post absorb:");
-        info!("Lookups: {}", lookup_counter);
-        info!("Columns: {}", cell_manager.get_width());
+        debug!("- Post absorb:");
+        debug!("Lookups: {}", lookup_counter);
+        debug!("Columns: {}", cell_manager.get_width());
         total_lookup_counter += lookup_counter;
 
         // Squeeze
@@ -993,9 +993,9 @@ impl<F: Field> SubCircuitConfig<F> for KeccakCircuitConfig<F> {
             is_paddings.push(cell_manager.query_cell(meta));
             data_rlcs.push(cell_manager.query_cell(meta));
         }
-        info!("- Post padding:");
-        info!("Lookups: {}", lookup_counter);
-        info!("Columns: {}", cell_manager.get_width());
+        debug!("- Post padding:");
+        debug!("Lookups: {}", lookup_counter);
+        debug!("Columns: {}", cell_manager.get_width());
         total_lookup_counter += lookup_counter;
 
         // Theta
@@ -1053,9 +1053,9 @@ impl<F: Field> SubCircuitConfig<F> for KeccakCircuitConfig<F> {
             }
         }
         s = os.clone();
-        info!("- Post theta:");
-        info!("Lookups: {}", lookup_counter);
-        info!("Columns: {}", cell_manager.get_width());
+        debug!("- Post theta:");
+        debug!("Lookups: {}", lookup_counter);
+        debug!("Columns: {}", cell_manager.get_width());
         total_lookup_counter += lookup_counter;
 
         // Rho/Pi
@@ -1142,9 +1142,9 @@ impl<F: Field> SubCircuitConfig<F> for KeccakCircuitConfig<F> {
             });
             lookup_counter += 1;
         }
-        info!("- Post rho/pi:");
-        info!("Lookups: {}", lookup_counter);
-        info!("Columns: {}", cell_manager.get_width());
+        debug!("- Post rho/pi:");
+        debug!("Lookups: {}", lookup_counter);
+        debug!("Columns: {}", cell_manager.get_width());
         total_lookup_counter += lookup_counter;
 
         // Chi
@@ -1231,9 +1231,9 @@ impl<F: Field> SubCircuitConfig<F> for KeccakCircuitConfig<F> {
                 cb.require_equal("next row check", s[i][j].clone(), s_next[i][j].clone());
             }
         }
-        info!("- Post chi:");
-        info!("Lookups: {}", lookup_counter);
-        info!("Columns: {}", cell_manager.get_width());
+        debug!("- Post chi:");
+        debug!("Lookups: {}", lookup_counter);
+        debug!("Columns: {}", cell_manager.get_width());
         total_lookup_counter += lookup_counter;
 
         let mut lookup_counter = 0;
@@ -1279,9 +1279,9 @@ impl<F: Field> SubCircuitConfig<F> for KeccakCircuitConfig<F> {
                 .unwrap(),
             true,
         );
-        info!("- Post squeeze:");
-        info!("Lookups: {}", lookup_counter);
-        info!("Columns: {}", cell_manager.get_width());
+        debug!("- Post squeeze:");
+        debug!("Lookups: {}", lookup_counter);
+        debug!("Columns: {}", cell_manager.get_width());
         total_lookup_counter += lookup_counter;
 
         // The round constraints that we've been building up till now
@@ -1584,21 +1584,21 @@ impl<F: Field> SubCircuitConfig<F> for KeccakCircuitConfig<F> {
             cb.gate(1.expr())
         });
 
-        info!("Degree: {}", meta.degree());
-        info!("Minimum rows: {}", meta.minimum_rows());
-        info!("Total Lookups: {}", total_lookup_counter);
-        info!("Total Columns: {}", cell_manager.get_width());
-        info!("num unused cells: {}", cell_manager.get_num_unused_cells());
-        info!("part_size absorb: {}", get_num_bits_per_absorb_lookup());
-        info!("part_size theta: {}", get_num_bits_per_theta_c_lookup());
-        info!(
+        debug!("Degree: {}", meta.degree());
+        debug!("Minimum rows: {}", meta.minimum_rows());
+        debug!("Total Lookups: {}", total_lookup_counter);
+        debug!("Total Columns: {}", cell_manager.get_width());
+        debug!("num unused cells: {}", cell_manager.get_num_unused_cells());
+        debug!("part_size absorb: {}", get_num_bits_per_absorb_lookup());
+        debug!("part_size theta: {}", get_num_bits_per_theta_c_lookup());
+        debug!(
             "part_size theta c: {}",
             get_num_bits_per_lookup(THETA_C_LOOKUP_RANGE)
         );
-        info!("part_size theta t: {}", get_num_bits_per_lookup(4));
-        info!("part_size rho/pi: {}", get_num_bits_per_rho_pi_lookup());
-        info!("part_size chi base: {}", get_num_bits_per_base_chi_lookup());
-        info!(
+        debug!("part_size theta t: {}", get_num_bits_per_lookup(4));
+        debug!("part_size rho/pi: {}", get_num_bits_per_rho_pi_lookup());
+        debug!("part_size chi base: {}", get_num_bits_per_base_chi_lookup());
+        debug!(
             "uniform part sizes: {:?}",
             target_part_sizes(get_num_bits_per_theta_c_lookup())
         );
@@ -2074,8 +2074,8 @@ fn keccak<F: Field>(rows: &mut Vec<KeccakRow<F>>, bytes: &[u8], challenges: Chal
                 .to_vec()
         })
         .collect::<Vec<_>>();
-    debug!("hash: {:x?}", &(hash_bytes[0..4].concat()));
-    debug!("data rlc: {:x?}", data_rlc);
+    trace!("hash: {:x?}", &(hash_bytes[0..4].concat()));
+    trace!("data rlc: {:x?}", data_rlc);
 }
 
 /// ...
