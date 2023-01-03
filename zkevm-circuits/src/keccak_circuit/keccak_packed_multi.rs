@@ -22,6 +22,8 @@ use halo2_proofs::{
     poly::Rotation,
 };
 use log::{debug, trace};
+use rayon::iter::IntoParallelRefIterator;
+use rayon::prelude::ParallelIterator;
 use std::{env::var, marker::PhantomData, vec};
 
 const MAX_DEGREE: usize = 9;
@@ -32,7 +34,7 @@ const CHI_BASE_LOOKUP_RANGE: usize = 5;
 
 fn get_num_rows_per_round() -> usize {
     var("KECCAK_ROWS")
-        .unwrap_or_else(|_| "28".to_string())
+        .unwrap_or_else(|_| "12".to_string())
         .parse()
         .expect("Cannot parse KECCAK_ROWS env var as usize")
 }
@@ -1721,6 +1723,12 @@ impl<F: Field> KeccakCircuitConfig<F> {
     }
 }
 
+fn keccak_rows<F: Field>(bytes: &[u8], challenges: Challenges<Value<F>>) -> Vec<KeccakRow<F>> {
+    let mut rows = Vec::new();
+    keccak(&mut rows, bytes, challenges);
+    rows
+}
+
 fn keccak<F: Field>(rows: &mut Vec<KeccakRow<F>>, bytes: &[u8], challenges: Challenges<Value<F>>) {
     let mut bits = into_bits(bytes);
     let mut s = [[F::zero(); 5]; 5];
@@ -2108,19 +2116,12 @@ pub fn multi_keccak<F: Field>(
     for (idx, bytes) in bytes.iter().enumerate() {
         debug!("{}th keccak is of len {}", idx, bytes.len());
     }
-    for (idx, bytes) in bytes.iter().enumerate() {
-        debug!("assigning {}th keccak, len {}", idx, bytes.len());
-        // early terminate
-        if let Some(capacity) = capacity {
-            if rows.len() >= (1 + capacity * (NUM_ROUNDS + 1)) * get_num_rows_per_round() {
-                // TODO: better check & truncate after each keccak_f instead of full input
-                // bytes?
-                log::error!("keccak circuit overflow, truncate with len {}", rows.len());
-                return Ok(rows);
-            }
-        }
-        keccak(&mut rows, bytes, challenges);
-    }
+    // TODO: optimize the `extend` using Iter?
+    let keccak_rows: Vec<_> = bytes
+        .par_iter()
+        .flat_map_iter(|bytes| keccak_rows(bytes, challenges))
+        .collect();
+    rows.extend(keccak_rows.into_iter());
     if let Some(capacity) = capacity {
         // Pad with no data hashes to the expected capacity
         while rows.len() < (1 + capacity * (NUM_ROUNDS + 1)) * get_num_rows_per_round() {
