@@ -2094,6 +2094,9 @@ pub fn multi_keccak<F: Field>(
 ) -> Result<Vec<KeccakRow<F>>, Error> {
     log::info!("multi_keccak assign with capacity: {:?}", capacity);
     let mut rows: Vec<KeccakRow<F>> = Vec::new();
+    if let Some(capacity) = capacity {
+        rows.reserve((1 + capacity * (NUM_ROUNDS + 1)) * get_num_rows_per_round());
+    }
     // Dummy first row so that the initial data is absorbed
     // The initial data doesn't really matter, `is_final` just needs to be disabled.
     for idx in 0..get_num_rows_per_round() {
@@ -2117,22 +2120,24 @@ pub fn multi_keccak<F: Field>(
         debug!("{}th keccak is of len {}", idx, bytes.len());
     }
     // TODO: optimize the `extend` using Iter?
-    let keccak_rows: Vec<_> = bytes
+    let real_rows: Vec<_> = bytes
         .par_iter()
         .flat_map_iter(|bytes| keccak_rows(bytes, challenges))
         .collect();
-    rows.extend(keccak_rows.into_iter());
+    rows.extend(real_rows.into_iter());
     debug!("keccak rows len without padding: {}", rows.len());
     if let Some(capacity) = capacity {
+        let rows_for_empty = keccak_rows(&[], challenges);
         // Pad with no data hashes to the expected capacity
         while rows.len() < (1 + capacity * (NUM_ROUNDS + 1)) * get_num_rows_per_round() {
-            keccak(&mut rows, &[], challenges);
+            rows.extend(rows_for_empty.iter().cloned())
         }
         // Check that we are not over capacity
         if rows.len() > (1 + capacity * (NUM_ROUNDS + 1)) * get_num_rows_per_round() {
             return Err(Error::BoundsFailure);
         }
     }
+    debug!("keccak witgen done");
     Ok(rows)
 }
 
