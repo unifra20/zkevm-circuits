@@ -260,8 +260,8 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
                     );
                     caller_ctx.memory.0[ret_offset..ret_offset + ret_length]
                         .copy_from_slice(&result[..ret_length]);
-                    for i in 0..ret_length {
-                        state.memory_write(&mut exec_step, (ret_offset + i).into(), result[i])?;
+                    for (i, value) in result.iter().enumerate() {
+                        state.memory_write(&mut exec_step, (ret_offset + i).into(), *value)?;
                     }
                 }
                 state.handle_return(geth_step)?;

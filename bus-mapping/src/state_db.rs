@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 lazy_static! {
     static ref ACCOUNT_ZERO: Account = Account::zero();
     static ref VALUE_ZERO: Word = Word::zero();
-    static ref CODE_HASH_ZERO: Hash = H256(keccak256(&[]));
+    static ref CODE_HASH_ZERO: Hash = H256(keccak256([]));
 }
 
 /// Define any object can encode the code to a 32 bytes hash
