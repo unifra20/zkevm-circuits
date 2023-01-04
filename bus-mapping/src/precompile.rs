@@ -1,3 +1,6 @@
+//! precompile helpers
+
+use eth_types::Address;
 use fp_evm::{
     Context, ExitError, ExitReason, ExitSucceed, LinearCostPrecompile, Precompile,
     PrecompileFailure, PrecompileHandle, PrecompileOutput, PrecompileResult, Transfer,
@@ -6,9 +9,13 @@ use pallet_evm_precompile_blake2::Blake2F;
 use pallet_evm_precompile_bn128::{Bn128Add, Bn128Mul, Bn128Pairing};
 use pallet_evm_precompile_modexp::Modexp;
 use pallet_evm_precompile_simple::{ECRecover, Identity, Ripemd160, Sha256};
-use eth_types::Address;
 
-pub fn execute_precompiled(address: &Address, input: &[u8]) -> Vec<u8> {
+/// Check if address is a precompiled or not.
+pub fn is_precompiled(address: &Address) -> bool {
+    address.0[0..19] == [0u8; 19] && (1..=9).contains(&address.0[19])
+}
+
+pub(crate) fn execute_precompiled(address: &Address, input: &[u8]) -> Vec<u8> {
     match address.as_bytes()[19] {
         0x01 => extract_linear_result(<ECRecover as LinearCostPrecompile>::execute(input, 0)),
         0x02 => extract_linear_result(<Sha256 as LinearCostPrecompile>::execute(input, 0)),
@@ -38,9 +45,9 @@ fn extract_linear_result(result: Result<(ExitSucceed, Vec<u8>), PrecompileFailur
 fn extract_result(result: PrecompileResult) -> Vec<u8> {
     match result {
         Ok(PrecompileOutput {
-               exit_status,
-               output,
-           }) => {
+            exit_status,
+            output,
+        }) => {
             assert_eq!(exit_status, ExitSucceed::Returned);
             output
         }

@@ -1,13 +1,13 @@
 use super::Opcode;
 use crate::circuit_input_builder::{CallKind, CircuitInputStateRef, CodeSource, ExecStep};
 use crate::operation::{AccountField, CallContextField, TxAccessListAccountOp, RW};
+use crate::precompile::{execute_precompiled, is_precompiled};
 use crate::Error;
 use eth_types::evm_types::gas_utils::{eip150_gas, memory_expansion_gas_cost};
 use eth_types::evm_types::GasCost;
 use eth_types::evm_types::OpcodeId;
 use eth_types::{GethExecStep, ToWord, Word};
 use keccak256::EMPTY_HASH;
-use crate::precompile::execute_precompiled;
 
 /// Placeholder structure used to implement [`Opcode`] trait over it
 /// corresponding to the `OpcodeId::CALL`, `OpcodeId::CALLCODE`,
@@ -237,12 +237,20 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
         let code_address = call.code_address();
         match (
             code_address
-                .map(|ref addr| state.is_precompiled(addr))
+                .map(|ref addr| is_precompiled(addr))
                 .unwrap_or(false),
             callee_code_hash.to_fixed_bytes() == *EMPTY_HASH,
         ) {
             // 1. Call to precompiled.
             (true, _) => {
+                for (field, value) in [
+                    (CallContextField::LastCalleeId, 0.into()),
+                    (CallContextField::LastCalleeReturnDataOffset, 0.into()),
+                    (CallContextField::LastCalleeReturnDataLength, 0.into()),
+                ] {
+                    state.call_context_write(&mut exec_step, current_call.call_id, field, value);
+                }
+
                 if call.is_success {
                     let caller_ctx = state.caller_ctx_mut()?;
                     let code_address = code_address.unwrap();
@@ -252,14 +260,9 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
                     );
                     caller_ctx.memory.0[ret_offset..ret_offset + ret_length]
                         .copy_from_slice(&result[..ret_length]);
-                }
-
-                for (field, value) in [
-                    (CallContextField::LastCalleeId, 0.into()),
-                    (CallContextField::LastCalleeReturnDataOffset, 0.into()),
-                    (CallContextField::LastCalleeReturnDataLength, 0.into()),
-                ] {
-                    state.call_context_write(&mut exec_step, current_call.call_id, field, value);
+                    for i in 0..ret_length {
+                        state.memory_write(&mut exec_step, (ret_offset + i).into(), result[i])?;
+                    }
                 }
                 state.handle_return(geth_step)?;
                 let real_cost = geth_steps[0].gas.0 - geth_steps[1].gas.0;
@@ -376,7 +379,6 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
     }
 }
 
-
 #[cfg(test)]
 mod call_tests {
     use crate::mock::BlockData;
@@ -400,7 +402,7 @@ mod call_tests {
             PUSH1(0x00)
             PUSH1(0x04)
             PUSH1(0xFF)
-            CALL
+            CALLCODE
         };
 
         // Get the execution steps from the external tracer
@@ -411,8 +413,8 @@ mod call_tests {
             |block, _tx| block.number(0xcafeu64),
             LoggerConfig::enable_memory(),
         )
-            .unwrap()
-            .into();
+        .unwrap()
+        .into();
 
         let mut builder = BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
         builder
@@ -444,8 +446,8 @@ mod call_tests {
             |block, _tx| block.number(0xcafeu64),
             LoggerConfig::enable_memory(),
         )
-            .unwrap()
-            .into();
+        .unwrap()
+        .into();
 
         let mut builder = BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
         builder
@@ -477,8 +479,8 @@ mod call_tests {
             |block, _tx| block.number(0xcafeu64),
             LoggerConfig::enable_memory(),
         )
-            .unwrap()
-            .into();
+        .unwrap()
+        .into();
 
         let mut builder = BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
         builder
@@ -510,8 +512,8 @@ mod call_tests {
             |block, _tx| block.number(0xcafeu64),
             LoggerConfig::enable_memory(),
         )
-            .unwrap()
-            .into();
+        .unwrap()
+        .into();
 
         let mut builder = BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
         builder
@@ -554,8 +556,8 @@ mod call_tests {
             |block, _tx| block.number(0xcafeu64),
             LoggerConfig::enable_memory(),
         )
-            .unwrap()
-            .into();
+        .unwrap()
+        .into();
 
         let mut builder = BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
         builder
@@ -589,8 +591,8 @@ mod call_tests {
             |block, _tx| block.number(0xcafeu64),
             LoggerConfig::enable_memory(),
         )
-            .unwrap()
-            .into();
+        .unwrap()
+        .into();
 
         let mut builder = BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
         builder
@@ -624,8 +626,8 @@ mod call_tests {
             |block, _tx| block.number(0xcafeu64),
             LoggerConfig::enable_memory(),
         )
-            .unwrap()
-            .into();
+        .unwrap()
+        .into();
 
         let mut builder = BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
         builder
@@ -668,8 +670,8 @@ mod call_tests {
             |block, _tx| block.number(0xcafeu64),
             LoggerConfig::enable_memory(),
         )
-            .unwrap()
-            .into();
+        .unwrap()
+        .into();
 
         let mut builder = BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
         builder
@@ -712,8 +714,8 @@ mod call_tests {
             |block, _tx| block.number(0xcafeu64),
             LoggerConfig::enable_memory(),
         )
-            .unwrap()
-            .into();
+        .unwrap()
+        .into();
 
         let mut builder = BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
         builder
@@ -753,8 +755,8 @@ mod call_tests {
             |block, _tx| block.number(0xcafeu64),
             LoggerConfig::enable_memory(),
         )
-            .unwrap()
-            .into();
+        .unwrap()
+        .into();
 
         let mut builder = BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
         builder
@@ -831,8 +833,8 @@ mod call_tests {
             |block, _tx| block.number(0xcafeu64),
             LoggerConfig::enable_memory(),
         )
-            .unwrap()
-            .into();
+        .unwrap()
+        .into();
 
         let mut builder = BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
         builder
@@ -883,8 +885,8 @@ mod call_tests {
             |block, _tx| block.number(0xcafeu64),
             LoggerConfig::enable_memory(),
         )
-            .unwrap()
-            .into();
+        .unwrap()
+        .into();
 
         let mut builder = BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
         builder
