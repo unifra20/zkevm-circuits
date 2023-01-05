@@ -6,9 +6,7 @@ use crate::evm_circuit::util::constraint_builder::Transition::{Delta, To};
 use crate::evm_circuit::util::constraint_builder::{
     ConstraintBuilder, ReversionInfo, StepStateTransition,
 };
-use crate::evm_circuit::util::math_gadget::{
-    CmpWordsGadget, ConstantDivisionGadget, IsEqualGadget, IsZeroGadget, MinMaxGadget,
-};
+use crate::evm_circuit::util::math_gadget::{CmpWordsGadget, ConstantDivisionGadget, IsEqualGadget, IsZeroGadget, LtGadget, MinMaxGadget};
 use crate::evm_circuit::util::memory_gadget::{MemoryAddressGadget, MemoryExpansionGadget};
 use crate::evm_circuit::util::{
     from_bytes, or, select, sum, CachedRegion, Cell, RandomLinearCombination, Word,
@@ -17,9 +15,8 @@ use crate::evm_circuit::witness::{Block, Call, ExecStep, Rw, Transaction};
 use crate::table::{AccountFieldTag, CallContextFieldTag};
 use crate::util::Expr;
 use bus_mapping::evm::OpcodeId;
-use bus_mapping::precompile::is_precompiled;
 use eth_types::evm_types::{GasCost, GAS_STIPEND_CALL_WITH_VALUE};
-use eth_types::{Field, ToAddress, ToLittleEndian, ToScalar, U256};
+use eth_types::{Field, ToLittleEndian, ToScalar, U256};
 use halo2_proofs::circuit::Value;
 use halo2_proofs::plonk::Error;
 use keccak256::EMPTY_HASH_LE;
@@ -59,7 +56,7 @@ pub(crate) struct CallOpGadget<F> {
     is_empty_code_hash: IsEqualGadget<F>,
     one_64th_gas: ConstantDivisionGadget<F, N_BYTES_GAS>,
     capped_callee_gas_left: MinMaxGadget<F, N_BYTES_GAS>,
-    is_precompile: Cell<F>,
+    is_precompile: LtGadget<F, N_BYTES_ACCOUNT_ADDRESS>,
     gas_cost: Cell<F>,
 }
 
@@ -278,8 +275,7 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
             all_but_one_64th_gas,
         );
 
-        // TODO: Handle precompiled
-        let is_precompile = cb.query_bool();
+        let is_precompile = LtGadget::construct(cb, code_address_word.expr(), 0x9.expr());
         let precompile_memory_writes = is_precompile.expr() * from_bytes::expr(&rd_length.cells);
 
         let stack_pointer_delta =
@@ -646,7 +642,8 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
         self.is_precompile.assign(
             region,
             offset,
-            Value::known(F::from(is_precompiled(&code_address.to_address()))),
+            F::from_u128(code_address.as_u128()),
+            F::from(0x9)
         )?;
         let has_value = !value.is_zero() && !is_delegatecall;
         let gas_cost = if is_warm_prev {
