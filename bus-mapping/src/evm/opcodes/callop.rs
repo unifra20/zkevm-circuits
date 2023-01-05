@@ -388,141 +388,67 @@ mod call_tests {
     use mock::TestContext;
 
     #[test]
-    fn test_precompiled_call() {
+    fn test_precompiled_call_callcode() {
         let code = bytecode! {
             PUSH16(word!("0123456789ABCDEF0123456789ABCDEF"))
             PUSH1(0x00)
             MSTORE
-
-            PUSH1(0x20)
-            PUSH1(0x20)
-            PUSH1(0x20)
-            PUSH1(0x00)
-            PUSH1(0x00)
-            PUSH1(0x04)
-            PUSH1(0xFF)
-            CALLCODE
         };
 
-        // Get the execution steps from the external tracer
-        let block: GethData = TestContext::<2, 1>::new_with_logger_config(
-            None,
-            account_0_code_account_1_no_code(code),
-            tx_from_1_to_0,
-            |block, _tx| block.number(0xcafeu64),
-            LoggerConfig::enable_memory(),
-        )
-        .unwrap()
-        .into();
+        let stack = [
+            bytecode! {
+                PUSH1(0x20)
+                PUSH1(0x20)
+                PUSH1(0x20)
+                PUSH1(0x00)
+                PUSH1(0x00)
+                PUSH1(0x04)
+                PUSH1(0xFF)
+            },
+            bytecode! {
+                PUSH1(0x20)
+                PUSH1(0x20)
+                PUSH1(0x20)
+                PUSH1(0x00)
+                PUSH1(0x04)
+                PUSH1(0xFF)
+            },
+        ];
 
-        let mut builder = BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
-        builder
-            .handle_block(&block.eth_block, &block.geth_traces)
-            .unwrap();
-    }
-    #[test]
-    fn test_precompiled_callcode() {
-        let code = bytecode! {
-            PUSH16(word!("0123456789ABCDEF0123456789ABCDEF"))
-            PUSH1(0x00)
-            MSTORE
+        let instructions = [
+            [bytecode! { CALL }, bytecode! { CALLCODE }],
+            [bytecode! { STATICCALL }, bytecode! { DELEGATECALL }],
+        ];
 
-            PUSH1(0x20)
-            PUSH1(0x20)
-            PUSH1(0x20)
-            PUSH1(0x00)
-            PUSH1(0x00)
-            PUSH1(0x04)
-            PUSH1(0xFF)
-            CALLCODE
-        };
+        for (stack, instructions) in stack.iter().zip(instructions.iter()) {
+            for instruction in instructions.iter() {
+                let mut code = code.clone();
+                code.append(stack);
+                code.append(instruction);
 
-        // Get the execution steps from the external tracer
-        let block: GethData = TestContext::<2, 1>::new_with_logger_config(
-            None,
-            account_0_code_account_1_no_code(code),
-            tx_from_1_to_0,
-            |block, _tx| block.number(0xcafeu64),
-            LoggerConfig::enable_memory(),
-        )
-        .unwrap()
-        .into();
+                // Get the execution steps from the external tracer
+                let block: GethData = TestContext::<2, 1>::new_with_logger_config(
+                    None,
+                    account_0_code_account_1_no_code(code),
+                    tx_from_1_to_0,
+                    |block, _tx| block.number(0xcafeu64),
+                    LoggerConfig::enable_memory(),
+                )
+                .unwrap()
+                .into();
 
-        let mut builder = BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
-        builder
-            .handle_block(&block.eth_block, &block.geth_traces)
-            .unwrap();
+                let mut builder =
+                    BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
+                builder
+                    .handle_block(&block.eth_block, &block.geth_traces)
+                    .unwrap();
+            }
+        }
     }
 
     #[test]
-    fn test_precompiled_static_call() {
-        let code = bytecode! {
-            PUSH16(word!("0123456789ABCDEF0123456789ABCDEF"))
-            PUSH1(0x00)
-            MSTORE
-
-            PUSH1(0x20)
-            PUSH1(0x20)
-            PUSH1(0x20)
-            PUSH1(0x00)
-            PUSH1(0x04)
-            PUSH1(0xFF)
-            STATICCALL
-        };
-
-        // Get the execution steps from the external tracer
-        let block: GethData = TestContext::<2, 1>::new_with_logger_config(
-            None,
-            account_0_code_account_1_no_code(code),
-            tx_from_1_to_0,
-            |block, _tx| block.number(0xcafeu64),
-            LoggerConfig::enable_memory(),
-        )
-        .unwrap()
-        .into();
-
-        let mut builder = BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
-        builder
-            .handle_block(&block.eth_block, &block.geth_traces)
-            .unwrap();
-    }
-
-    #[test]
-    fn test_precompiled_delegate_call() {
-        let code = bytecode! {
-            PUSH16(word!("0123456789ABCDEF0123456789ABCDEF"))
-            PUSH1(0x00)
-            MSTORE
-
-            PUSH1(0x20)
-            PUSH1(0x20)
-            PUSH1(0x20)
-            PUSH1(0x00)
-            PUSH1(0x04)
-            PUSH1(0xFF)
-            DELEGATECALL
-        };
-
-        // Get the execution steps from the external tracer
-        let block: GethData = TestContext::<2, 1>::new_with_logger_config(
-            None,
-            account_0_code_account_1_no_code(code),
-            tx_from_1_to_0,
-            |block, _tx| block.number(0xcafeu64),
-            LoggerConfig::enable_memory(),
-        )
-        .unwrap()
-        .into();
-
-        let mut builder = BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
-        builder
-            .handle_block(&block.eth_block, &block.geth_traces)
-            .unwrap();
-    }
-
-    #[test]
-    fn test_ec_recover() {
-        let code = bytecode! {
+    fn test_others() {
+        let ec_recover = bytecode! {
             // First place the parameters in memory
             PUSH32(word!("456e9aea5e197a1f1af7a3e85a3212fa4049a3ba34c2289b4c860fc0b0c64ef3")) // hash
             PUSH1(0)
@@ -547,26 +473,7 @@ mod call_tests {
             STATICCALL
         };
 
-        // Get the execution steps from the external tracer
-        let block: GethData = TestContext::<2, 1>::new_with_logger_config(
-            None,
-            account_0_code_account_1_no_code(code),
-            tx_from_1_to_0,
-            |block, _tx| block.number(0xcafeu64),
-            LoggerConfig::enable_memory(),
-        )
-        .unwrap()
-        .into();
-
-        let mut builder = BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
-        builder
-            .handle_block(&block.eth_block, &block.geth_traces)
-            .unwrap();
-    }
-
-    #[test]
-    fn test_sha2() {
-        let code = bytecode! {
+        let sha2 = bytecode! {
             // First place the parameters in memory
             PUSH1(0xFF) // data
             PUSH1(0)
@@ -582,26 +489,7 @@ mod call_tests {
             STATICCALL
         };
 
-        // Get the execution steps from the external tracer
-        let block: GethData = TestContext::<2, 1>::new_with_logger_config(
-            None,
-            account_0_code_account_1_no_code(code),
-            tx_from_1_to_0,
-            |block, _tx| block.number(0xcafeu64),
-            LoggerConfig::enable_memory(),
-        )
-        .unwrap()
-        .into();
-
-        let mut builder = BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
-        builder
-            .handle_block(&block.eth_block, &block.geth_traces)
-            .unwrap();
-    }
-
-    #[test]
-    fn test_ripemd_160() {
-        let code = bytecode! {
+        let ripemd_160 = bytecode! {
             // First place the parameters in memory
             PUSH1(0xFF) // data
             PUSH1(0)
@@ -617,26 +505,7 @@ mod call_tests {
             STATICCALL
         };
 
-        // Get the execution steps from the external tracer
-        let block: GethData = TestContext::<2, 1>::new_with_logger_config(
-            None,
-            account_0_code_account_1_no_code(code),
-            tx_from_1_to_0,
-            |block, _tx| block.number(0xcafeu64),
-            LoggerConfig::enable_memory(),
-        )
-        .unwrap()
-        .into();
-
-        let mut builder = BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
-        builder
-            .handle_block(&block.eth_block, &block.geth_traces)
-            .unwrap();
-    }
-
-    #[test]
-    fn test_modexp() {
-        let code = bytecode! {
+        let modexp = bytecode! {
             // First place the parameters in memory
             PUSH1(1) // Bsize
             PUSH1(0)
@@ -661,26 +530,7 @@ mod call_tests {
             STATICCALL
         };
 
-        // Get the execution steps from the external tracer
-        let block: GethData = TestContext::<2, 1>::new_with_logger_config(
-            None,
-            account_0_code_account_1_no_code(code),
-            tx_from_1_to_0,
-            |block, _tx| block.number(0xcafeu64),
-            LoggerConfig::enable_memory(),
-        )
-        .unwrap()
-        .into();
-
-        let mut builder = BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
-        builder
-            .handle_block(&block.eth_block, &block.geth_traces)
-            .unwrap();
-    }
-
-    #[test]
-    fn test_ec_add() {
-        let code = bytecode! {
+        let ec_add = bytecode! {
             // First place the parameters in memory
             PUSH1(1) // x1
             PUSH1(0)
@@ -705,26 +555,7 @@ mod call_tests {
             STATICCALL
         };
 
-        // Get the execution steps from the external tracer
-        let block: GethData = TestContext::<2, 1>::new_with_logger_config(
-            None,
-            account_0_code_account_1_no_code(code),
-            tx_from_1_to_0,
-            |block, _tx| block.number(0xcafeu64),
-            LoggerConfig::enable_memory(),
-        )
-        .unwrap()
-        .into();
-
-        let mut builder = BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
-        builder
-            .handle_block(&block.eth_block, &block.geth_traces)
-            .unwrap();
-    }
-
-    #[test]
-    fn test_ec_mul() {
-        let code = bytecode! {
+        let ec_mul = bytecode! {
             // First place the parameters in memory
             PUSH1(1) // x1
             PUSH1(0)
@@ -746,26 +577,7 @@ mod call_tests {
             STATICCALL
         };
 
-        // Get the execution steps from the external tracer
-        let block: GethData = TestContext::<2, 1>::new_with_logger_config(
-            None,
-            account_0_code_account_1_no_code(code),
-            tx_from_1_to_0,
-            |block, _tx| block.number(0xcafeu64),
-            LoggerConfig::enable_memory(),
-        )
-        .unwrap()
-        .into();
-
-        let mut builder = BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
-        builder
-            .handle_block(&block.eth_block, &block.geth_traces)
-            .unwrap();
-    }
-
-    #[test]
-    fn test_ec_pairing() {
-        let code = bytecode! {
+        let ec_pairing = bytecode! {
             PUSH32(word!("2cf44499d5d27bb186308b7af7af02ac5bc9eeb6a3d147c186b21fb1b76e18da"))
             PUSH1(0x0)
             MSTORE
@@ -824,26 +636,7 @@ mod call_tests {
             STATICCALL
         };
 
-        // Get the execution steps from the external tracer
-        let block: GethData = TestContext::<2, 1>::new_with_logger_config(
-            None,
-            account_0_code_account_1_no_code(code),
-            tx_from_1_to_0,
-            |block, _tx| block.number(0xcafeu64),
-            LoggerConfig::enable_memory(),
-        )
-        .unwrap()
-        .into();
-
-        let mut builder = BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
-        builder
-            .handle_block(&block.eth_block, &block.geth_traces)
-            .unwrap();
-    }
-
-    #[test]
-    fn test_blake2f() {
-        let code = bytecode! {
+        let blake2f = bytecode! {
             PUSH1(0x0000000C)
             PUSH1(0x0)
             MSTORE
@@ -876,20 +669,27 @@ mod call_tests {
             STATICCALL
         };
 
-        // Get the execution steps from the external tracer
-        let block: GethData = TestContext::<2, 1>::new_with_logger_config(
-            None,
-            account_0_code_account_1_no_code(code),
-            tx_from_1_to_0,
-            |block, _tx| block.number(0xcafeu64),
-            LoggerConfig::enable_memory(),
-        )
-        .unwrap()
-        .into();
+        let codes = [
+            ec_recover, sha2, ripemd_160, modexp, ec_add, ec_mul, ec_pairing, blake2f,
+        ];
 
-        let mut builder = BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
-        builder
-            .handle_block(&block.eth_block, &block.geth_traces)
-            .unwrap();
+        for code in codes.into_iter() {
+            // Get the execution steps from the external tracer
+            let block: GethData = TestContext::<2, 1>::new_with_logger_config(
+                None,
+                account_0_code_account_1_no_code(code),
+                tx_from_1_to_0,
+                |block, _tx| block.number(0xcafeu64),
+                LoggerConfig::enable_memory(),
+            )
+            .unwrap()
+            .into();
+
+            let mut builder =
+                BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
+            builder
+                .handle_block(&block.eth_block, &block.geth_traces)
+                .unwrap();
+        }
     }
 }
