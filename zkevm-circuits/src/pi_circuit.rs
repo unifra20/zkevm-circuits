@@ -118,15 +118,6 @@ impl PublicData {
     }
 }
 
-// fn rlc_be_bytes<F: Field, const N: usize>(bytes: [u8; N], rand: Value<F>) ->
-// Value<F> {     bytes
-//         .into_iter()
-//         .fold(Value::known(F::zero()), |acc, byte| {
-//             acc.zip(rand)
-//                 .and_then(|(acc, rand)| Value::known(acc * rand +
-// F::from(byte as u64)))         })
-// }
-
 /// Config for PiCircuit
 #[derive(Clone, Debug)]
 pub struct PiCircuitConfig<F: Field> {
@@ -605,7 +596,7 @@ impl<F: Field> PiCircuitConfig<F> {
                 tx_hash_cell.cell(),
                 Cell {
                     region_index: RegionIndex(1), // FIXME: this is not safe
-                    row_offset: i * 11 + 10,
+                    row_offset: i * 19 + 18,
                     column: self.tx_table.value.into(),
                 },
             )?;
