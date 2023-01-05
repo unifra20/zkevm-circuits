@@ -265,6 +265,7 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
                     }
                 }
                 state.handle_return(geth_step)?;
+                // TODO: calc gas
                 let real_cost = geth_steps[0].gas.0 - geth_steps[1].gas.0;
                 if real_cost != exec_step.gas_cost.0 {
                     log::warn!(
