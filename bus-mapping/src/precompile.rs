@@ -15,53 +15,58 @@ pub fn is_precompiled(address: &Address) -> bool {
     address.0[0..19] == [0u8; 19] && (1..=9).contains(&address.0[19])
 }
 
-pub(crate) fn execute_precompiled(address: &Address, input: &[u8]) -> Vec<u8> {
+pub(crate) fn execute_precompiled(address: &Address, input: &[u8], gas: u64) -> (Vec<u8>, u64) {
     match address.as_bytes()[19] {
-        0x01 => extract_linear_result(<ECRecover as LinearCostPrecompile>::execute(input, 0)),
-        0x02 => extract_linear_result(<Sha256 as LinearCostPrecompile>::execute(input, 0)),
-        0x03 => extract_linear_result(<Ripemd160 as LinearCostPrecompile>::execute(input, 0)),
-        0x04 => extract_linear_result(<Identity as LinearCostPrecompile>::execute(input, 0)),
-        0x05 => extract_result(Modexp::execute(&mut DummyHandler { input })),
-        0x06 => extract_result(Bn128Add::execute(&mut DummyHandler { input })),
-        0x07 => extract_result(Bn128Mul::execute(&mut DummyHandler { input })),
-        0x08 => extract_result(Bn128Pairing::execute(&mut DummyHandler { input })),
-        0x09 => extract_result(Blake2F::execute(&mut DummyHandler { input })),
+        0x01 => execute::<ECRecover>(input, gas),
+        0x02 => execute::<Sha256>(input, gas),
+        0x03 => execute::<Ripemd160>(input, gas),
+        0x04 => execute::<Identity>(input, gas),
+        0x05 => execute::<Modexp>(input, gas),
+        0x06 => execute::<Bn128Add>(input, gas),
+        0x07 => execute::<Bn128Mul>(input, gas),
+        0x08 => execute::<Bn128Pairing>(input, gas),
+        0x09 => execute::<Blake2F>(input, gas),
         _ => panic!("calling non-exist precompiled contract address"),
     }
 }
 
-fn extract_linear_result(result: Result<(ExitSucceed, Vec<u8>), PrecompileFailure>) -> Vec<u8> {
-    match result {
-        Ok((exit_status, return_data)) => {
-            assert_eq!(exit_status, ExitSucceed::Returned);
-            return_data
-        }
-        Err(failure) => {
-            unreachable!("{:?} should not happen in precompiled contract", failure)
-        }
-    }
-}
-
-fn extract_result(result: PrecompileResult) -> Vec<u8> {
-    match result {
+fn execute<T: Precompile>(input: &[u8], gas: u64) -> (Vec<u8>, u64) {
+    let mut handler = Handler::new(input, gas);
+    match T::execute(&mut handler) {
         Ok(PrecompileOutput {
             exit_status,
             output,
         }) => {
             assert_eq!(exit_status, ExitSucceed::Returned);
-            output
+            (output, handler.gas_cost)
         }
         Err(failure) => {
-            unreachable!("{:?} should not happen in precompiled contract", failure)
+            match failure {
+                // invalid input, consume all gas and return empty
+                PrecompileFailure::Error { .. } => (vec![], gas),
+                _ => unreachable!("{:?} should not happen in precompiled contract", failure),
+            }
         }
     }
 }
 
-struct DummyHandler<'a> {
+struct Handler<'a> {
     input: &'a [u8],
+    gas_cost: u64,
+    available_gas: u64,
 }
 
-impl<'a> PrecompileHandle for DummyHandler<'a> {
+impl<'a> Handler<'a> {
+    fn new(input: &'a [u8], gas: u64) -> Self {
+        Self {
+            input,
+            gas_cost: 0,
+            available_gas: gas,
+        }
+    }
+}
+
+impl<'a> PrecompileHandle for Handler<'a> {
     fn call(
         &mut self,
         _to: primitive_types_12::H160,
@@ -74,12 +79,17 @@ impl<'a> PrecompileHandle for DummyHandler<'a> {
         unreachable!("we don't use this")
     }
 
-    fn record_cost(&mut self, _: u64) -> Result<(), ExitError> {
+    fn record_cost(&mut self, delta: u64) -> Result<(), ExitError> {
+        self.gas_cost += delta;
+        debug_assert!(
+            self.gas_cost <= self.available_gas,
+            "exceeded available gas"
+        );
         Ok(())
     }
 
     fn remaining_gas(&self) -> u64 {
-        u64::MAX
+        self.available_gas - self.gas_cost
     }
 
     fn log(
@@ -88,7 +98,7 @@ impl<'a> PrecompileHandle for DummyHandler<'a> {
         _: Vec<primitive_types_12::H256>,
         _: Vec<u8>,
     ) -> Result<(), ExitError> {
-        Ok(())
+        unreachable!("we don't use this")
     }
 
     fn code_address(&self) -> primitive_types_12::H160 {
@@ -108,6 +118,6 @@ impl<'a> PrecompileHandle for DummyHandler<'a> {
     }
 
     fn gas_limit(&self) -> Option<u64> {
-        None
+        Some(self.available_gas)
     }
 }

@@ -253,9 +253,10 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
                 assert!(call.is_success, "call to precompile should not fail");
                 let caller_ctx = state.caller_ctx_mut()?;
                 let code_address = code_address.unwrap();
-                let result = execute_precompiled(
+                let (result, contract_gas_cost) = execute_precompiled(
                     &code_address,
                     &caller_ctx.memory.0[args_offset..args_offset + args_length],
+                    callee_gas_left,
                 );
                 caller_ctx.memory.0[ret_offset..ret_offset + ret_length]
                     .copy_from_slice(&result[..ret_length]);
@@ -263,8 +264,8 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
                     state.memory_write(&mut exec_step, (ret_offset + i).into(), *value)?;
                 }
                 state.handle_return(geth_step)?;
-                // TODO: calc gas
                 let real_cost = geth_steps[0].gas.0 - geth_steps[1].gas.0;
+                debug_assert_eq!(real_cost, gas_cost + contract_gas_cost);
                 if real_cost != exec_step.gas_cost.0 {
                     log::warn!(
                         "precompile gas fixed from {} to {}, step {:?}",
