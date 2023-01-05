@@ -250,19 +250,17 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
                 ] {
                     state.call_context_write(&mut exec_step, current_call.call_id, field, value);
                 }
-
-                if call.is_success {
-                    let caller_ctx = state.caller_ctx_mut()?;
-                    let code_address = code_address.unwrap();
-                    let result = execute_precompiled(
-                        &code_address,
-                        &caller_ctx.memory.0[args_offset..args_offset + args_length],
-                    );
-                    caller_ctx.memory.0[ret_offset..ret_offset + ret_length]
-                        .copy_from_slice(&result[..ret_length]);
-                    for (i, value) in result.iter().enumerate() {
-                        state.memory_write(&mut exec_step, (ret_offset + i).into(), *value)?;
-                    }
+                assert!(call.is_success, "call to precompile should not fail");
+                let caller_ctx = state.caller_ctx_mut()?;
+                let code_address = code_address.unwrap();
+                let result = execute_precompiled(
+                    &code_address,
+                    &caller_ctx.memory.0[args_offset..args_offset + args_length],
+                );
+                caller_ctx.memory.0[ret_offset..ret_offset + ret_length]
+                    .copy_from_slice(&result[..ret_length]);
+                for (i, value) in result.iter().enumerate() {
+                    state.memory_write(&mut exec_step, (ret_offset + i).into(), *value)?;
                 }
                 state.handle_return(geth_step)?;
                 // TODO: calc gas
