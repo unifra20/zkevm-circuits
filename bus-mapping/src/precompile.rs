@@ -2,8 +2,8 @@
 
 use eth_types::Address;
 use fp_evm::{
-    Context, ExitError, ExitReason, ExitSucceed, LinearCostPrecompile, Precompile,
-    PrecompileFailure, PrecompileHandle, PrecompileOutput, PrecompileResult, Transfer,
+    Context, ExitError, ExitReason, ExitSucceed, Precompile, PrecompileFailure, PrecompileHandle,
+    PrecompileOutput, Transfer,
 };
 use pallet_evm_precompile_blake2::Blake2F;
 use pallet_evm_precompile_bn128::{Bn128Add, Bn128Mul, Bn128Pairing};
