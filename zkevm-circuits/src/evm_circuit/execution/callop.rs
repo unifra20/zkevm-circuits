@@ -6,7 +6,9 @@ use crate::evm_circuit::util::constraint_builder::Transition::{Delta, To};
 use crate::evm_circuit::util::constraint_builder::{
     ConstraintBuilder, ReversionInfo, StepStateTransition,
 };
-use crate::evm_circuit::util::math_gadget::{CmpWordsGadget, ConstantDivisionGadget, IsEqualGadget, IsZeroGadget, LtGadget, MinMaxGadget};
+use crate::evm_circuit::util::math_gadget::{
+    CmpWordsGadget, ConstantDivisionGadget, IsEqualGadget, IsZeroGadget, LtGadget, MinMaxGadget,
+};
 use crate::evm_circuit::util::memory_gadget::{MemoryAddressGadget, MemoryExpansionGadget};
 use crate::evm_circuit::util::{
     from_bytes, or, select, sum, CachedRegion, Cell, RandomLinearCombination, Word,
@@ -643,7 +645,7 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
             region,
             offset,
             F::from_u128(code_address.as_u128()),
-            F::from(0x9)
+            F::from(0x9),
         )?;
         let has_value = !value.is_zero() && !is_delegatecall;
         let gas_cost = if is_warm_prev {
