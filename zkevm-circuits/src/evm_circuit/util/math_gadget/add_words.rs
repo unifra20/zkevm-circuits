@@ -12,8 +12,8 @@ use halo2_proofs::{circuit::Value, plonk::Error};
 /// opcode ADD, SUB and balance operation
 #[derive(Clone, Debug)]
 pub(crate) struct AddWordsGadget<F, const N_ADDENDS: usize, const CHECK_OVERFLOW: bool> {
-    addends: [util::Word<F>; N_ADDENDS],
-    sum: util::Word<F>,
+    addends: [util::EvmWord<F>; N_ADDENDS],
+    sum: util::EvmWord<F>,
     carry_lo: Cell<F>,
     carry_hi: Option<Cell<F>>,
 }
@@ -23,8 +23,8 @@ impl<F: Field, const N_ADDENDS: usize, const CHECK_OVERFLOW: bool>
 {
     pub(crate) fn construct(
         cb: &mut ConstraintBuilder<F>,
-        addends: [util::Word<F>; N_ADDENDS],
-        sum: util::Word<F>,
+        addends: [util::EvmWord<F>; N_ADDENDS],
+        sum: util::EvmWord<F>,
     ) -> Self {
         let carry_lo = cb.query_cell();
         let carry_hi = if CHECK_OVERFLOW {
@@ -33,16 +33,11 @@ impl<F: Field, const N_ADDENDS: usize, const CHECK_OVERFLOW: bool>
             Some(cb.query_cell())
         };
 
-        let addends_lo = &addends
+        let (addends_hi, addends_lo): (Vec<_>, Vec<_>) = &addends
             .iter()
-            .map(|addend| from_bytes::expr(&addend.cells[..16]))
-            .collect::<Vec<_>>();
-        let addends_hi = &addends
-            .iter()
-            .map(|addend| from_bytes::expr(&addend.cells[16..]))
-            .collect::<Vec<_>>();
-        let sum_lo = from_bytes::expr(&sum.cells[..16]);
-        let sum_hi = from_bytes::expr(&sum.cells[16..]);
+            .map(|addend| addend.to_hi_lo())
+            .unzip();
+        let (sum_hi, sum_lo) = sum.to_hi_lo();
 
         cb.require_equal(
             "sum(addends_lo) == sum_lo + carry_lo ⋅ 2^128",

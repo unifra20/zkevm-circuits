@@ -36,6 +36,10 @@ pub(crate) const LOOKUP_CONFIG: &[(Table, usize)] = &[
 /// around.
 pub(crate) const MAX_N_BYTES_INTEGER: usize = 31;
 
+/// Maximum number of u16 that an integer can fit in field without wrapping
+/// around.
+pub(crate) const MAX_N_U16_INTEGER: usize = 15;
+
 // Number of bytes an EVM word has.
 pub(crate) const N_BYTES_WORD: usize = 32;
 
@@ -49,6 +53,9 @@ pub(crate) const N_BYTES_ACCOUNT_ADDRESS: usize = 20;
 // an out-of-gas error.
 pub(crate) const N_BYTES_MEMORY_ADDRESS: usize = 5;
 pub(crate) const N_BYTES_MEMORY_WORD_SIZE: usize = 4;
+pub(crate) const N_U16_MEMORY_ADDRESS: usize = 3;
+pub(crate) const N_U16_MEMORY_WORD_SIZE: usize = 2;
+
 
 pub(crate) const STACK_CAPACITY: usize = 1024;
 

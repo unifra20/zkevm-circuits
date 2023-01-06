@@ -358,10 +358,14 @@ pub struct RwTable {
     pub field_tag: Column<Advice>,
     /// Key3 (StorageKey)
     pub storage_key: Column<Advice>,
-    /// Value
-    pub value: Column<Advice>,
-    /// Value Previous
-    pub value_prev: Column<Advice>,
+    /// Value high-128 bits
+    pub value_hi: Column<Advice>,
+    /// Value low-128 bits
+    pub value_lo: Column<Advice>,
+    /// Value Previous high-128 bits
+    pub value_prev_hi: Column<Advice>,
+    /// Value Previous low-128 bits
+    pub value_prev_lo: Column<Advice>,
     /// Aux1
     pub aux1: Column<Advice>,
     /// Aux2 (Committed Value)
@@ -396,8 +400,10 @@ impl RwTable {
             address: meta.advice_column(),
             field_tag: meta.advice_column(),
             storage_key: meta.advice_column_in(SecondPhase),
-            value: meta.advice_column_in(SecondPhase),
-            value_prev: meta.advice_column_in(SecondPhase),
+            value_hi: meta.advice_column(),
+            value_lo: meta.advice_column(),
+            value_prev_hi: meta.advice_column(),
+            value_prev_lo: meta.advice_column(),
             // It seems that aux1 for the moment is not using randomness
             // TODO check in a future review
             aux1: meta.advice_column_in(SecondPhase),

@@ -495,7 +495,185 @@ impl<F: FieldExt, const N: usize> Expr<F> for RandomLinearCombination<F, N> {
     }
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct U8Repr<F, const N: usize> {
+    // random linear combination expression of cells
+    value: Expression<F>,
+    // inner cells in little-endian for synthesis
+    pub(crate) cells: [Cell<F>; N],
+}
+
+impl<F: FieldExt, const N: usize> U8Repr<F, N> {
+    const N_BYTES: usize = N;
+
+    pub(crate) fn new(cells: [Cell<F>; N]) -> Self {
+        Self {
+            value: from_bytes::expr(
+                &cells.clone().map(|cell| cell.expr()),
+            ),
+            cells,
+        }
+    }
+
+    pub(crate) fn assign(
+        &self,
+        region: &mut CachedRegion<'_, '_, F>,
+        offset: usize,
+        bytes: Option<[u8; N]>,
+    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+        bytes.map_or(Err(Error::Synthesis), |bytes| {
+            self.cells
+                .iter()
+                .zip(bytes.iter())
+                .map(|(cell, byte)| {
+                    cell.assign(region, offset, Value::known(F::from(*byte as u64)))
+                })
+                .collect()
+        })
+    }
+}
+
+impl<F: FieldExt, const N: usize> Expr<F> for U8Repr<F, N> {
+    fn expr(&self) -> Expression<F> {
+        self.value.clone()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct U16Repr<F, const N: usize> {
+    // random linear combination expression of cells
+    value: Expression<F>,
+    // inner cells in little-endian for synthesis
+    pub(crate) cells: [Cell<F>; N],
+}
+
+impl<F: FieldExt, const N: usize> U16Repr<F, N> {
+    const N_BYTES: usize = N;
+
+    pub(crate) fn new(cells: [Cell<F>; N]) -> Self {
+        Self {
+            value: from_u16::expr(
+                &cells.clone().map(|cell| cell.expr()),
+            ),
+            cells,
+        }
+    }
+
+    pub(crate) fn assign(
+        &self,
+        region: &mut CachedRegion<'_, '_, F>,
+        offset: usize,
+        bytes: Option<[u16; N]>,
+    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+        bytes.map_or(Err(Error::Synthesis), |bytes| {
+            self.cells
+                .iter()
+                .zip(bytes.iter())
+                .map(|(cell, byte)| {
+                    cell.assign(region, offset, Value::known(F::from(*byte as u64)))
+                })
+                .collect()
+        })
+    }
+}
+
+impl<F: FieldExt, const N: usize> Expr<F> for U16Repr<F, N> {
+    fn expr(&self) -> Expression<F> {
+        self.value.clone()
+    }
+}
+
+pub(crate) trait EvmWord<F> {
+    /// Returns the EVM word expressions in high 128-bit and low 128-bit format.
+    pub(crate) fn to_hi_lo(&self) -> [Expression<F>; 2];
+
+    pub(crate) fn to_u64s(&self) -> [Expression<F>; 4];
+
+    pub(crate) fn assign(
+        &self,
+        region: &mut CachedRegion<'_, '_, F>,
+        offset: usize,
+        bytes: Option<[u8; 32]>,
+    ) -> Result<Vec<AssignedCell<F, F>>, Error>;
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct EvmWordU8<F> {
+    pub(crate) lo: U8Repr<F, 16>,
+    pub(crate) hi: U8Repr<F, 16>,
+}
+
+impl<F: FieldExt> EvmWordU8<F> {
+    pub(crate) fn new(&self, cells: [Cell<F>; 32]) -> Self {
+        Self {
+            lo: U8Repr::new(cells[0..16].clone()),
+            hi: U8Repr::new(cells[16..]),
+        }
+    }
+}
+
+impl<F: FieldExt> EvmWord<F> for EvmWordU8<F> {
+    fn to_hi_lo(&self) -> [Expression<F>; 2] {
+        [self.hi.expr(), self.lo.expr()]
+    }
+
+    fn assign(
+        &self,
+        region: &mut CachedRegion<'_, '_, F>,
+        offset: usize,
+        bytes: Option<[u8; 32]>,
+    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+        bytes.map_or(Err(Error::Synthesis), |bytes| {
+            let mut ret = self.lo.assign(region, offset, Some(bytes[..16]))?;
+            ret.append(self.hi.assign(region, offset, Some(bytes[16..])))?;
+            Ok(ret)
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct EvmWordU16<F> {
+    pub(crate) lo: U8Repr<F, 8>,
+    pub(crate) hi: U8Repr<F, 8>,
+}
+
+impl<F: FieldExt> EvmWordU16<F> {
+    pub(crate) fn new(&self, cells: [Cell<F>; 16]) -> Self {
+        Self {
+            lo: U8Repr::new(cells[0..8].clone()),
+            hi: U8Repr::new(cells[8..]),
+        }
+    }
+
+    fn assign(
+        &self,
+        region: &mut CachedRegion<'_, '_, F>,
+        offset: usize,
+        bytes: Option<[u8; 32]>,
+    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+        bytes.map_or(Err(Error::Synthesis), |bytes| {
+            let mut lo_u16s = [0u16; 8];
+            let mut hi_u16s = [0u16; 8];
+            for i in 0..8 {
+                lo_u16s[i] = bytes[i * 2 + 1] * 256 + bytes[i * 2];
+                hi_u16s[i] = bytes[i * 2 + 17] * 256 + bytes[i * 2 + 16];
+            }
+
+            let mut ret = self.lo.assign(region, offset, Some(lo_u16s))?;
+            ret.append(self.hi.assign(region, offset, Some(hi_u16s))?;
+            Ok(ret)
+        })
+    }
+}
+
+impl<F: FieldExt> EvmWord<F> for EvmWordU16<F> {
+    fn to_hi_lo(&self) -> [Expression<F>; 2] {
+        [self.hi.expr(), self.lo.expr()]
+    }
+}
+
 pub(crate) type Word<F> = RandomLinearCombination<F, 32>;
+//pub(crate) type MemoryAddress<F> = U16Repr<F, N_U16_MEMORY_ADDRESS>;
 pub(crate) type MemoryAddress<F> = RandomLinearCombination<F, N_BYTES_MEMORY_ADDRESS>;
 
 /// Decodes a field element from its byte representation
@@ -527,6 +705,40 @@ pub(crate) mod from_bytes {
         for byte in bytes.iter() {
             value += F::from(*byte as u64) * multiplier;
             multiplier *= F::from(256);
+        }
+        value
+    }
+}
+
+/// Decodes a field element from its byte representation
+pub(crate) mod from_u16 {
+    use crate::{evm_circuit::param::MAX_N_BYTES_INTEGER, util::Expr};
+    use halo2_proofs::{arithmetic::FieldExt, plonk::Expression};
+
+    pub(crate) fn expr<F: FieldExt, E: Expr<F>>(u16s: &[E]) -> Expression<F> {
+        debug_assert!(
+            u16s.len() <= MAX_N_U16_INTEGER,
+            "Too many u16s to compose an integer in field"
+        );
+        let mut value = 0.expr();
+        let mut multiplier = F::one();
+        for byte in bytes.iter() {
+            value = value + byte.expr() * multiplier;
+            multiplier *= F::from(65536);
+        }
+        value
+    }
+
+    pub(crate) fn value<F: FieldExt>(u16s: &[u16]) -> F {
+        debug_assert!(
+            bytes.len() <= MAX_N_U16_INTEGER,
+            "Too many u16s to compose an integer in field"
+        );
+        let mut value = F::zero();
+        let mut multiplier = F::one();
+        for byte in bytes.iter() {
+            value += F::from(*byte as u64) * multiplier;
+            multiplier *= F::from(65536);
         }
         value
     }

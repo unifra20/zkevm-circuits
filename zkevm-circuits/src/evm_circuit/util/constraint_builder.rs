@@ -3,7 +3,7 @@ use crate::{
         param::STACK_CAPACITY,
         step::{ExecutionState, Step},
         table::{FixedTableTag, Lookup, RwValues, Table},
-        util::{Cell, RandomLinearCombination, Word},
+        util::{Cell, RandomLinearCombination, Word, EvmWord, EvmHalfWordU8, EvmHalfWordU16},
     },
     table::{
         AccountFieldTag, BytecodeFieldTag, CallContextFieldTag, RwTableTag, TxContextFieldTag,
@@ -382,12 +382,28 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
         RandomLinearCombination::<F, N>::new(self.query_bytes(), self.word_powers_of_randomness)
     }
 
+    pub(crate) fn query_evm_word_u8(&mut self) -> EvmWordU8<F> {
+        EvmWordU8::new(self.query_bytes())
+    }
+
+    pub(crate) fn query_evm_word_u16(&mut self) -> EvmWordU16<F> {
+        EvmWordU16::new(self.query_u16s())
+    }
+
     pub(crate) fn query_bytes<const N: usize>(&mut self) -> [Cell<F>; N] {
         self.query_bytes_dyn(N).try_into().unwrap()
     }
 
     pub(crate) fn query_bytes_dyn(&mut self, count: usize) -> Vec<Cell<F>> {
         self.query_cells(CellType::Lookup(Table::Byte), count)
+    }
+
+    pub(crate) fn query_u16s<const N: usize>(&mut self) -> [Cell<F>; N] {
+        self.query_u16s_dyn(N).try_into().unwrap()
+    }
+
+    pub(crate) fn query_u16s_dyn(&mut self, count: usize) -> Vec<Cell<F>> {
+        self.query_cells(CellType::Lookup(Table::U16), count)
     }
 
     pub(crate) fn query_cell(&mut self) -> Cell<F> {
@@ -772,8 +788,10 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
                         true.expr(),
                         tag,
                         RwValues {
-                            value_prev: values.value,
-                            value: values.value_prev,
+                            prev_value_hi: values.value_hi,
+                            prev_value_lo: values.value_lo,
+                            value_hi: values.prev_value_hi,
+                            value_lo: values.prev_value_lo,
                             ..values
                         },
                     )
@@ -785,123 +803,123 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
 
     // Access list
 
-    pub(crate) fn account_access_list_write(
-        &mut self,
-        tx_id: Expression<F>,
-        account_address: Expression<F>,
-        value: Expression<F>,
-        value_prev: Expression<F>,
-        reversion_info: Option<&mut ReversionInfo<F>>,
-    ) {
-        self.reversible_write(
-            "TxAccessListAccount write",
-            RwTableTag::TxAccessListAccount,
-            RwValues::new(
-                tx_id,
-                account_address,
-                0.expr(),
-                0.expr(),
-                value,
-                value_prev,
-                0.expr(),
-                0.expr(),
-            ),
-            reversion_info,
-        );
-    }
+    // pub(crate) fn account_access_list_write(
+    //     &mut self,
+    //     tx_id: Expression<F>,
+    //     account_address: Expression<F>,
+    //     value: Expression<F>,
+    //     value_prev: Expression<F>,
+    //     reversion_info: Option<&mut ReversionInfo<F>>,
+    // ) {
+    //     self.reversible_write(
+    //         "TxAccessListAccount write",
+    //         RwTableTag::TxAccessListAccount,
+    //         RwValues::new(
+    //             tx_id,
+    //             account_address,
+    //             0.expr(),
+    //             0.expr(),
+    //             value,
+    //             value_prev,
+    //             0.expr(),
+    //             0.expr(),
+    //         ),
+    //         reversion_info,
+    //     );
+    // }
 
-    pub(crate) fn account_access_list_read(
-        &mut self,
-        tx_id: Expression<F>,
-        account_address: Expression<F>,
-        value: Expression<F>,
-    ) {
-        self.rw_lookup(
-            "account access list read",
-            false.expr(),
-            RwTableTag::TxAccessListAccount,
-            RwValues::new(
-                tx_id,
-                account_address,
-                0.expr(),
-                0.expr(),
-                value.clone(),
-                value,
-                0.expr(),
-                0.expr(),
-            ),
-        );
-    }
+    // pub(crate) fn account_access_list_read(
+    //     &mut self,
+    //     tx_id: Expression<F>,
+    //     account_address: Expression<F>,
+    //     value: Expression<F>,
+    // ) {
+    //     self.rw_lookup(
+    //         "account access list read",
+    //         false.expr(),
+    //         RwTableTag::TxAccessListAccount,
+    //         RwValues::new(
+    //             tx_id,
+    //             account_address,
+    //             0.expr(),
+    //             0.expr(),
+    //             value.clone(),
+    //             value,
+    //             0.expr(),
+    //             0.expr(),
+    //         ),
+    //     );
+    // }
 
-    pub(crate) fn account_storage_access_list_write(
-        &mut self,
-        tx_id: Expression<F>,
-        account_address: Expression<F>,
-        storage_key: Expression<F>,
-        value: Expression<F>,
-        value_prev: Expression<F>,
-        reversion_info: Option<&mut ReversionInfo<F>>,
-    ) {
-        self.reversible_write(
-            "TxAccessListAccountStorage write",
-            RwTableTag::TxAccessListAccountStorage,
-            RwValues::new(
-                tx_id,
-                account_address,
-                0.expr(),
-                storage_key,
-                value,
-                value_prev,
-                0.expr(),
-                0.expr(),
-            ),
-            reversion_info,
-        );
-    }
+    // pub(crate) fn account_storage_access_list_write(
+    //     &mut self,
+    //     tx_id: Expression<F>,
+    //     account_address: Expression<F>,
+    //     storage_key: Expression<F>,
+    //     value: Expression<F>,
+    //     value_prev: Expression<F>,
+    //     reversion_info: Option<&mut ReversionInfo<F>>,
+    // ) {
+    //     self.reversible_write(
+    //         "TxAccessListAccountStorage write",
+    //         RwTableTag::TxAccessListAccountStorage,
+    //         RwValues::new(
+    //             tx_id,
+    //             account_address,
+    //             0.expr(),
+    //             storage_key,
+    //             value,
+    //             value_prev,
+    //             0.expr(),
+    //             0.expr(),
+    //         ),
+    //         reversion_info,
+    //     );
+    // }
 
-    // Tx Refund
+    // // Tx Refund
 
-    pub(crate) fn tx_refund_read(&mut self, tx_id: Expression<F>, value: Expression<F>) {
-        self.rw_lookup(
-            "TxRefund read",
-            false.expr(),
-            RwTableTag::TxRefund,
-            RwValues::new(
-                tx_id,
-                0.expr(),
-                0.expr(),
-                0.expr(),
-                value.clone(),
-                value,
-                0.expr(),
-                0.expr(),
-            ),
-        );
-    }
+    // pub(crate) fn tx_refund_read(&mut self, tx_id: Expression<F>, value: Expression<F>) {
+    //     self.rw_lookup(
+    //         "TxRefund read",
+    //         false.expr(),
+    //         RwTableTag::TxRefund,
+    //         RwValues::new(
+    //             tx_id,
+    //             0.expr(),
+    //             0.expr(),
+    //             0.expr(),
+    //             value.clone(),
+    //             value,
+    //             0.expr(),
+    //             0.expr(),
+    //         ),
+    //     );
+    // }
 
-    pub(crate) fn tx_refund_write(
-        &mut self,
-        tx_id: Expression<F>,
-        value: Expression<F>,
-        value_prev: Expression<F>,
-        reversion_info: Option<&mut ReversionInfo<F>>,
-    ) {
-        self.reversible_write(
-            "TxRefund write",
-            RwTableTag::TxRefund,
-            RwValues::new(
-                tx_id,
-                0.expr(),
-                0.expr(),
-                0.expr(),
-                value,
-                value_prev,
-                0.expr(),
-                0.expr(),
-            ),
-            reversion_info,
-        );
-    }
+    // pub(crate) fn tx_refund_write(
+    //     &mut self,
+    //     tx_id: Expression<F>,
+    //     value: Expression<F>,
+    //     value_prev: Expression<F>,
+    //     reversion_info: Option<&mut ReversionInfo<F>>,
+    // ) {
+    //     self.reversible_write(
+    //         "TxRefund write",
+    //         RwTableTag::TxRefund,
+    //         RwValues::new(
+    //             tx_id,
+    //             0.expr(),
+    //             0.expr(),
+    //             0.expr(),
+    //             value,
+    //             value_prev,
+    //             0.expr(),
+    //             0.expr(),
+    //         ),
+    //         reversion_info,
+    //     );
+    // }
 
     // Account
 
@@ -909,7 +927,7 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
         &mut self,
         account_address: Expression<F>,
         field_tag: AccountFieldTag,
-        value: Expression<F>,
+        value: [Expression<F>; 2],
     ) {
         self.rw_lookup(
             "Account read",
@@ -920,8 +938,11 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
                 account_address,
                 field_tag.expr(),
                 0.expr(),
-                value.clone(),
-                value,
+                value[0].clone(),
+                value[1].clone(),
+                value[0].clone(),
+                value[1].clone(),
+                0.expr(),
                 0.expr(),
                 0.expr(),
             ),
@@ -932,8 +953,8 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
         &mut self,
         account_address: Expression<F>,
         field_tag: AccountFieldTag,
-        value: Expression<F>,
-        value_prev: Expression<F>,
+        value: [Expression<F>; 2],
+        prev_value: [Expression<F>; 2],
         reversion_info: Option<&mut ReversionInfo<F>>,
     ) {
         self.reversible_write(
@@ -944,8 +965,11 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
                 account_address,
                 field_tag.expr(),
                 0.expr(),
-                value,
-                value_prev,
+                value[0],
+                value[1],
+                prev_value[0],
+                prev_value[1],
+                0.expr(),
                 0.expr(),
                 0.expr(),
             ),
@@ -959,9 +983,9 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
         &mut self,
         account_address: Expression<F>,
         key: Expression<F>,
-        value: Expression<F>,
+        value: EvmWord<F>,
         tx_id: Expression<F>,
-        committed_value: Expression<F>,
+        committed_value: EvmWord<F>,
     ) {
         self.rw_lookup(
             "account_storage_read",
@@ -972,10 +996,13 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
                 account_address,
                 0.expr(),
                 key,
-                value.clone(),
-                value,
+                value.hi.expr(),
+                value.lo.expr(),
+                value.hi.expr(),
+                value.lo.expr(),
+                committed_value.hi.expr(),
+                committed_value.lo.expr(),
                 0.expr(),
-                committed_value,
             ),
         );
     }
@@ -985,8 +1012,8 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
         &mut self,
         account_address: Expression<F>,
         key: Expression<F>,
-        value: Expression<F>,
-        value_prev: Expression<F>,
+        value: EvmWord<F>,
+        prev_value: EvmWord<F>,
         tx_id: Expression<F>,
         committed_value: Expression<F>,
         reversion_info: Option<&mut ReversionInfo<F>>,
@@ -999,10 +1026,13 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
                 account_address,
                 0.expr(),
                 key,
-                value,
-                value_prev,
+                value.hi.expr(),
+                value.lo.expr(),
+                prev_value.hi.expr(),
+                prev_value.lo.expr(),
+                committed_value.hi.expr(),
+                committed_value.lo.expr(),
                 0.expr(),
-                committed_value,
             ),
             reversion_info,
         );
@@ -1039,7 +1069,7 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
         is_write: Expression<F>,
         call_id: Option<Expression<F>>,
         field_tag: CallContextFieldTag,
-        value: Expression<F>,
+        value: [Expression<F>; 2],
     ) {
         self.rw_lookup(
             "CallContext lookup",
@@ -1050,7 +1080,10 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
                 0.expr(),
                 field_tag.expr(),
                 0.expr(),
-                value,
+                value[0],
+                value[1],
+                0.expr(),
+                0.expr(),
                 0.expr(),
                 0.expr(),
                 0.expr(),
@@ -1100,21 +1133,21 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
 
     // Stack
 
-    pub(crate) fn stack_pop(&mut self, value: Expression<F>) {
-        self.stack_lookup(false.expr(), self.stack_pointer_offset.clone(), value);
+    pub(crate) fn stack_pop(&mut self, word: EvmWord<F>) {
+        self.stack_lookup(false.expr(), self.stack_pointer_offset.clone(), word);
         self.stack_pointer_offset = self.stack_pointer_offset.clone() + self.condition_expr();
     }
 
-    pub(crate) fn stack_push(&mut self, value: Expression<F>) {
+    pub(crate) fn stack_push(&mut self, word: EvmWord<F>) {
+        self.stack_lookup(true.expr(), self.stack_pointer_offset.expr(), word);
         self.stack_pointer_offset = self.stack_pointer_offset.clone() - self.condition_expr();
-        self.stack_lookup(true.expr(), self.stack_pointer_offset.expr(), value);
     }
 
     pub(crate) fn stack_lookup(
         &mut self,
         is_write: Expression<F>,
         stack_pointer_offset: Expression<F>,
-        value: Expression<F>,
+        word: EvmWord<F>,
     ) {
         self.rw_lookup(
             "Stack lookup",
@@ -1125,10 +1158,13 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
                 self.curr.state.stack_pointer.expr() + stack_pointer_offset,
                 0.expr(),
                 0.expr(),
-                value,
+                word.hi.expr(),
+                word.lo.expr(),
                 0.expr(),
                 0.expr(),
                 0.expr(),
+                0.expr(),
+                0.expr()
             ),
         );
     }
@@ -1151,64 +1187,67 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
                 memory_address,
                 0.expr(),
                 0.expr(),
+                0.expr(),
                 byte,
                 0.expr(),
                 0.expr(),
                 0.expr(),
-            ),
-        );
-    }
-
-    pub(crate) fn tx_log_lookup(
-        &mut self,
-        tx_id: Expression<F>,
-        log_id: Expression<F>,
-        field_tag: TxLogFieldTag,
-        index: Expression<F>,
-        value: Expression<F>,
-    ) {
-        self.rw_lookup(
-            "log data lookup",
-            1.expr(),
-            RwTableTag::TxLog,
-            RwValues::new(
-                tx_id,
-                build_tx_log_expression(index, field_tag.expr(), log_id),
-                0.expr(),
-                0.expr(),
-                value,
-                0.expr(),
                 0.expr(),
                 0.expr(),
             ),
         );
     }
 
-    // Tx Receipt
+    // pub(crate) fn tx_log_lookup(
+    //     &mut self,
+    //     tx_id: Expression<F>,
+    //     log_id: Expression<F>,
+    //     field_tag: TxLogFieldTag,
+    //     index: Expression<F>,
+    //     value: Expression<F>,
+    // ) {
+    //     self.rw_lookup(
+    //         "log data lookup",
+    //         1.expr(),
+    //         RwTableTag::TxLog,
+    //         RwValues::new(
+    //             tx_id,
+    //             build_tx_log_expression(index, field_tag.expr(), log_id),
+    //             0.expr(),
+    //             0.expr(),
+    //             value,
+    //             0.expr(),
+    //             0.expr(),
+    //             0.expr(),
+    //         ),
+    //     );
+    // }
 
-    pub(crate) fn tx_receipt_lookup(
-        &mut self,
-        is_write: Expression<F>,
-        tx_id: Expression<F>,
-        tag: TxReceiptFieldTag,
-        value: Expression<F>,
-    ) {
-        self.rw_lookup(
-            "tx receipt lookup",
-            is_write,
-            RwTableTag::TxReceipt,
-            RwValues::new(
-                tx_id,
-                0.expr(),
-                tag.expr(),
-                0.expr(),
-                value,
-                0.expr(),
-                0.expr(),
-                0.expr(),
-            ),
-        );
-    }
+    // // Tx Receipt
+
+    // pub(crate) fn tx_receipt_lookup(
+    //     &mut self,
+    //     is_write: Expression<F>,
+    //     tx_id: Expression<F>,
+    //     tag: TxReceiptFieldTag,
+    //     value: Expression<F>,
+    // ) {
+    //     self.rw_lookup(
+    //         "tx receipt lookup",
+    //         is_write,
+    //         RwTableTag::TxReceipt,
+    //         RwValues::new(
+    //             tx_id,
+    //             0.expr(),
+    //             tag.expr(),
+    //             0.expr(),
+    //             value,
+    //             0.expr(),
+    //             0.expr(),
+    //             0.expr(),
+    //         ),
+    //     );
+    // }
 
     // RwTable Padding (Start tag)
 
@@ -1223,10 +1262,13 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
                 address: 0.expr(),
                 field_tag: 0.expr(),
                 storage_key: 0.expr(),
-                value: 0.expr(),
-                value_prev: 0.expr(),
-                aux1: 0.expr(),
-                aux2: 0.expr(),
+                value_hi: 0.expr(),
+                value_lo: 0.expr(),
+                prev_value_hi: 0.expr(),
+                prev_value_lo: 0.expr(),
+                commited_value_hi: 0.expr(),
+                commited_value_lo: 0.expr(),
+                aux: 0.expr(),
             },
         );
     }
