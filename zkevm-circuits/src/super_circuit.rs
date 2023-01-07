@@ -498,7 +498,7 @@ impl<
         let bytecode = BytecodeCircuit::min_num_rows_block(block);
         let copy = CopyCircuit::min_num_rows_block(block);
         let keccak = KeccakCircuit::min_num_rows_block(block);
-        let tx = TxCircuit::min_num_rows_block(block);
+        let tx = 0; //TxCircuit::min_num_rows_block(block);
         let exp = ExpCircuit::min_num_rows_block(block);
         let pi = PiCircuit::min_num_rows_block(block);
 
