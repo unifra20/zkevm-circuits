@@ -802,7 +802,7 @@ impl<F: Field> SubCircuit<F> for BytecodeCircuit<F> {
             .sum()
     }
 
-    /// Make the assignments to the TxCircuit
+    /// Make the assignments to the BytecodeCircuit
     fn synthesize_sub(
         &self,
         config: &Self::Config,
@@ -810,7 +810,7 @@ impl<F: Field> SubCircuit<F> for BytecodeCircuit<F> {
         layouter: &mut impl Layouter<F>,
     ) -> Result<(), Error> {
         config.load_aux_tables(layouter)?;
-        config.assign_internal(layouter, self.size, &self.bytecodes, challenges, false)
+        config.assign_internal(layouter, self.size, &self.bytecodes, challenges, true)
     }
 }
 

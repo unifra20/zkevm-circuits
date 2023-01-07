@@ -96,7 +96,7 @@ async fn test_super_circuit_all_block() {
             max_txs: 500,
             max_calldata: 2_000_000,
             max_inner_blocks: 64,
-            max_bytecode: 2_000_000,
+            max_bytecode: 3_000_000,
             keccak_padding: None,
         };
         let cli = BuilderClient::new(cli, params).await.unwrap();
