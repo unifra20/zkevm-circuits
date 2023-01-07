@@ -243,7 +243,7 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
             );
         });
         cb.condition(1.expr() - callee_exists.expr(), |cb| {
-            cb.account_read(code_address, AccountFieldTag::NonExisting, 0.expr());
+            cb.account_read(code_address.expr(), AccountFieldTag::NonExisting, 0.expr());
         });
 
         let is_empty_code_hash = IsEqualGadget::construct(
