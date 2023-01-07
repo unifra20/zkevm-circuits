@@ -277,7 +277,7 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
             all_but_one_64th_gas,
         );
 
-        let is_precompile = LtGadget::construct(cb, code_address_word.expr(), 0x9.expr());
+        let is_precompile = LtGadget::construct(cb, code_address.expr(), 10.expr());
         let precompile_memory_writes = is_precompile.expr() * from_bytes::expr(&rd_length.cells);
 
         let stack_pointer_delta =
@@ -644,8 +644,8 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
         self.is_precompile.assign(
             region,
             offset,
-            F::from_u128(code_address.as_u128()),
-            F::from(0x9),
+            F::from_repr(code_address.to_le_bytes()).unwrap(),
+            F::from(10),
         )?;
         let has_value = !value.is_zero() && !is_delegatecall;
         let gas_cost = if is_warm_prev {
