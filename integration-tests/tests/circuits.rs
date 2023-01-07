@@ -20,6 +20,7 @@ const CIRCUITS_PARAMS: CircuitsParams = CircuitsParams {
     max_rws: 30000,
     max_txs: 20,
     max_calldata: 30000,
+    max_inner_blocks: 64,
     max_bytecode: 30000,
     keccak_padding: None,
 };
@@ -37,6 +38,7 @@ async fn test_mock_prove_tx() {
         max_rws: 100000,
         max_txs: 10,
         max_calldata: 40000,
+        max_inner_blocks: 64,
         max_bytecode: 40000,
         keccak_padding: None,
     };
@@ -93,6 +95,7 @@ async fn test_super_circuit_all_block() {
             max_rws: 4_000_000,
             max_txs: 500,
             max_calldata: 2_000_000,
+            max_inner_blocks: 64,
             max_bytecode: 2_000_000,
             keccak_padding: None,
         };
@@ -105,7 +108,7 @@ async fn test_super_circuit_all_block() {
         }
 
         let (k, circuit, instance) =
-            SuperCircuit::<Fr, 500, 2_000_000, 2_000_000>::build_from_circuit_input_builder(
+            SuperCircuit::<Fr, 500, 2_000_000, 64, 2_000_000>::build_from_circuit_input_builder(
                 &builder,
             )
             .unwrap();
@@ -136,6 +139,7 @@ async fn test_tx_circuit_all_block() {
             max_rws: 200_000,
             max_txs: 14, // so max_txs * num_rows_per_tx < 2**21
             max_calldata: 200_000,
+            max_inner_blocks: 64,
             max_bytecode: 200_000,
             keccak_padding: None,
         };
@@ -173,13 +177,14 @@ async fn test_evm_circuit_all_block() {
             max_rws: 5_000_000,
             max_txs: 500,
             max_calldata: 400000,
+            max_inner_blocks: 64,
             max_bytecode: 400000,
             keccak_padding: None,
         };
         let cli = BuilderClient::new(cli, params).await.unwrap();
         let (builder, _) = cli.gen_inputs(block_num).await.unwrap();
 
-        let block = block_convert(&builder.block, &builder.code_db).unwrap();
+        let block = block_convert::<Fr>(&builder.block, &builder.code_db).unwrap();
         if builder.block.txs.is_empty() {
             log::info!("skip empty block");
             return;
@@ -210,7 +215,7 @@ async fn test_print_circuits_size() {
             return;
         }
 
-        let block = block_convert(&builder.block, &builder.code_db).unwrap();
+        let block = block_convert::<Fr>(&builder.block, &builder.code_db).unwrap();
         let evm_rows = EvmCircuit::get_num_rows_required(&block);
         let keccak_inputs = keccak_inputs(&builder.block, &builder.code_db).unwrap();
 
@@ -247,7 +252,7 @@ async fn test_evm_circuit_batch() {
         return;
     }
 
-    let block = block_convert(&builder.block, &builder.code_db).unwrap();
+    let block = block_convert::<Fr>(&builder.block, &builder.code_db).unwrap();
     log::info!("tx num: {}", builder.block.txs.len());
     run_test_circuit(block).unwrap();
     log::info!("prove done");

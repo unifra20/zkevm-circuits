@@ -4,10 +4,12 @@ use bus_mapping::circuit_input_builder::{CircuitInputBuilder, CircuitsParams};
 use bus_mapping::mock::BlockData;
 use eth_types::{geth_types, Address, Bytes, GethExecTrace, U256, U64};
 use ethers_core::k256::ecdsa::SigningKey;
+use ethers_core::types::transaction::eip2718::TypedTransaction;
 use ethers_core::types::TransactionRequest;
+use ethers_core::utils::keccak256;
 use ethers_signers::{LocalWallet, Signer};
 use external_tracer::TraceConfig;
-use halo2_proofs::dev::MockProver;
+use halo2_proofs::{dev::MockProver, halo2curves::bn256::Fr};
 use std::{collections::HashMap, str::FromStr};
 use thiserror::Error;
 use zkevm_circuits::{super_circuit::SuperCircuit, test_util::BytecodeTestConfig};
@@ -124,8 +126,10 @@ fn into_traceconfig(st: StateTest) -> (String, TraceConfig, StateTestResult) {
     if let Some(to) = st.to {
         tx = tx.to(to);
     }
+    let tx: TypedTransaction = tx.into();
 
-    let sig = wallet.sign_transaction_sync(&tx.into());
+    let sig = wallet.sign_transaction_sync(&tx);
+    let tx_hash = keccak256(tx.rlp_signed(&sig));
 
     (
         st.id,
@@ -140,7 +144,6 @@ fn into_traceconfig(st: StateTest) -> (String, TraceConfig, StateTestResult) {
                 gas_limit: U256::from(st.env.current_gas_limit),
                 base_fee: U256::one(),
             },
-
             transactions: vec![geth_types::Transaction {
                 from: st.from,
                 to: st.to,
@@ -155,6 +158,7 @@ fn into_traceconfig(st: StateTest) -> (String, TraceConfig, StateTestResult) {
                 v: sig.v,
                 r: sig.r,
                 s: sig.s,
+                hash: tx_hash.into(),
             }],
             accounts: st.pre,
             ..Default::default()
@@ -326,7 +330,7 @@ pub fn run_test(
         geth_data.sign(&wallets);
 
         let (k, circuit, instance, _builder) =
-            SuperCircuit::<_, 1, 32, 255>::build(geth_data).unwrap();
+            SuperCircuit::<Fr, 1, 32, 255>::build(geth_data).unwrap();
         builder = _builder;
 
         let prover = MockProver::run(k, &circuit, instance).unwrap();
