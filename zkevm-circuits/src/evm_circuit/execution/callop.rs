@@ -474,7 +474,7 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
         region: &mut CachedRegion<'_, '_, F>,
         offset: usize,
         block: &Block<F>,
-        _tx: &Transaction,
+        tx: &Transaction,
         call: &Call,
         step: &ExecStep,
     ) -> Result<(), Error> {
@@ -681,12 +681,12 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
             callee_code_hash,
             Word::random_linear_combine(*EMPTY_HASH_LE, block.randomness),
         )?;
-        self.is_precompile.assign(
-            region,
-            offset,
-            F::from_repr(code_address.to_le_bytes()).unwrap(),
-            F::from(10),
-        )?;
+        let mut code_address_bytes = [0; 32];
+        code_address_bytes[0..N_BYTES_ACCOUNT_ADDRESS]
+            .copy_from_slice(&code_address.to_le_bytes()[0..N_BYTES_ACCOUNT_ADDRESS]);
+        let addr_f = F::from_repr(code_address_bytes);
+        self.is_precompile
+            .assign(region, offset, addr_f.unwrap(), F::from(10))?;
         let has_value = !value.is_zero() && !is_delegatecall;
         let gas_cost = if is_warm_prev {
             GasCost::WARM_ACCESS.as_u64()

@@ -370,6 +370,10 @@ impl<
             Value::known(block.randomness),
         )?;
 
+        self.evm_circuit
+            .synthesize_sub(&config.evm_circuit, &challenges, &mut layouter)?;
+        self.state_circuit
+            .synthesize_sub(&config.state_circuit, &challenges, &mut layouter)?;
         self.keccak_circuit
             .synthesize_sub(&config.keccak_circuit, &challenges, &mut layouter)?;
         self.bytecode_circuit.synthesize_sub(
@@ -377,14 +381,10 @@ impl<
             &challenges,
             &mut layouter,
         )?;
-        self.state_circuit
-            .synthesize_sub(&config.state_circuit, &challenges, &mut layouter)?;
         self.copy_circuit
             .synthesize_sub(&config.copy_circuit, &challenges, &mut layouter)?;
         self.exp_circuit
             .synthesize_sub(&config.exp_circuit, &challenges, &mut layouter)?;
-        self.evm_circuit
-            .synthesize_sub(&config.evm_circuit, &challenges, &mut layouter)?;
         self.rlp_circuit
             .synthesize_sub(&config.rlp_circuit, &challenges, &mut layouter)?;
         self.pi_circuit
