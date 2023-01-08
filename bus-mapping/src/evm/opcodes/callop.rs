@@ -255,6 +255,16 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
                 caller_ctx.return_data = result.clone();
                 caller_ctx.memory.0[ret_offset..ret_offset + ret_length]
                     .copy_from_slice(&result[..ret_length]);
+                for (field, value) in [
+                    (CallContextField::LastCalleeId, call.call_id.into()),
+                    (CallContextField::LastCalleeReturnDataOffset, 0.into()),
+                    (
+                        CallContextField::LastCalleeReturnDataLength,
+                        result.len().into(),
+                    ),
+                ] {
+                    state.call_context_write(&mut exec_step, current_call.call_id, field, value);
+                }
                 for (i, value) in result.iter().enumerate() {
                     state.push_op(
                         &mut exec_step,
@@ -268,16 +278,6 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
                     );
                 }
 
-                for (field, value) in [
-                    (CallContextField::LastCalleeId, call.call_id.into()),
-                    (CallContextField::LastCalleeReturnDataOffset, 0.into()),
-                    (
-                        CallContextField::LastCalleeReturnDataLength,
-                        result.len().into(),
-                    ),
-                ] {
-                    state.call_context_write(&mut exec_step, current_call.call_id, field, value);
-                }
                 state.handle_return(geth_step)?;
 
                 let real_cost = geth_steps[0].gas.0 - geth_steps[1].gas.0;
