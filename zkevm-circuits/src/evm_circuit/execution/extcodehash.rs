@@ -10,14 +10,14 @@ use crate::{
             },
             from_bytes,
             math_gadget::BatchedIsZeroGadget,
-            CachedRegion, Cell, RandomLinearCombination, Word,
+            CachedRegion, Cell, Word,
         },
         witness::{Block, Call, ExecStep, Transaction},
     },
     table::{AccountFieldTag, CallContextFieldTag},
     util::Expr,
 };
-use eth_types::{evm_types::GasCost, Field, ToAddress, ToLittleEndian};
+use eth_types::{evm_types::GasCost, Field, ToLittleEndian};
 use halo2_proofs::{circuit::Value, plonk::Error};
 use keccak256::EMPTY_HASH_LE;
 

@@ -69,15 +69,15 @@ fn test_with<C: SubCircuit<Fr> + Circuit<Fr>>(
     block: &witness::Block<Fr>,
     instance: Vec<Vec<Fr>>,
 ) -> MockProver<Fr> {
-    let rows_needed = C::min_num_rows_block(&block);
+    let rows_needed = C::min_num_rows_block(block);
     let k = log2_ceil(128 + rows_needed);
     log::debug!("{} circuit needs k = {}", *CIRCUIT, k);
-    let circuit = C::new_from_block(&block);
+    let circuit = C::new_from_block(block);
     MockProver::<Fr>::run(k, &circuit, instance).unwrap()
 }
 fn test_witness_block(block: &witness::Block<Fr>) -> Vec<VerifyFailure> {
     let prover = if *CIRCUIT == "evm" {
-        let k = get_test_degree(&block);
+        let k = get_test_degree(block);
         let circuit = get_test_cicuit_from_block(block.clone());
         let instance = vec![];
         MockProver::<Fr>::run(k, &circuit, instance).unwrap()
@@ -92,8 +92,8 @@ fn test_witness_block(block: &witness::Block<Fr>) -> Vec<VerifyFailure> {
     };
 
     let result = prover.verify_par();
-    let errs = result.err().unwrap_or_default();
-    errs
+
+    result.err().unwrap_or_default()
 }
 
 #[tokio::test]

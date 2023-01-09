@@ -67,7 +67,6 @@ use crate::table::{
     TxTable,
 };
 
-use crate::tx_circuit::TxCircuit;
 use crate::util::{log2_ceil, Challenges, SubCircuit, SubCircuitConfig};
 use crate::witness::{block_convert, Block, MptUpdates, SignedTransaction};
 use bus_mapping::circuit_input_builder::{CircuitInputBuilder, CircuitsParams};

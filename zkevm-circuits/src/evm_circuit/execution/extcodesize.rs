@@ -14,7 +14,7 @@ use crate::table::{AccountFieldTag, CallContextFieldTag};
 use crate::util::Expr;
 use array_init::array_init;
 use eth_types::evm_types::GasCost;
-use eth_types::{Field, ToAddress, ToLittleEndian};
+use eth_types::{Field, ToLittleEndian};
 use halo2_proofs::circuit::Value;
 use halo2_proofs::plonk::Error;
 

@@ -142,7 +142,7 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
         let gas = from_bytes::expr(&gas_word.cells[..N_BYTES_GAS]);
         let gas_is_u64 = IsZeroGadget::construct(cb, sum::expr(&gas_word.cells[N_BYTES_GAS..]));
         let cd_address = MemoryAddressGadget::construct(cb, cd_offset, cd_length);
-        let rd_address = MemoryAddressGadget::construct(cb, rd_offset, rd_length.clone());
+        let rd_address = MemoryAddressGadget::construct(cb, rd_offset, rd_length);
         let memory_expansion =
             MemoryExpansionGadget::construct(cb, [cd_address.address(), rd_address.address()]);
 
@@ -474,7 +474,7 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
         region: &mut CachedRegion<'_, '_, F>,
         offset: usize,
         block: &Block<F>,
-        tx: &Transaction,
+        _tx: &Transaction,
         call: &Call,
         step: &ExecStep,
     ) -> Result<(), Error> {

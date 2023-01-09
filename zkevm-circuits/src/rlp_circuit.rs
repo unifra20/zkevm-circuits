@@ -1241,8 +1241,13 @@ impl<F: Field> RlpCircuitConfig<F> {
                     ChainId,
                 ];
 
-                for (signed_tx_idx, signed_tx ) in signed_txs.iter().enumerate() {
-                    log::debug!("rlp circuit assign {}th tx at offset:{}, {:?}", signed_tx_idx, offset, signed_tx);
+                for (signed_tx_idx, signed_tx) in signed_txs.iter().enumerate() {
+                    log::debug!(
+                        "rlp circuit assign {}th tx at offset:{}, {:?}",
+                        signed_tx_idx,
+                        offset,
+                        signed_tx
+                    );
                     // tx hash (signed tx)
                     let mut all_bytes_rlc_acc = Value::known(F::zero());
                     let tx_hash_rows = signed_tx.gen_witness(challenges);
@@ -1632,7 +1637,7 @@ impl<F: Field> SubCircuit<F> for RlpCircuit<F, SignedTransaction> {
 
     fn min_num_rows_block(_block: &crate::witness::Block<F>) -> usize {
         // FIXME
-        (1<<22) - 256
+        (1 << 22) - 256
     }
 }
 
