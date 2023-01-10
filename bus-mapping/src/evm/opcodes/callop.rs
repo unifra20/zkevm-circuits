@@ -258,10 +258,12 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
                     &caller_ctx.memory.0[args_offset..args_offset + args_length],
                     callee_gas_left,
                 );
-                caller_ctx.memory.0[ret_offset..ret_offset + ret_length]
-                    .copy_from_slice(&result[..ret_length]);
-                for (i, value) in result.iter().enumerate() {
-                    state.memory_write(&mut exec_step, (ret_offset + i).into(), *value)?;
+                if !result.is_empty() {
+                    caller_ctx.memory.0[ret_offset..ret_offset + ret_length]
+                        .copy_from_slice(&result[..ret_length]);
+                    for (i, value) in result.iter().enumerate() {
+                        state.memory_write(&mut exec_step, (ret_offset + i).into(), *value)?;
+                    }
                 }
                 state.handle_return(geth_step)?;
                 let real_cost = geth_steps[0].gas.0 - geth_steps[1].gas.0;
@@ -474,6 +476,31 @@ mod call_tests {
             STATICCALL
         };
 
+        let neg_ec_recover = bytecode! {
+            // First place the parameters in memory
+            PUSH32(word!("a")) // hash
+            PUSH1(0)
+            MSTORE
+            PUSH1(0xb) // v
+            PUSH1(0x20)
+            MSTORE
+            PUSH32(word!("0xc")) // r
+            PUSH1(0x40)
+            MSTORE
+            PUSH32(word!("0xd")) // s
+            PUSH1(0x60)
+            MSTORE
+
+            // Do the call
+            PUSH1(32) // retSize
+            PUSH1(0x80) // retOffset
+            PUSH1(0x80) // argsSize
+            PUSH1(0) // argsOffset
+            PUSH1(1) // address
+            PUSH4(word!("FFFFFFFF")) // gas
+            STATICCALL
+        };
+
         let sha2 = bytecode! {
             // First place the parameters in memory
             PUSH1(0xFF) // data
@@ -672,6 +699,7 @@ mod call_tests {
 
         let codes = [
             ec_recover, sha2, ripemd_160, modexp, ec_add, ec_mul, ec_pairing, blake2f,
+            neg_ec_recover
         ];
 
         for code in codes.into_iter() {
