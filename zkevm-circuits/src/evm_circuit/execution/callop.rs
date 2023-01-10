@@ -21,6 +21,7 @@ use eth_types::evm_types::{GasCost, GAS_STIPEND_CALL_WITH_VALUE};
 use eth_types::{Field, ToLittleEndian, ToScalar, U256};
 use halo2_proofs::circuit::Value;
 use halo2_proofs::plonk::Error;
+use gadgets::util::{and, not};
 use keccak256::EMPTY_HASH_LE;
 
 /// Gadget for call related opcodes. It supports `OpcodeId::CALL`,
@@ -58,7 +59,8 @@ pub(crate) struct CallOpGadget<F> {
     is_empty_code_hash: IsEqualGadget<F>,
     one_64th_gas: ConstantDivisionGadget<F, N_BYTES_GAS>,
     capped_callee_gas_left: MinMaxGadget<F, N_BYTES_GAS>,
-    is_precompile: LtGadget<F, N_BYTES_ACCOUNT_ADDRESS>,
+    is_code_address_zero: IsZeroGadget<F>,
+    is_precompile_lt: LtGadget<F, N_BYTES_ACCOUNT_ADDRESS>,
     gas_cost: Cell<F>,
 }
 
@@ -277,7 +279,12 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
             all_but_one_64th_gas,
         );
 
-        let is_precompile = LtGadget::construct(cb, code_address_word.expr(), 0x9.expr());
+        let is_code_address_zero = IsZeroGadget::construct(cb, code_address_word.expr());
+        let is_precompile_lt = LtGadget::construct(cb, code_address_word.expr(), 0xA.expr());
+        let is_precompile = and::expr(&[
+            not::expr(is_code_address_zero.expr()),
+            is_precompile_lt.expr(),
+        ]);
         let precompile_memory_writes = is_precompile.expr() * from_bytes::expr(&rd_length.cells);
 
         let stack_pointer_delta =
@@ -441,7 +448,8 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
             is_empty_code_hash,
             one_64th_gas,
             capped_callee_gas_left,
-            is_precompile,
+            is_code_address_zero,
+            is_precompile_lt,
             gas_cost: gas_cost_cell,
         }
     }
@@ -641,12 +649,14 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
             callee_code_hash,
             Word::random_linear_combine(*EMPTY_HASH_LE, block.randomness),
         )?;
-        self.is_precompile.assign(
-            region,
-            offset,
-            F::from_u128(code_address.as_u128()),
-            F::from(0x9),
-        )?;
+        let mut code_address_bytes = [0; 32];
+        code_address_bytes[0..N_BYTES_ACCOUNT_ADDRESS]
+            .copy_from_slice(&code_address.to_le_bytes()[0..N_BYTES_ACCOUNT_ADDRESS]);
+        let code_address_bytes = F::from_repr(code_address_bytes).unwrap();
+        self.is_code_address_zero
+            .assign(region, offset, code_address_bytes)?;
+        self.is_precompile_lt
+            .assign(region, offset, code_address_bytes, F::from(0xA))?;
         let has_value = !value.is_zero() && !is_delegatecall;
         let gas_cost = if is_warm_prev {
             GasCost::WARM_ACCESS.as_u64()
