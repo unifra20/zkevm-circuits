@@ -46,6 +46,7 @@ pub(crate) struct CreateGadget<F> {
     reversion_info: ReversionInfo<F>,
     was_warm: Cell<F>,
 
+    depth: Cell<F>,
     caller_address: RandomLinearCombination<F, N_BYTES_ACCOUNT_ADDRESS>,
     nonce: RlpU64Gadget<F>,
 
@@ -169,7 +170,21 @@ impl<F: Field> ExecutionGadget<F> for CreateGadget<F> {
             Some(&mut reversion_info),
         );
 
+        // TODO: deduplicate with the code in CallOpGadget
         let mut callee_reversion_info = cb.reversion_info_write(Some(callee_call_id.expr()));
+        cb.require_equal(
+            "callee_is_persistent == is_persistent ⋅ is_success",
+            callee_reversion_info.is_persistent(),
+            reversion_info.is_persistent() * callee_is_success.expr(),
+        );
+        cb.condition(callee_is_success.expr() * (1.expr() - reversion_info.is_persistent()), |cb| {
+            cb.require_equal(
+                "callee_rw_counter_end_of_reversion == rw_counter_end_of_reversion - (reversible_write_counter + 1)",
+                callee_reversion_info.rw_counter_end_of_reversion(),
+                reversion_info.rw_counter_of_reversion(),
+            );
+        });
+
         cb.account_write(
             new_address.clone(),
             AccountFieldTag::Nonce,
@@ -221,6 +236,8 @@ impl<F: Field> ExecutionGadget<F> for CreateGadget<F> {
             cb.call_context_lookup(true.expr(), None, field_tag, value);
         }
 
+        let depth = cb.call_context(None, CallContextFieldTag::Depth);
+
         for (field_tag, value) in [
             (CallContextFieldTag::CallerId, cb.curr.state.call_id.expr()),
             (CallContextFieldTag::IsSuccess, callee_is_success.expr()),
@@ -238,6 +255,11 @@ impl<F: Field> ExecutionGadget<F> for CreateGadget<F> {
                 CallContextFieldTag::RwCounterEndOfReversion,
                 callee_reversion_info.rw_counter_end_of_reversion(),
             ),
+            (CallContextFieldTag::Depth, depth.expr() + 1.expr()),
+            (CallContextFieldTag::IsRoot, false.expr()),
+            (CallContextFieldTag::IsStatic, false.expr()),
+            (CallContextFieldTag::IsCreate, true.expr()),
+            (CallContextFieldTag::CodeHash, code_hash.expr()),
         ] {
             cb.call_context_lookup(true.expr(), Some(callee_call_id.expr()), field_tag, value);
         }
@@ -269,7 +291,10 @@ impl<F: Field> ExecutionGadget<F> for CreateGadget<F> {
         let keccak_input = cb.query_cell();
         let keccak_input_length = cb.query_cell();
         cb.condition(is_create2.expr(), |cb| {
-            // TODO: some comments here explaining what's going on....
+            // For CREATE2, the keccak input is the concatenation of 0xff, address, salt,
+            // and code_hash. Each sequence of bytes occurs in a fixed position, so to
+            // compute the RLC of the input, we only need to compute some fixed powers of
+            // the randomness.
             let randomness_raised_to_16 = cb.power_of_randomness()[15].clone();
             let randomness_raised_to_32 = randomness_raised_to_16.square();
             let randomness_raised_to_64 = randomness_raised_to_32.clone().square();
@@ -326,6 +351,7 @@ impl<F: Field> ExecutionGadget<F> for CreateGadget<F> {
             salt,
             caller_address,
             nonce,
+            depth,
             callee_reversion_info,
             transfer,
             initialization_code,
@@ -392,6 +418,11 @@ impl<F: Field> ExecutionGadget<F> for CreateGadget<F> {
 
         self.tx_id
             .assign(region, offset, Value::known(tx.id.to_scalar().unwrap()))?;
+        self.depth.assign(
+            region,
+            offset,
+            Value::known(call.depth.to_scalar().unwrap()),
+        )?;
 
         self.reversion_info.assign(
             region,
@@ -487,7 +518,7 @@ impl<F: Field> ExecutionGadget<F> for CreateGadget<F> {
             region,
             offset,
             Value::known(
-                block.rws[step.rw_indices[21 + usize::from(is_create2) + copy_rw_increase]]
+                block.rws[step.rw_indices[22 + usize::from(is_create2) + copy_rw_increase]]
                     .call_context_value()
                     .to_scalar()
                     .unwrap(),
@@ -730,8 +761,8 @@ mod test {
         }
         code.append(&bytecode! {
             PUSH1(initialization_bytes.len()) // size
-            PUSH1(32 - initialization_bytes.len()) // value
-            PUSH1(10) // value
+            PUSH1(32 - initialization_bytes.len()) // length
+            PUSH2(23414) // value
         });
         code.write_op(if is_create2 {
             OpcodeId::CREATE2
