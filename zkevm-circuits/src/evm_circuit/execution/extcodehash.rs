@@ -17,14 +17,14 @@ use crate::{
     table::{AccountFieldTag, CallContextFieldTag},
     util::Expr,
 };
-use eth_types::{evm_types::GasCost, Field, ToLittleEndian};
+use eth_types::{evm_types::GasCost, Field, ToAddress, ToLittleEndian};
 use halo2_proofs::{circuit::Value, plonk::Error};
 use keccak256::EMPTY_HASH_LE;
 
 #[derive(Clone, Debug)]
 pub(crate) struct ExtcodehashGadget<F> {
     same_context: SameContextGadget<F>,
-    external_address: Word<F>,
+    external_address: RandomLinearCombination<F, N_BYTES_ACCOUNT_ADDRESS>,
     tx_id: Cell<F>,
     reversion_info: ReversionInfo<F>,
     is_warm: Cell<F>,
@@ -47,21 +47,32 @@ impl<F: Field> ExecutionGadget<F> for ExtcodehashGadget<F> {
         let mut reversion_info = cb.reversion_info_read(None);
 
         let is_warm = cb.query_bool();
-        let address = from_bytes::expr(&external_address.cells[..N_BYTES_ACCOUNT_ADDRESS]);
         cb.account_access_list_write(
             tx_id.expr(),
-            address.expr(),
+            from_bytes::expr(&external_address.cells),
             1.expr(),
             is_warm.expr(),
             Some(&mut reversion_info),
         );
 
         let nonce = cb.query_cell();
-        cb.account_read(address.expr(), AccountFieldTag::Nonce, nonce.expr());
+        cb.account_read(
+            from_bytes::expr(&external_address.cells),
+            AccountFieldTag::Nonce,
+            nonce.expr(),
+        );
         let balance = cb.query_cell();
-        cb.account_read(address.expr(), AccountFieldTag::Balance, balance.expr());
+        cb.account_read(
+            from_bytes::expr(&external_address.cells),
+            AccountFieldTag::Balance,
+            balance.expr(),
+        );
         let code_hash = cb.query_cell();
-        cb.account_read(address.expr(), AccountFieldTag::CodeHash, code_hash.expr());
+        cb.account_read(
+            from_bytes::expr(&external_address.cells),
+            AccountFieldTag::CodeHash,
+            code_hash.expr(),
+        );
 
         let empty_code_hash_rlc = Word::random_linear_combine_expr(
             (*EMPTY_HASH_LE).map(|byte| byte.expr()),
@@ -120,9 +131,11 @@ impl<F: Field> ExecutionGadget<F> for ExtcodehashGadget<F> {
     ) -> Result<(), Error> {
         self.same_context.assign_exec_step(region, offset, step)?;
 
-        let external_address = block.rws[step.rw_indices[0]].stack_value();
+        let external_address = block.rws[step.rw_indices[0]].stack_value().to_address();
+        let mut le_bytes = external_address.0;
+        le_bytes.reverse();
         self.external_address
-            .assign(region, offset, Some(external_address.to_le_bytes()))?;
+            .assign(region, offset, Some(le_bytes))?;
 
         self.tx_id
             .assign(region, offset, Value::known(F::from(tx.id as u64)))?;
