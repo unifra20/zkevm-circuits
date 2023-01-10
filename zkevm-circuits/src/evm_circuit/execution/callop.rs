@@ -245,7 +245,7 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
             );
         });
         cb.condition(1.expr() - callee_exists.expr(), |cb| {
-            cb.account_read(code_address, AccountFieldTag::NonExisting, 0.expr());
+            cb.account_read(code_address.expr(), AccountFieldTag::NonExisting, 0.expr());
         });
 
         let is_empty_code_hash = IsEqualGadget::construct(
@@ -279,8 +279,8 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
             all_but_one_64th_gas,
         );
 
-        let is_code_address_zero = IsZeroGadget::construct(cb, code_address_word.expr());
-        let is_precompile_lt = LtGadget::construct(cb, code_address_word.expr(), 0xA.expr());
+        let is_code_address_zero = IsZeroGadget::construct(cb, code_address.expr());
+        let is_precompile_lt = LtGadget::construct(cb, code_address.expr(), 0xA.expr());
         let is_precompile = and::expr(&[
             not::expr(is_code_address_zero.expr()),
             is_precompile_lt.expr(),
