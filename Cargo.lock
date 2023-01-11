@@ -2438,7 +2438,7 @@ checksum = "eabb4a44450da02c90444cf74558da904edde8fb4e9035a9a6a4e15445af0bd7"
 [[package]]
 name = "halo2_proofs"
 version = "0.2.0"
-source = "git+https://github.com/scroll-tech/halo2.git?branch=scroll-dev-1220#09506036ae601225f9a7c5d4ca016b2c57df3cff"
+source = "git+https://github.com/scroll-tech/halo2.git?branch=scroll-dev-1220#18af374525375b1ce774849a7c4d2c015b0b1cfd"
 dependencies = [
  "ark-std",
  "blake2b_simd",
