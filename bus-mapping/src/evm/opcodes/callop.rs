@@ -8,6 +8,7 @@ use eth_types::evm_types::GasCost;
 use eth_types::evm_types::OpcodeId;
 use eth_types::{GethExecStep, ToWord, Word};
 use keccak256::EMPTY_HASH;
+use std::cmp::min;
 
 /// Placeholder structure used to implement [`Opcode`] trait over it
 /// corresponding to the `OpcodeId::CALL`, `OpcodeId::CALLCODE`,
@@ -258,12 +259,12 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
                     &caller_ctx.memory.0[args_offset..args_offset + args_length],
                     callee_gas_left,
                 );
-                if !result.is_empty() {
-                    caller_ctx.memory.0[ret_offset..ret_offset + ret_length]
-                        .copy_from_slice(&result[..ret_length]);
-                    for (i, value) in result.iter().enumerate() {
-                        state.memory_write(&mut exec_step, (ret_offset + i).into(), *value)?;
-                    }
+                let length = min(result.len(), ret_length);
+                caller_ctx.memory.extend_at_least(ret_offset + length);
+                caller_ctx.memory.0[ret_offset..ret_offset + length]
+                    .copy_from_slice(&result[..length]);
+                for (i, value) in result[..length].iter().enumerate() {
+                    state.memory_write(&mut exec_step, (ret_offset + i).into(), *value)?;
                 }
                 state.handle_return(geth_step)?;
                 let real_cost = geth_steps[0].gas.0 - geth_steps[1].gas.0;
@@ -517,6 +518,22 @@ mod call_tests {
             STATICCALL
         };
 
+        let sha2_less_return = bytecode! {
+            // First place the parameters in memory
+            PUSH1(0xFF) // data
+            PUSH1(0)
+            MSTORE
+
+            // Do the call
+            PUSH1(0x10) // retSize
+            PUSH1(0x20) // retOffset
+            PUSH1(1) // argsSize
+            PUSH1(0x1F) // argsOffset
+            PUSH1(2) // address
+            PUSH4(word!("FFFFFFFF")) // gas
+            STATICCALL
+        };
+
         let ripemd_160 = bytecode! {
             // First place the parameters in memory
             PUSH1(0xFF) // data
@@ -698,8 +715,16 @@ mod call_tests {
         };
 
         let codes = [
-            ec_recover, sha2, ripemd_160, modexp, ec_add, ec_mul, ec_pairing, blake2f,
-            neg_ec_recover
+            ec_recover,
+            sha2,
+            ripemd_160,
+            modexp,
+            ec_add,
+            ec_mul,
+            ec_pairing,
+            blake2f,
+            neg_ec_recover,
+            sha2_less_return,
         ];
 
         for code in codes.into_iter() {
