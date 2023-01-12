@@ -538,6 +538,8 @@ impl<F: Field> SubCircuitConfig<F> for TxCircuitConfig<F> {
             cb.gate(and::expr([
                 meta.query_fixed(q_enable, Rotation::cur()),
                 tag.value_equals(CallerAddress, Rotation::cur())(meta),
+                // FIXME
+                0.expr(),
             ]))
         });
 
