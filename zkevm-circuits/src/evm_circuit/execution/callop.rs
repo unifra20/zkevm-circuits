@@ -7,11 +7,11 @@ use crate::evm_circuit::util::constraint_builder::{
     ConstraintBuilder, ReversionInfo, StepStateTransition,
 };
 use crate::evm_circuit::util::math_gadget::{
-    ConstantDivisionGadget, IsEqualGadget, IsZeroGadget, LtGadget, LtWordGadget, MinMaxGadget,
+    ConstantDivisionGadget, IsEqualGadget, IsZeroGadget, LtWordGadget, MinMaxGadget,
 };
 use crate::evm_circuit::util::memory_gadget::{MemoryAddressGadget, MemoryExpansionGadget};
 use crate::evm_circuit::util::{
-    and, from_bytes, not, or, select, sum, CachedRegion, Cell, RandomLinearCombination, Word,
+    from_bytes, not, or, select, sum, CachedRegion, Cell, RandomLinearCombination, Word,
 };
 use crate::evm_circuit::witness::{Block, Call, ExecStep, Rw, Transaction};
 use crate::table::{AccountFieldTag, CallContextFieldTag};
@@ -65,12 +65,6 @@ pub(crate) struct CallOpGadget<F> {
     is_empty_code_hash: IsEqualGadget<F>,
     one_64th_gas: ConstantDivisionGadget<F, N_BYTES_GAS>,
     capped_callee_gas_left: MinMaxGadget<F, N_BYTES_GAS>,
-    is_code_address_zero: IsZeroGadget<F>,
-    is_precompile_lt: LtGadget<F, N_BYTES_ACCOUNT_ADDRESS>,
-    // FIXME: free cells
-    gas_cost: Cell<F>,
-    // used only in precompiled contracts
-    return_len_cell: Cell<F>,
 }
 
 impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
@@ -265,8 +259,8 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
                 callee_code_hash.expr(),
             );
         });
-        cb.condition(not::expr(callee_exists.expr()), |cb| {
-            cb.account_read(code_address.expr(), AccountFieldTag::NonExisting, 0.expr());
+        cb.condition(1.expr() - callee_exists.expr(), |cb| {
+            cb.account_read(code_address, AccountFieldTag::NonExisting, 0.expr());
         });
 
         let is_empty_code_hash = IsEqualGadget::construct(
@@ -300,25 +294,12 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
             all_but_one_64th_gas,
         );
 
-        let is_code_address_zero = IsZeroGadget::construct(cb, code_address.expr());
-        let is_precompile_lt = LtGadget::construct(cb, code_address.expr(), 0xA.expr());
-        let is_precompile = and::expr(&[
-            not::expr(is_code_address_zero.expr()),
-            is_precompile_lt.expr(),
-        ]);
-        let return_len_cell = cb.query_cell();
-        let precompile_memory_writes = 2.expr() * is_precompile.expr() * return_len_cell.expr();
+        // TODO: Handle precompiled
 
         let stack_pointer_delta =
             select::expr(is_call.expr() + is_callcode.expr(), 6.expr(), 5.expr());
-        let gas_cost_cell = cb.query_cell();
-
         cb.condition(
-            and::expr([
-                is_empty_code_hash.expr(),
-                not::expr(is_precompile.expr()),
-                not::expr(is_insufficient_balance.expr()),
-            ]),
+            is_empty_code_hash.expr() * not::expr(is_insufficient_balance.expr()),
             |cb| {
                 // Save caller's call state
                 for field_tag in [
@@ -328,34 +309,7 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
                 ] {
                     cb.call_context_lookup(true.expr(), None, field_tag, 0.expr());
                 }
-            },
-        );
-        cb.condition(
-            and::expr([
-                is_precompile.expr(),
-                not::expr(is_insufficient_balance.expr()),
-            ]),
-            |cb| {
-                // Save caller's call state
-                for (field_tag, value) in [
-                    (CallContextFieldTag::LastCalleeId, callee_call_id.expr()),
-                    (CallContextFieldTag::LastCalleeReturnDataOffset, 0.expr()),
-                    (
-                        CallContextFieldTag::LastCalleeReturnDataLength,
-                        return_len_cell.expr(),
-                    ),
-                ] {
-                    cb.call_context_lookup(true.expr(), None, field_tag, value);
-                }
-            },
-        );
 
-        cb.condition(
-            and::expr([
-                is_empty_code_hash.expr(),
-                not::expr(is_insufficient_balance.expr()),
-            ]),
-            |cb| {
                 // For CALL opcode, it has an extra stack pop `value` and two account write for
                 // `transfer` call (+3).
                 //
@@ -369,13 +323,14 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
                 let rw_counter_delta = 21.expr()
                     + is_call.expr() * 3.expr()
                     + is_callcode.expr()
-                    + is_delegatecall.expr() * 2.expr()
-                    + precompile_memory_writes;
+                    + is_delegatecall.expr() * 2.expr();
                 cb.require_step_state_transition(StepStateTransition {
                     rw_counter: Delta(rw_counter_delta),
                     program_counter: Delta(1.expr()),
                     stack_pointer: Delta(stack_pointer_delta.expr()),
-                    gas_left: Delta(-gas_cost_cell.expr()),
+                    gas_left: Delta(
+                        has_value.clone() * GAS_STIPEND_CALL_WITH_VALUE.expr() - gas_cost.clone(),
+                    ),
                     memory_word_size: To(memory_expansion.next_memory_word_size()),
                     // For CALL opcode, `transfer` invocation has two account write.
                     reversible_write_counter: Delta(1.expr() + is_call.expr() * 2.expr()),
@@ -409,10 +364,7 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
         });
 
         cb.condition(
-            and::expr(&[
-                not::expr(is_empty_code_hash.expr()),
-                not::expr(is_insufficient_balance.expr()),
-            ]),
+            (1.expr() - is_empty_code_hash.expr()) * not::expr(is_insufficient_balance.expr()),
             |cb| {
                 // Save caller's call state
                 for (field_tag, value) in [
@@ -540,10 +492,6 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
             is_empty_code_hash,
             one_64th_gas,
             capped_callee_gas_left,
-            is_code_address_zero,
-            is_precompile_lt,
-            return_len_cell,
-            gas_cost: gas_cost_cell,
         }
     }
 
@@ -552,7 +500,7 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
         region: &mut CachedRegion<'_, '_, F>,
         offset: usize,
         block: &Block<F>,
-        _tx: &Transaction,
+        _: &Transaction,
         call: &Call,
         step: &ExecStep,
     ) -> Result<(), Error> {
@@ -583,7 +531,6 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
             step.rw_indices[7 + rw_offset],
         ]
         .map(|idx| block.rws[idx].stack_value());
-        let is_precompile = code_address < 10.into() && !code_address.is_zero();
         let value = if is_call || is_callcode {
             rw_offset += 1;
             block.rws[step.rw_indices[7 + rw_offset]].stack_value()
@@ -641,19 +588,6 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
         };
         let callee_code_hash =
             RandomLinearCombination::random_linear_combine(callee_code_hash, block.randomness);
-        if is_precompile {
-            let last_caller_return_data_length_rw = block.rws[step.rw_indices[20 + rw_offset]];
-            assert_eq!(
-                last_caller_return_data_length_rw.field_tag().unwrap(),
-                CallContextFieldTag::LastCalleeReturnDataLength as u64
-            );
-            let return_len = last_caller_return_data_length_rw.call_context_value();
-            self.return_len_cell.assign(
-                region,
-                offset,
-                Value::known(F::from(return_len.as_u64())),
-            )?;
-        }
         self.opcode
             .assign(region, offset, Value::known(F::from(opcode.as_u64())))?;
         self.is_call.assign(
@@ -765,14 +699,6 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
             callee_code_hash,
             Word::random_linear_combine(*EMPTY_HASH_LE, block.randomness),
         )?;
-        let mut code_address_bytes = [0; 32];
-        code_address_bytes[0..N_BYTES_ACCOUNT_ADDRESS]
-            .copy_from_slice(&code_address.to_le_bytes()[0..N_BYTES_ACCOUNT_ADDRESS]);
-        let code_address_bytes = F::from_repr(code_address_bytes).unwrap();
-        self.is_code_address_zero
-            .assign(region, offset, code_address_bytes)?;
-        self.is_precompile_lt
-            .assign(region, offset, code_address_bytes, F::from(0xA))?;
         let has_value = !value.is_zero() && !is_delegatecall;
         let gas_cost = if is_warm_prev {
             GasCost::WARM_ACCESS.as_u64()
@@ -780,7 +706,7 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
             GasCost::COLD_ACCOUNT_ACCESS.as_u64()
         } + if has_value {
             GasCost::CALL_WITH_VALUE.as_u64()
-                // Only CALL opcode could invoke transfer in successful case to make empty
+                // Only CALL opcode could invoke transfer in successful case to make empty 
                 // account into non-empty.
                 + if is_call && !callee_exists {
                     GasCost::NEW_ACCOUNT.as_u64()
@@ -791,8 +717,7 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
             0
         } + memory_expansion_gas_cost;
         let gas_available = step.gas_left - gas_cost;
-        self.gas_cost
-            .assign(region, offset, Value::known(F::from(step.gas_cost)))?;
+
         self.one_64th_gas
             .assign(region, offset, gas_available as u128)?;
         self.capped_callee_gas_left.assign(
@@ -812,10 +737,9 @@ mod test {
     use bus_mapping::circuit_input_builder::CircuitsParams;
     use eth_types::evm_types::OpcodeId;
     use eth_types::geth_types::{Account, GethData};
-    use eth_types::{address, bytecode, word, Address, ToWord, Word};
+    use eth_types::{address, bytecode, Address, ToWord, Word};
     use halo2_proofs::halo2curves::bn256::Fr;
     use itertools::Itertools;
-    use mock::test_ctx::helpers::{account_0_code_account_1_no_code, tx_from_1_to_0};
     use mock::TestContext;
     use std::default::Default;
 
@@ -844,80 +768,6 @@ mod test {
             .cartesian_product(callees.into_iter())
         {
             test_ok(caller_for_insufficient_balance(opcode, stack), callee);
-        }
-    }
-
-    #[test]
-    fn test_precompiled_call() {
-        let head = bytecode! {
-            PUSH16(word!("0123456789ABCDEF0123456789ABCDEF"))
-            PUSH1(0x00)
-            MSTORE
-        };
-
-        let call6 = bytecode! {
-            PUSH1(0x20)
-            PUSH1(0x20)
-            PUSH1(0x20)
-            PUSH1(0x00)
-            PUSH1(0x04)
-            PUSH1(0xFF)
-        };
-
-        let call7 = bytecode! {
-            PUSH1(0x20)
-            PUSH1(0x20)
-            PUSH1(0x20)
-            PUSH1(0x00)
-            PUSH1(0x00)
-            PUSH1(0x04)
-            PUSH1(0xFF)
-        };
-
-        let tail = bytecode! {
-            PUSH1(0x20)
-            MLOAD
-        };
-
-        let tests = [bytecode! { STATICCALL }, bytecode! { DELEGATECALL }]
-            .map(|c| {
-                let mut call6 = call6.clone();
-                call6.append(&c);
-                call6
-            })
-            .into_iter()
-            .chain([bytecode! { CALL }, bytecode! { CALLCODE }].map(|c| {
-                let mut call7 = call7.clone();
-                call7.append(&c);
-                call7
-            }))
-            .map(|c| {
-                let mut code = head.clone();
-                code.append(&c);
-                code.append(&tail);
-                code
-            });
-
-        for test in tests {
-            // Get the execution steps from the external tracer
-            let block: GethData = TestContext::<2, 1>::new(
-                None,
-                account_0_code_account_1_no_code(test),
-                tx_from_1_to_0,
-                |block, _tx| block.number(0xcafeu64),
-            )
-            .unwrap()
-            .into();
-            assert_eq!(
-                run_test_circuit_geth_data::<Fr>(
-                    block,
-                    CircuitsParams {
-                        max_rws: 4500,
-                        ..Default::default()
-                    }
-                ),
-                Ok(())
-            );
         }
     }
 

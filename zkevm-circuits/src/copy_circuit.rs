@@ -12,15 +12,13 @@ use gadgets::{
 };
 use halo2_proofs::{
     circuit::{Layouter, Region, Value},
-    plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed, Selector},
+    plonk::{
+        Advice, Challenge, Column, ConstraintSystem, Error, Expression, Fixed, SecondPhase,
+        Selector,
+    },
     poly::Rotation,
 };
 use itertools::Itertools;
-
-#[cfg(feature = "onephase")]
-use halo2_proofs::plonk::FirstPhase as SecondPhase;
-#[cfg(not(feature = "onephase"))]
-use halo2_proofs::plonk::SecondPhase;
 
 use crate::{
     evm_circuit::{
@@ -28,7 +26,8 @@ use crate::{
         witness::Block,
     },
     table::{
-        BytecodeTable, CopyTable, LookupTable, RwTable, RwTableTag, TxContextFieldTag, TxTable,
+        BytecodeFieldTag, BytecodeTable, CopyTable, LookupTable, RwTable, RwTableTag,
+        TxContextFieldTag, TxTable,
     },
     util::{Challenges, SubCircuit, SubCircuitConfig},
     witness,
@@ -367,10 +366,7 @@ impl<F: Field> SubCircuitConfig<F> for CopyCircuitConfig<F> {
             .collect()
         });
 
-        // create case unimplemented for poseidon hash
-        #[cfg(feature = "codehash")]
         meta.lookup_any("Bytecode lookup", |meta| {
-            use crate::table::BytecodeFieldTag;
             let cond = meta.query_fixed(q_enable, Rotation::cur())
                 * tag.value_equals(CopyDataType::Bytecode, Rotation::cur())(meta)
                 * not::expr(meta.query_advice(is_pad, Rotation::cur()));
@@ -435,18 +431,7 @@ impl<F: Field> CopyCircuitConfig<F> {
             || "assign copy table",
             |mut region| {
                 let mut offset = 0;
-                for (ev_idx, copy_event) in block.copy_events.iter().enumerate() {
-                    log::debug!(
-                        "offset is {} before {}th copy event(bytes len: {}): {:?}",
-                        offset,
-                        ev_idx,
-                        copy_event.bytes.len(),
-                        {
-                            let mut copy_event = copy_event.clone();
-                            copy_event.bytes.clear();
-                            copy_event
-                        }
-                    );
+                for copy_event in block.copy_events.iter() {
                     for (step_idx, (tag, table_row, circuit_row)) in
                         CopyTable::assignments(copy_event, challenges)
                             .iter()
@@ -470,16 +455,14 @@ impl<F: Field> CopyCircuitConfig<F> {
 
                         // q_step
                         if is_read {
-                            //self.q_step.enable(&mut region, offset)?;
+                            self.q_step.enable(&mut region, offset)?;
                         }
-                        // FIXME: finish padding of copy circuit
-                        // Now temporarily set it to 0 to make vk univeral
                         // q_enable
                         region.assign_fixed(
                             || "q_enable",
                             self.q_enable,
                             offset,
-                            || Value::known(F::zero()),
+                            || Value::known(F::one()),
                         )?;
 
                         // is_last, value, is_pad, is_code
@@ -513,7 +496,6 @@ impl<F: Field> CopyCircuitConfig<F> {
 
                         offset += 1;
                     }
-                    log::debug!("offset after {}th copy event: {}", ev_idx, offset);
                 }
                 // pad two rows in the end to satisfy Halo2 cell assignment check
                 for _ in 0..2 {
@@ -701,7 +683,7 @@ pub mod dev {
     };
 
     impl<F: Field> Circuit<F> for CopyCircuit<F> {
-        type Config = (CopyCircuitConfig<F>, Challenges);
+        type Config = (CopyCircuitConfig<F>, Challenges<Challenge>);
         type FloorPlanner = SimpleFloorPlanner;
 
         fn without_witnesses(&self) -> Self {

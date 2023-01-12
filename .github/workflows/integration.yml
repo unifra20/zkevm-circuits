@@ -3,13 +3,9 @@ name: Integration Tests
 on:
   pull_request:
     types: [synchronize, labeled]
-    # Ignore when target branch is `main` and source branch is scroll-stable.
-    # It could avoid running twice. Since scroll-stable is set as `push` below.
-    branches-ignore:
-      - main
   push:
     branches:
-      - scroll-stable
+      - main
 
 jobs:
   consecutiveness:
@@ -62,9 +58,6 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
-      # https://github.com/actions/cache/issues/133#issuecomment-599102035
-      - name: Change cargo dir owner
-        run: sudo chown -R $(whoami):$(id -ng) ~/.cargo/
       - name: Cargo cache
         uses: actions/cache@v3
         with:

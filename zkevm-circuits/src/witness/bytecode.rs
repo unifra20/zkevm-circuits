@@ -1,6 +1,7 @@
 use bus_mapping::evm::OpcodeId;
 use eth_types::{Field, ToLittleEndian, Word};
 use halo2_proofs::circuit::Value;
+use sha3::{Digest, Keccak256};
 
 use crate::{
     evm_circuit::util::RandomLinearCombination, table::BytecodeFieldTag, util::Challenges,
@@ -16,6 +17,12 @@ pub struct Bytecode {
 }
 
 impl Bytecode {
+    /// Construct from bytecode bytes
+    pub fn new(bytes: Vec<u8>) -> Self {
+        let hash = Word::from_big_endian(Keccak256::digest(&bytes).as_slice());
+        Self { hash, bytes }
+    }
+
     /// Assignments for bytecode table
     pub fn table_assignments<F: Field>(
         &self,
@@ -76,5 +83,11 @@ impl Bytecode {
 
         // here dest > bytecodes len
         panic!("can not find byte in the bytecodes list")
+    }
+}
+
+impl From<&eth_types::bytecode::Bytecode> for Bytecode {
+    fn from(b: &eth_types::bytecode::Bytecode) -> Self {
+        Bytecode::new(b.to_vec())
     }
 }

@@ -10,15 +10,14 @@ use crate::{
                 Transition::{Delta, To},
             },
             math_gadget::{IsEqualGadget, IsZeroGadget, MulWordByU64Gadget, RangeCheckGadget},
-            not, CachedRegion, Cell, RandomLinearCombination, Word,
+            select, CachedRegion, Cell, RandomLinearCombination, Word,
         },
         witness::{Block, Call, ExecStep, Transaction},
     },
     table::{AccountFieldTag, CallContextFieldTag, TxFieldTag as TxContextFieldTag},
     util::Expr,
 };
-use eth_types::{Field, ToLittleEndian, ToScalar};
-use ethers_core::utils::get_contract_address;
+use eth_types::{evm_types::GasCost, Field, ToLittleEndian, ToScalar};
 use halo2_proofs::circuit::Value;
 use halo2_proofs::plonk::Error;
 use keccak256::EMPTY_HASH_LE;
@@ -33,13 +32,11 @@ pub(crate) struct BeginTxGadget<F> {
     tx_caller_address: Cell<F>,
     tx_caller_address_is_zero: IsZeroGadget<F>,
     tx_callee_address: Cell<F>,
-    call_callee_address: Cell<F>,
     tx_is_create: Cell<F>,
     tx_value: Word<F>,
     tx_call_data_length: Cell<F>,
     tx_call_data_gas_cost: Cell<F>,
     reversion_info: ReversionInfo<F>,
-    intrinsic_gas_cost: Cell<F>,
     sufficient_gas_left: RangeCheckGadget<F, N_BYTES_GAS>,
     transfer_with_gas_fee: TransferWithGasFeeGadget<F>,
     code_hash: Cell<F>,
@@ -81,20 +78,6 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
                 TxContextFieldTag::CallDataGasCost,
             ]
             .map(|field_tag| cb.tx_context(tx_id.expr(), field_tag, None));
-
-        let call_callee_address = cb.query_cell();
-        cb.condition(tx_is_create.expr(), |_cb| {
-            // TODO: require call_callee_address to be
-            // address(keccak(rlp([tx_caller_address, tx_nonce])))
-        });
-        cb.condition(not::expr(tx_is_create.expr()), |cb| {
-            cb.require_equal(
-                "Tx to non-zero address",
-                tx_callee_address.expr(),
-                call_callee_address.expr(),
-            );
-        });
-
         let tx_caller_address_is_zero = IsZeroGadget::construct(cb, tx_caller_address.expr());
         cb.require_equal(
             "CallerAddress != 0 (not a padding tx)",
@@ -127,16 +110,14 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
 
         // TODO: Take gas cost of access list (EIP 2930) into consideration.
         // Use intrinsic gas
-        /*
         let intrinsic_gas_cost = select::expr(
             tx_is_create.expr(),
             GasCost::CREATION_TX.expr(),
             GasCost::TX.expr(),
         ) + tx_call_data_gas_cost.expr();
-        */
+
         // Check gas_left is sufficient
-        let intrinsic_gas_cost = cb.query_cell();
-        let gas_left = tx_gas.expr() - intrinsic_gas_cost.expr();
+        let gas_left = tx_gas.expr() - intrinsic_gas_cost;
         let sufficient_gas_left = RangeCheckGadget::construct(cb, gas_left.clone());
 
         // Prepare access list of caller and callee
@@ -149,7 +130,7 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
         );
         cb.account_access_list_write(
             tx_id.expr(),
-            call_callee_address.expr(),
+            tx_callee_address.expr(),
             1.expr(),
             0.expr(),
             None,
@@ -159,7 +140,7 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
         let transfer_with_gas_fee = TransferWithGasFeeGadget::construct(
             cb,
             tx_caller_address.expr(),
-            call_callee_address.expr(),
+            tx_callee_address.expr(),
             tx_value.clone(),
             mul_gas_fee_by_gas.product().clone(),
             &mut reversion_info,
@@ -170,12 +151,10 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
 
         // Read code_hash of callee
         let code_hash = cb.query_cell();
-        cb.account_write(
-            call_callee_address.expr(),
+        cb.account_read(
+            tx_callee_address.expr(),
             AccountFieldTag::CodeHash,
             code_hash.expr(),
-            code_hash.expr(),
-            None,
         );
 
         let is_empty_code_hash = IsEqualGadget::construct(
@@ -222,10 +201,7 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
             for (field_tag, value) in [
                 (CallContextFieldTag::Depth, 1.expr()),
                 (CallContextFieldTag::CallerAddress, tx_caller_address.expr()),
-                (
-                    CallContextFieldTag::CalleeAddress,
-                    call_callee_address.expr(),
-                ),
+                (CallContextFieldTag::CalleeAddress, tx_callee_address.expr()),
                 (CallContextFieldTag::CallDataOffset, 0.expr()),
                 (
                     CallContextFieldTag::CallDataLength,
@@ -289,7 +265,6 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
             tx_caller_address,
             tx_caller_address_is_zero,
             tx_callee_address,
-            call_callee_address,
             tx_is_create,
             tx_value,
             tx_call_data_length,
@@ -298,7 +273,6 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
             sufficient_gas_left,
             transfer_with_gas_fee,
             code_hash,
-            intrinsic_gas_cost,
             is_empty_code_hash,
         }
     }
@@ -313,7 +287,6 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
         step: &ExecStep,
     ) -> Result<(), Error> {
         let gas_fee = tx.gas_price * tx.gas;
-
         let [caller_balance_pair, callee_balance_pair, (callee_code_hash, _)] =
             [step.rw_indices[7], step.rw_indices[8], step.rw_indices[9]]
                 .map(|idx| block.rws[idx].account_value_pair());
@@ -326,8 +299,6 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
             .assign(region, offset, Value::known(F::from(tx.gas)))?;
         self.tx_gas_price
             .assign(region, offset, Some(tx.gas_price.to_le_bytes()))?;
-        self.tx_value
-            .assign(region, offset, Some(tx.value.to_le_bytes()))?;
         self.mul_gas_fee_by_gas
             .assign(region, offset, tx.gas_price, tx.gas, gas_fee)?;
         let caller_address = tx
@@ -345,19 +316,6 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
                 tx.callee_address
                     .to_scalar()
                     .expect("unexpected Address -> Scalar conversion failure"),
-            ),
-        )?;
-        self.call_callee_address.assign(
-            region,
-            offset,
-            Value::known(
-                if tx.is_create {
-                    get_contract_address(tx.caller_address, tx.nonce)
-                } else {
-                    tx.callee_address
-                }
-                .to_scalar()
-                .expect("unexpected Address -> Scalar conversion failure"),
             ),
         )?;
         self.tx_is_create
@@ -378,8 +336,6 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
             call.rw_counter_end_of_reversion,
             call.is_persistent,
         )?;
-        self.intrinsic_gas_cost
-            .assign(region, offset, Value::known(F::from(step.gas_cost)))?;
         self.sufficient_gas_left
             .assign(region, offset, F::from(tx.gas - step.gas_cost))?;
         self.transfer_with_gas_fee.assign(

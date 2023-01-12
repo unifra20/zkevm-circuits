@@ -54,7 +54,7 @@ fn get_call_result(trace: &[GethExecStep]) -> Option<Word> {
 }
 
 /// State and Code Access set.
-#[derive(Debug, PartialEq, Eq, Default)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct AccessSet {
     /// Set of accounts
     pub state: HashMap<Address, HashSet<Word>>,
@@ -62,10 +62,10 @@ pub struct AccessSet {
     pub code: HashSet<Address>,
 }
 
-impl AccessSet {
-    pub(crate) fn add(&mut self, list: Vec<Access>) {
-        let state = &mut self.state;
-        let code = &mut self.code;
+impl From<Vec<Access>> for AccessSet {
+    fn from(list: Vec<Access>) -> Self {
+        let mut state: HashMap<Address, HashSet<Word>> = HashMap::new();
+        let mut code: HashSet<Address> = HashSet::new();
         for access in list {
             match access.value {
                 AccessValue::Account { address } => {
@@ -87,14 +87,7 @@ impl AccessSet {
                 }
             }
         }
-    }
-}
-
-impl From<Vec<Access>> for AccessSet {
-    fn from(list: Vec<Access>) -> Self {
-        let mut access_set = AccessSet::default();
-        access_set.add(list);
-        access_set
+        Self { state, code }
     }
 }
 

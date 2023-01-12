@@ -6,7 +6,6 @@ use crate::{
         witness::{Block, Call, ExecStep},
     },
     util::Expr,
-    witness::Transaction,
 };
 use bus_mapping::evm::OpcodeId;
 use eth_types::ToLittleEndian;
@@ -25,7 +24,6 @@ pub enum ExecutionState {
     // Internal state
     BeginTx,
     EndTx,
-    EndInnerBlock,
     EndBlock,
     // Opcode successful cases
     STOP,
@@ -77,13 +75,14 @@ pub enum ExecutionState {
     MSIZE,
     GAS,
     JUMPDEST,
-    PUSH,          // PUSH1, PUSH2, ..., PUSH32
-    DUP,           // DUP1, DUP2, ..., DUP16
-    SWAP,          // SWAP1, SWAP2, ..., SWAP16
-    LOG,           // LOG0, LOG1, ..., LOG4
-    CREATE,        // CREATE, CREATE2
+    PUSH, // PUSH1, PUSH2, ..., PUSH32
+    DUP,  // DUP1, DUP2, ..., DUP16
+    SWAP, // SWAP1, SWAP2, ..., SWAP16
+    LOG,  // LOG0, LOG1, ..., LOG4
+    CREATE,
     CALL_OP,       // CALL, CALLCODE, DELEGATECALL, STATICCALL
     RETURN_REVERT, // RETURN, REVERT
+    CREATE2,
     SELFDESTRUCT,
     // Error cases
     ErrorInvalidOpcode,
@@ -300,7 +299,7 @@ impl ExecutionState {
                 OpcodeId::LOG3,
                 OpcodeId::LOG4,
             ],
-            Self::CREATE => vec![OpcodeId::CREATE, OpcodeId::CREATE2],
+            Self::CREATE => vec![OpcodeId::CREATE],
             Self::CALL_OP => vec![
                 OpcodeId::CALL,
                 OpcodeId::CALLCODE,
@@ -308,6 +307,7 @@ impl ExecutionState {
                 OpcodeId::STATICCALL,
             ],
             Self::RETURN_REVERT => vec![OpcodeId::RETURN, OpcodeId::REVERT],
+            Self::CREATE2 => vec![OpcodeId::CREATE2],
             Self::SELFDESTRUCT => vec![OpcodeId::SELFDESTRUCT],
             _ => vec![],
         }
@@ -422,16 +422,10 @@ pub(crate) struct StepState<F> {
     /// The unique identifier of call in the whole proof, using the
     /// `rw_counter` at the call step.
     pub(crate) call_id: Cell<F>,
-    /// The transaction id of this transaction within the block.
-    pub(crate) tx_id: Cell<F>,
     /// Whether the call is root call
     pub(crate) is_root: Cell<F>,
     /// Whether the call is a create call
     pub(crate) is_create: Cell<F>,
-    /// The block number the state currently is in. This is particularly
-    /// important as multiple blocks can be assigned and proven in a single
-    /// circuit instance.
-    pub(crate) block_number: Cell<F>,
     /// Denotes the hash of the bytecode for the current call.
     /// In the case of a contract creation root call, this denotes the hash of
     /// the tx calldata.
@@ -480,10 +474,8 @@ impl<F: FieldExt> Step<F> {
                 ),
                 rw_counter: cell_manager.query_cell(CellType::Storage),
                 call_id: cell_manager.query_cell(CellType::Storage),
-                tx_id: cell_manager.query_cell(CellType::Storage),
                 is_root: cell_manager.query_cell(CellType::Storage),
                 is_create: cell_manager.query_cell(CellType::Storage),
-                block_number: cell_manager.query_cell(CellType::Storage),
                 code_hash: cell_manager.query_cell(CellType::Storage),
                 program_counter: cell_manager.query_cell(CellType::Storage),
                 stack_pointer: cell_manager.query_cell(CellType::Storage),
@@ -513,7 +505,6 @@ impl<F: FieldExt> Step<F> {
         region: &mut CachedRegion<'_, '_, F>,
         offset: usize,
         block: &Block<F>,
-        tx: &Transaction,
         call: &Call,
         step: &ExecStep,
     ) -> Result<(), Error> {
@@ -529,9 +520,6 @@ impl<F: FieldExt> Step<F> {
             .call_id
             .assign(region, offset, Value::known(F::from(call.id as u64)))?;
         self.state
-            .tx_id
-            .assign(region, offset, Value::known(F::from(tx.id as u64)))?;
-        self.state
             .is_root
             .assign(region, offset, Value::known(F::from(call.is_root as u64)))?;
         self.state.is_create.assign(
@@ -539,9 +527,6 @@ impl<F: FieldExt> Step<F> {
             offset,
             Value::known(F::from(call.is_create as u64)),
         )?;
-        self.state
-            .block_number
-            .assign(region, offset, Value::known(F::from(step.block_num)))?;
         self.state.code_hash.assign(
             region,
             offset,
