@@ -220,11 +220,7 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
         // for call, `current_callee_address` work as child caller, for callcode
         // `callee_address` equal to child caller address
         cb.account_read(
-            select::expr(
-                is_call.expr(),
-                current_callee_address.expr(),
-                callee_address.expr(),
-            ),
+            caller_address.expr(),
             AccountFieldTag::Balance,
             caller_balance_word.expr(),
         );
