@@ -428,12 +428,12 @@ pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Er
     ) {
         // 1. Creation transaction.
         (true, _, _) => {
-            state.account_write(
+            state.account_read(
                 &mut exec_step,
                 call.address,
                 AccountField::CodeHash,
-                call.code_hash.to_word(),
-                call.code_hash.to_word(),
+                Word::zero(),
+                Word::zero(),
             )?;
             for (field, value) in [
                 (CallContextField::Depth, call.depth.into()),
@@ -472,7 +472,7 @@ pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Er
             Ok(exec_step)
         }
         (_, _, is_empty_code_hash) => {
-            state.account_write(
+            state.account_read(
                 &mut exec_step,
                 call.address,
                 AccountField::CodeHash,
