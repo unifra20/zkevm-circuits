@@ -37,6 +37,14 @@ mod tests {
         let txs = vec![mock::CORRECT_MOCK_TXS[0].clone().into()];
         let circuit = TxCircuit::<Fr>::new(MAX_TXS, MAX_CALLDATA, chain_id, txs);
 
+        let prover = match halo2_proofs::dev::MockProver::run(DEGREE as u32, &circuit, vec![vec![]])
+        {
+            Ok(prover) => prover,
+            Err(e) => panic!("{:#?}", e),
+        };
+        let res = prover.verify_par();
+        println!("tx verify res {:?}", res);
+
         // Bench setup generation
         let setup_message = format!("Setup generation with degree = {}", DEGREE);
         let start1 = start_timer!(|| setup_message);
