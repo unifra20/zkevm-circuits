@@ -54,7 +54,7 @@ impl<F: Field> ExecutionGadget<F> for BalanceGadget<F> {
         cb.account_read(address.expr(), AccountFieldTag::CodeHash, code_hash.expr());
         let not_exists = IsZeroGadget::construct(cb, code_hash.expr());
         let exists = not::expr(not_exists.expr());
-        let balance = cb.query_cell();
+        let balance = cb.query_cell_phase2();
         cb.condition(exists.expr(), |cb| {
             cb.account_read(address.expr(), AccountFieldTag::Balance, balance.expr());
         });

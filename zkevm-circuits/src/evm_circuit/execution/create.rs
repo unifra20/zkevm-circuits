@@ -280,7 +280,7 @@ impl<F: Field> ExecutionGadget<F> for CreateGadget<F> {
             })
         });
 
-        let keccak_input = cb.query_cell();
+        let keccak_input = cb.query_cell_phase2();
         let keccak_input_length = cb.query_cell();
         /*
         cb.condition(is_create2.expr(), |cb| {
@@ -396,8 +396,8 @@ impl<F: Field> ExecutionGadget<F> for CreateGadget<F> {
             .collect();
         let mut code_hash = keccak256(&values);
         code_hash.reverse();
-        let code_has_rlc = region.word_rlc(U256::from_little_endian(&code_hash));
-        self.code_hash.assign(region, offset, code_has_rlc)?;
+        let code_hash_rlc = region.word_rlc(U256::from_little_endian(&code_hash));
+        self.code_hash.assign(region, offset, code_hash_rlc)?;
 
         for (word, assignment) in [(&self.value, value), (&self.salt, salt)] {
             word.assign(region, offset, Some(assignment.to_le_bytes()))?;

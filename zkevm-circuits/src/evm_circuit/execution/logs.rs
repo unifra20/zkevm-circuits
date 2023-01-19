@@ -45,7 +45,7 @@ impl<F: Field> ExecutionGadget<F> for LogGadget<F> {
     const EXECUTION_STATE: ExecutionState = ExecutionState::LOG;
 
     fn configure(cb: &mut ConstraintBuilder<F>) -> Self {
-        let mstart = cb.query_cell();
+        let mstart = cb.query_cell_phase2();
         let msize = cb.query_word_rlc();
 
         // Pop mstart_address, msize from stack
