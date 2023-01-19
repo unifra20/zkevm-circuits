@@ -69,7 +69,7 @@ impl<F: Field> ExecutionGadget<F> for ExtcodecopyGadget<F> {
             Some(&mut reversion_info),
         );
 
-        let code_hash = cb.query_cell();
+        let code_hash = cb.query_cell_phase2();
         cb.account_read(
             from_bytes::expr(&external_address.cells),
             AccountFieldTag::CodeHash,

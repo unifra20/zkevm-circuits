@@ -114,7 +114,7 @@ impl<F: Field> ExecutionGadget<F> for CreateGadget<F> {
         let callee_is_success = cb.query_bool();
         cb.stack_push(callee_is_success.expr() * new_address_rlc);
 
-        let code_hash = cb.query_cell();
+        let code_hash = cb.query_cell_phase2();
         cb.condition(initialization_code.has_length(), |cb| {
             cb.copy_table_lookup(
                 cb.curr.state.call_id.expr(),

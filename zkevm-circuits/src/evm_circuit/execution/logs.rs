@@ -10,7 +10,7 @@ use crate::{
                 Transition::{Delta, To},
             },
             memory_gadget::{MemoryAddressGadget, MemoryExpansionGadget},
-            not, sum, CachedRegion, Cell, CellType,
+            not, sum, CachedRegion, Cell,
         },
         witness::{Block, Call, ExecStep, Transaction},
     },
@@ -74,7 +74,7 @@ impl<F: Field> ExecutionGadget<F> for LogGadget<F> {
         });
 
         // constrain topics in logs
-        let phase2_topics = array_init(|_| cb.query_cell_with_type(CellType::StoragePhase2));
+        let phase2_topics = array_init(|_| cb.query_cell_phase2());
         let topic_selectors: [Cell<F>; 4] = array_init(|_| cb.query_cell());
         for (idx, topic) in phase2_topics.iter().enumerate() {
             cb.condition(topic_selectors[idx].expr(), |cb| {

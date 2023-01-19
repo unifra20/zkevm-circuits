@@ -99,7 +99,7 @@ impl<F: Field> ExecutionGadget<F> for ReturnRevertGadget<F> {
             cb.condition(is_contract_deployment.clone(), |cb| {
                 // We don't need to place any additional constraints on code_hash because the
                 // copy circuit enforces that it is the hash of the bytes in the copy lookup.
-                let code_hash = cb.query_cell();
+                let code_hash = cb.query_cell_phase2();
                 cb.copy_table_lookup(
                     cb.curr.state.call_id.expr(),
                     CopyDataType::Memory.expr(),
