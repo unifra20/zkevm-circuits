@@ -438,6 +438,7 @@ impl<
 
         self.state_circuit
             .synthesize_sub(&config.state_circuit, &challenges, &mut layouter)?;
+        let _state_root_exports = self.state_circuit.exports.borrow().clone().expect("should be assigned");
         self.copy_circuit
             .synthesize_sub(&config.copy_circuit, &challenges, &mut layouter)?;
         self.exp_circuit

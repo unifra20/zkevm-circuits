@@ -1004,6 +1004,7 @@ fn prover(rows: Vec<Rw>, overrides: HashMap<(AdviceColumn, isize), Fr>) -> MockP
         updates,
         overrides,
         n_rows: N_ROWS,
+        exports: Default::default(),
         _marker: std::marker::PhantomData::default(),
     };
     let instance = circuit.instance();
