@@ -88,6 +88,12 @@ pub trait ToLittleEndian {
     fn to_le_bytes(&self) -> [u8; 32];
 }
 
+/// Trait used to convert a scalar value to low and high 128-bit values
+pub trait ToLoHi {
+    /// Convert the value to low and high 128-bit values
+    fn to_lo_hi(&self) -> [u128; 2];
+}
+
 // We use our own declaration of another U256 in order to implement a custom
 // deserializer that can parse U256 when returned by structLogs fields in geth
 // debug_trace* methods, which don't contain the `0x` prefix.
@@ -165,6 +171,15 @@ impl<F: Field> ToScalar<F> for U256 {
 impl ToAddress for U256 {
     fn to_address(&self) -> Address {
         Address::from_slice(&self.to_be_bytes()[12..])
+    }
+}
+
+impl ToLoHi for U256 {
+    fn to_lo_hi(&self) -> [u128; 2] {
+        let u64s = &self.0;
+        let lo = u64s[0] as u128 + ((u64s[1] as u128) << 64);
+        let hi = u64s[1] as u128 + ((u64s[2] as u128) << 64);
+        [lo, hi]
     }
 }
 

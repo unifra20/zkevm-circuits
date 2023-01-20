@@ -2,7 +2,7 @@ use crate::{
     evm_circuit::{
         param::{
             LOOKUP_CONFIG, N_BYTES_MEMORY_ADDRESS, N_COPY_COLUMNS, N_PHASE2_COLUMNS,
-            N_PHASE3_COLUMNS,
+            N_PHASE3_COLUMNS
         },
         table::Table,
     },
@@ -583,13 +583,13 @@ impl<F: FieldExt, const N: usize> Expr<F> for U16Repr<F, N> {
     }
 }
 
-pub(crate) trait EvmWord<F> {
-    /// Returns the EVM word expressions in high 128-bit and low 128-bit format.
-    pub(crate) fn to_hi_lo(&self) -> [Expression<F>; 2];
+pub(crate) trait EvmWord<F: FieldExt> {
+    /// Returns the EVM word expressions in low 128-bit and high 128-bit format.
+    fn to_lo_hi(&self) -> [Expression<F>; 2];
 
-    pub(crate) fn to_u64s(&self) -> [Expression<F>; 4];
+    //fn to_u64s(&self) -> [Expression<F>; 4];
 
-    pub(crate) fn assign(
+    fn assign(
         &self,
         region: &mut CachedRegion<'_, '_, F>,
         offset: usize,
@@ -613,8 +613,8 @@ impl<F: FieldExt> EvmWordU8<F> {
 }
 
 impl<F: FieldExt> EvmWord<F> for EvmWordU8<F> {
-    fn to_hi_lo(&self) -> [Expression<F>; 2] {
-        [self.hi.expr(), self.lo.expr()]
+    fn to_lo_hi(&self) -> [Expression<F>; 2] {
+        [self.lo.expr(), self.hi.expr()]
     }
 
     fn assign(
@@ -633,15 +633,15 @@ impl<F: FieldExt> EvmWord<F> for EvmWordU8<F> {
 
 #[derive(Clone, Debug)]
 pub(crate) struct EvmWordU16<F> {
-    pub(crate) lo: U8Repr<F, 8>,
-    pub(crate) hi: U8Repr<F, 8>,
+    pub(crate) lo: U16Repr<F, 8>,
+    pub(crate) hi: U16Repr<F, 8>,
 }
 
 impl<F: FieldExt> EvmWordU16<F> {
     pub(crate) fn new(&self, cells: [Cell<F>; 16]) -> Self {
         Self {
-            lo: U8Repr::new(cells[0..8].clone()),
-            hi: U8Repr::new(cells[8..]),
+            lo: U16Repr::new(cells[0..8].clone()),
+            hi: U16Repr::new(cells[8..]),
         }
     }
 
@@ -660,15 +660,29 @@ impl<F: FieldExt> EvmWordU16<F> {
             }
 
             let mut ret = self.lo.assign(region, offset, Some(lo_u16s))?;
-            ret.append(self.hi.assign(region, offset, Some(hi_u16s))?;
+            let mut assign_hi = self.hi.assign(region, offset, Some(hi_u16s))?;
+            ret.append(&mut assign_hi);
             Ok(ret)
         })
     }
 }
 
 impl<F: FieldExt> EvmWord<F> for EvmWordU16<F> {
-    fn to_hi_lo(&self) -> [Expression<F>; 2] {
-        [self.hi.expr(), self.lo.expr()]
+    fn to_lo_hi(&self) -> [Expression<F>; 2] {
+        [self.lo.expr(), self.hi.expr()]
+    }
+
+    fn assign(
+        &self,
+        region: &mut CachedRegion<'_, '_, F>,
+        offset: usize,
+        bytes: Option<[u8; 32]>,
+    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+        bytes.map_or(Err(Error::Synthesis), |bytes| {
+            let mut ret = self.lo.assign(region, offset, Some(bytes[..16]))?;
+            ret.append(self.hi.assign(region, offset, Some(bytes[16..])))?;
+            Ok(ret)
+        })
     }
 }
 
@@ -712,7 +726,7 @@ pub(crate) mod from_bytes {
 
 /// Decodes a field element from its byte representation
 pub(crate) mod from_u16 {
-    use crate::{evm_circuit::param::MAX_N_BYTES_INTEGER, util::Expr};
+    use crate::{evm_circuit::param::MAX_N_U16_INTEGER, util::Expr};
     use halo2_proofs::{arithmetic::FieldExt, plonk::Expression};
 
     pub(crate) fn expr<F: FieldExt, E: Expr<F>>(u16s: &[E]) -> Expression<F> {
@@ -722,8 +736,8 @@ pub(crate) mod from_u16 {
         );
         let mut value = 0.expr();
         let mut multiplier = F::one();
-        for byte in bytes.iter() {
-            value = value + byte.expr() * multiplier;
+        for limb in u16s.iter() {
+            value = value + limb.expr() * multiplier;
             multiplier *= F::from(65536);
         }
         value
@@ -731,13 +745,13 @@ pub(crate) mod from_u16 {
 
     pub(crate) fn value<F: FieldExt>(u16s: &[u16]) -> F {
         debug_assert!(
-            bytes.len() <= MAX_N_U16_INTEGER,
+            u16s.len() <= MAX_N_U16_INTEGER,
             "Too many u16s to compose an integer in field"
         );
         let mut value = F::zero();
         let mut multiplier = F::one();
-        for byte in bytes.iter() {
-            value += F::from(*byte as u64) * multiplier;
+        for limb in u16s.iter() {
+            value += F::from(*limb as u64) * multiplier;
             multiplier *= F::from(65536);
         }
         value

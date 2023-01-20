@@ -2,7 +2,7 @@
 use std::collections::HashMap;
 
 use bus_mapping::operation::{self, AccountField, CallContextField, TxLogField, TxReceiptField};
-use eth_types::{Address, Field, ToAddress, ToLittleEndian, ToScalar, Word, U256};
+use eth_types::{Address, Field, ToAddress, ToLittleEndian, ToScalar, Word, U256, ToLoHi};
 use halo2_proofs::circuit::Value;
 use itertools::Itertools;
 
@@ -204,14 +204,17 @@ pub struct RwRow<F> {
     pub(crate) address: F,
     pub(crate) field_tag: F,
     pub(crate) storage_key: F,
-    pub(crate) value: F,
-    pub(crate) value_prev: F,
-    pub(crate) aux1: F,
-    pub(crate) aux2: F,
+    pub(crate) value_hi: F,
+    pub(crate) value_lo: F,
+    pub(crate) prev_value_hi: F,
+    pub(crate) prev_value_lo: F,
+    pub(crate) committed_value_hi: F,
+    pub(crate) committed_value_lo: F,
+    pub(crate) aux: F,
 }
 
 impl<F: Field> RwRow<F> {
-    pub(crate) fn values(&self) -> [F; 11] {
+    pub(crate) fn values(&self) -> [F; 14] {
         [
             self.rw_counter,
             self.is_write,
@@ -220,10 +223,13 @@ impl<F: Field> RwRow<F> {
             self.address,
             self.field_tag,
             self.storage_key,
-            self.value,
-            self.value_prev,
-            self.aux1,
-            self.aux2,
+            self.value_hi,
+            self.value_lo,
+            self.prev_value_hi,
+            self.prev_value_lo,
+            self.committed_value_hi,
+            self.committed_value_lo,
+            self.aux,
         ]
     }
     pub(crate) fn rlc(&self, randomness: F) -> F {
@@ -336,6 +342,9 @@ impl Rw {
     // At this moment is a helper for the EVM circuit until EVM challange API is
     // applied
     pub(crate) fn table_assignment_aux<F: Field>(&self, randomness: F) -> RwRow<F> {
+        let value = self.value_assignment();
+        let prev_value = self.prev_value_assignment();
+        let committed_value = self.committed_value_assignment();
         RwRow {
             rw_counter: F::from(self.rw_counter() as u64),
             is_write: F::from(self.is_write() as u64),
@@ -347,16 +356,20 @@ impl Rw {
                 self.storage_key().unwrap_or_default().to_le_bytes(),
                 randomness,
             ),
-            value: self.value_assignment(randomness),
-            value_prev: self.value_prev_assignment(randomness).unwrap_or_default(),
-            aux1: F::zero(), // only used for AccountStorage::tx_id, which moved to key1.
-            aux2: self
-                .committed_value_assignment(randomness)
-                .unwrap_or_default(),
+            value_lo: value[0],
+            value_hi: value[1],
+            prev_value_lo: prev_value.unwrap_or_default()[0],
+            prev_value_hi: prev_value.unwrap_or_default()[1],
+            committed_value_lo: committed_value.unwrap_or_default()[0],
+            committed_value_hi: committed_value.unwrap_or_default()[1],
+            aux: F::zero(), // only used for AccountStorage::tx_id, which moved to key1.
         }
     }
 
     pub(crate) fn table_assignment<F: Field>(&self, randomness: Value<F>) -> RwRow<Value<F>> {
+        let value = self.value_assignment();
+        let prev_value = self.prev_value_assignment();
+        let committed_value = self.committed_value_assignment();
         RwRow {
             rw_counter: Value::known(F::from(self.rw_counter() as u64)),
             is_write: Value::known(F::from(self.is_write() as u64)),
@@ -370,15 +383,14 @@ impl Rw {
                     randomness,
                 )
             }),
-            value: randomness.map(|randomness| self.value_assignment(randomness)),
-            value_prev: randomness
-                .map(|randomness| self.value_prev_assignment(randomness).unwrap_or_default()),
-            aux1: Value::known(F::zero()), /* only used for AccountStorage::tx_id, which moved to
+            value_lo: Value::known(value[0]),
+            value_hi: Value::known(value[1]),
+            prev_value_lo: Value::known(prev_value.unwrap_or_default()[0]),
+            prev_value_hi: Value::known(prev_value.unwrap_or_default()[1]),
+            committed_value_lo: Value::known(committed_value.unwrap_or_default()[0]),
+            committed_value_hi: Value::known(committed_value.unwrap_or_default()[1]),
+            aux: Value::known(F::zero()), /* only used for AccountStorage::tx_id, which moved to
                                             * key1. */
-            aux2: randomness.map(|randomness| {
-                self.committed_value_assignment(randomness)
-                    .unwrap_or_default()
-            }),
         }
     }
 
@@ -519,9 +531,9 @@ impl Rw {
         }
     }
 
-    pub(crate) fn value_assignment<F: Field>(&self, randomness: F) -> F {
+    pub(crate) fn value_assignment<F: Field>(&self) -> [F; 2] {
         match self {
-            Self::Start { .. } => F::zero(),
+            Self::Start { .. } => [F::zero(), F::zero()],
             Self::CallContext {
                 field_tag, value, ..
             } => {
@@ -529,44 +541,49 @@ impl Rw {
                     // Only these two tags have values that may not fit into a scalar, so we need to
                     // RLC.
                     CallContextFieldTag::CodeHash | CallContextFieldTag::Value => {
-                        RandomLinearCombination::random_linear_combine(
-                            value.to_le_bytes(),
-                            randomness,
-                        )
+                        let (lo, hi) = value.to_lo_hi();
+                        [F::from_u128(lo), F::from_u128(hi)]
                     }
-                    _ => value.to_scalar().unwrap(),
+                    _ => [value.to_scalar().unwrap(), F::zero()],
                 }
             }
             Self::Account {
                 value, field_tag, ..
             } => match field_tag {
                 AccountFieldTag::CodeHash | AccountFieldTag::Balance => {
-                    RandomLinearCombination::random_linear_combine(value.to_le_bytes(), randomness)
+                    let (lo, hi) = value.to_lo_hi();
+                    [F::from_u128(lo), F::from_u128(hi)]
                 }
-                AccountFieldTag::Nonce | AccountFieldTag::NonExisting => value.to_scalar().unwrap(),
+                AccountFieldTag::Nonce | AccountFieldTag::NonExisting =>
+                    [value.to_scalar().unwrap(), F::zero]
             },
             Self::AccountStorage { value, .. } | Self::Stack { value, .. } => {
-                RandomLinearCombination::random_linear_combine(value.to_le_bytes(), randomness)
+                let (lo, hi) = value.to_lo_hi();
+                [F::from_u128(lo), F::from_u128(hi)]
             }
 
             Self::TxLog {
                 field_tag, value, ..
             } => match field_tag {
                 TxLogFieldTag::Topic => {
-                    RandomLinearCombination::random_linear_combine(value.to_le_bytes(), randomness)
+                    let (lo, hi) = value.to_lo_hi();
+                    [F::from_u128(lo), F::from_u128(hi)]
                 }
-                _ => value.to_scalar().unwrap(),
+                _ => [value.to_scalar().unwrap(), F::zero()],
             },
 
             Self::TxAccessListAccount { is_warm, .. }
-            | Self::TxAccessListAccountStorage { is_warm, .. } => F::from(*is_warm as u64),
-            Self::AccountDestructed { is_destructed, .. } => F::from(*is_destructed as u64),
-            Self::Memory { byte, .. } => F::from(u64::from(*byte)),
-            Self::TxRefund { value, .. } | Self::TxReceipt { value, .. } => F::from(*value),
+            | Self::TxAccessListAccountStorage { is_warm, .. } =>
+                [F::from(*is_warm as u64), F::zero()],
+            Self::AccountDestructed { is_destructed, .. } =>
+                [F::from(*is_destructed as u64), F::zero()],
+            Self::Memory { byte, .. } => [F::from(u64::from(*byte)), F::zero()],
+            Self::TxRefund { value, .. } | Self::TxReceipt { value, .. } =>
+                [F::from(*value), F::zero()],
         }
     }
 
-    pub(crate) fn value_prev_assignment<F: Field>(&self, randomness: F) -> Option<F> {
+    pub(crate) fn prev_value_assignment<F: Field>(&self) -> Option<[F; 2]> {
         match self {
             Self::Account {
                 value_prev,
@@ -574,28 +591,24 @@ impl Rw {
                 ..
             } => Some(match field_tag {
                 AccountFieldTag::CodeHash | AccountFieldTag::Balance => {
-                    RandomLinearCombination::random_linear_combine(
-                        value_prev.to_le_bytes(),
-                        randomness,
-                    )
+                    let (lo, hi) = value_prev.to_lo_hi();
+                    Some([F::from_u128(lo), F::from_u128(hi)])
                 }
                 AccountFieldTag::Nonce | AccountFieldTag::NonExisting => {
-                    value_prev.to_scalar().unwrap()
+                    Some([value_prev.to_scalar().unwrap(), F::zero()])
                 }
             }),
             Self::AccountStorage { value_prev, .. } => {
-                Some(RandomLinearCombination::random_linear_combine(
-                    value_prev.to_le_bytes(),
-                    randomness,
-                ))
+                let (lo, hi) = value_prev.to_lo_hi();
+                Some([F::from_u128(lo), F::from_u128(hi)])
             }
             Self::TxAccessListAccount { is_warm_prev, .. }
             | Self::TxAccessListAccountStorage { is_warm_prev, .. } => {
-                Some(F::from(*is_warm_prev as u64))
+                Some([F::from(*is_warm_prev as u64), F::zero()])
             }
             Self::AccountDestructed {
                 is_destructed_prev, ..
-            } => Some(F::from(*is_destructed_prev as u64)),
+            } => Some([F::from(*is_destructed_prev as u64), F::zero()]),
             Self::TxRefund { value_prev, .. } => Some(F::from(*value_prev)),
             Self::Start { .. }
             | Self::Stack { .. }
@@ -606,14 +619,14 @@ impl Rw {
         }
     }
 
-    fn committed_value_assignment<F: Field>(&self, randomness: F) -> Option<F> {
+    fn committed_value_assignment<F: Field>(&self) -> Option<[F; 2]> {
         match self {
             Self::AccountStorage {
                 committed_value, ..
-            } => Some(RandomLinearCombination::random_linear_combine(
-                committed_value.to_le_bytes(),
-                randomness,
-            )),
+            } => {
+                let (lo, hi) = committed_value.to_lo_hi();
+                Some([F::from_u128(lo), F::from_u128(hi)])
+            },
             _ => None,
         }
     }

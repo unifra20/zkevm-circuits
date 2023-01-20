@@ -360,16 +360,18 @@ pub struct RwTable {
     pub storage_key: Column<Advice>,
     /// Value high-128 bits
     pub value_hi: Column<Advice>,
-    /// Value low-128 bits
+    /// Value (low-128 bits)
     pub value_lo: Column<Advice>,
-    /// Value Previous high-128 bits
-    pub value_prev_hi: Column<Advice>,
-    /// Value Previous low-128 bits
-    pub value_prev_lo: Column<Advice>,
-    /// Aux1
-    pub aux1: Column<Advice>,
-    /// Aux2 (Committed Value)
-    pub aux2: Column<Advice>,
+    /// Previous value high-128 bits
+    pub prev_value_hi: Column<Advice>,
+    /// Previous value (low-128 bits)
+    pub prev_value_lo: Column<Advice>,
+    /// Committed value high-128 bits
+    pub committed_value_hi: Column<Advice>,
+    /// Committed value (low-128 bits)
+    pub committed_value_lo: Column<Advice>,
+    /// Aux
+    pub aux: Column<Advice>,
 }
 
 impl DynamicTableColumns for RwTable {
@@ -382,10 +384,13 @@ impl DynamicTableColumns for RwTable {
             self.address,
             self.field_tag,
             self.storage_key,
-            self.value,
-            self.value_prev,
-            self.aux1,
-            self.aux2,
+            self.value_hi,
+            self.value_lo,
+            self.prev_value_hi,
+            self.prev_value_lo,
+            self.commited_value_hi,
+            self.commited_value_lo,
+            self.aux,
         ]
     }
 }
@@ -402,14 +407,16 @@ impl RwTable {
             storage_key: meta.advice_column_in(SecondPhase),
             value_hi: meta.advice_column(),
             value_lo: meta.advice_column(),
-            value_prev_hi: meta.advice_column(),
-            value_prev_lo: meta.advice_column(),
-            // It seems that aux1 for the moment is not using randomness
+            prev_value_hi: meta.advice_column(),
+            prev_value_lo: meta.advice_column(),
+            committed_value_hi: meta.advice_column(),
+            committed_value_lo: meta.advice_column(),
+            // It seems that aux for the moment is not using randomness
             // TODO check in a future review
-            aux1: meta.advice_column_in(SecondPhase),
-            aux2: meta.advice_column_in(SecondPhase),
+            aux: meta.advice_column_in(SecondPhase),
         }
     }
+
     fn assign<F: Field>(
         &self,
         region: &mut Region<'_, F>,
@@ -424,10 +431,13 @@ impl RwTable {
             (self.address, row.address),
             (self.field_tag, row.field_tag),
             (self.storage_key, row.storage_key),
-            (self.value, row.value),
-            (self.value_prev, row.value_prev),
-            (self.aux1, row.aux1),
-            (self.aux2, row.aux2),
+            (self.value_hi, row.value_hi),
+            (self.value_lo, row.value_lo),
+            (self.prev_value_hi, row.prev_value_hi),
+            (self.prev_value_lo, row.prev_value_lo),
+            (self.committed_value_hi, row.committed_value_hi),
+            (self.committed_value_lo, row.committed_value_lo),
+            (self.aux, row.aux),
         ] {
             region.assign_advice(|| "assign rw row on rw table", column, offset, || value)?;
         }

@@ -3,7 +3,7 @@ use crate::{
         param::STACK_CAPACITY,
         step::{ExecutionState, Step},
         table::{FixedTableTag, Lookup, RwValues, Table},
-        util::{Cell, RandomLinearCombination, Word, EvmWord, EvmHalfWordU8, EvmHalfWordU16},
+        util::{Cell, RandomLinearCombination, Word, EvmWord, EvmWordU8, EvmWordU16},
     },
     table::{
         AccountFieldTag, BytecodeFieldTag, CallContextFieldTag, RwTableTag, TxContextFieldTag,
@@ -983,9 +983,9 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
         &mut self,
         account_address: Expression<F>,
         key: Expression<F>,
-        value: EvmWord<F>,
+        value: dyn EvmWord<F>,
         tx_id: Expression<F>,
-        committed_value: EvmWord<F>,
+        committed_value: dyn EvmWord<F>,
     ) {
         self.rw_lookup(
             "account_storage_read",
@@ -1012,8 +1012,8 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
         &mut self,
         account_address: Expression<F>,
         key: Expression<F>,
-        value: EvmWord<F>,
-        prev_value: EvmWord<F>,
+        value: dyn EvmWord<F>,
+        prev_value: dyn EvmWord<F>,
         tx_id: Expression<F>,
         committed_value: Expression<F>,
         reversion_info: Option<&mut ReversionInfo<F>>,
@@ -1133,13 +1133,13 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
 
     // Stack
 
-    pub(crate) fn stack_pop(&mut self, word: EvmWord<F>) {
-        self.stack_lookup(false.expr(), self.stack_pointer_offset.clone(), word);
+    pub(crate) fn stack_pop(&mut self, word_hi: Expression<F>, word_lo: Expression<F>) {
+        self.stack_lookup(false.expr(), self.stack_pointer_offset.clone(), word_hi, word_lo);
         self.stack_pointer_offset = self.stack_pointer_offset.clone() + self.condition_expr();
     }
 
-    pub(crate) fn stack_push(&mut self, word: EvmWord<F>) {
-        self.stack_lookup(true.expr(), self.stack_pointer_offset.expr(), word);
+    pub(crate) fn stack_push(&mut self, word_hi: Expression<F>, word_lo: Expression<F>) {
+        self.stack_lookup(true.expr(), self.stack_pointer_offset.expr(), word_hi, word_lo);
         self.stack_pointer_offset = self.stack_pointer_offset.clone() - self.condition_expr();
     }
 
@@ -1147,7 +1147,8 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
         &mut self,
         is_write: Expression<F>,
         stack_pointer_offset: Expression<F>,
-        word: EvmWord<F>,
+        word_hi: Expression<F>,
+        word_lo: Expression<F>,
     ) {
         self.rw_lookup(
             "Stack lookup",
@@ -1158,8 +1159,8 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
                 self.curr.state.stack_pointer.expr() + stack_pointer_offset,
                 0.expr(),
                 0.expr(),
-                word.hi.expr(),
-                word.lo.expr(),
+                word_hi,
+                word_lo,
                 0.expr(),
                 0.expr(),
                 0.expr(),
