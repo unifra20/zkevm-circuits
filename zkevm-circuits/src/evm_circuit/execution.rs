@@ -608,6 +608,8 @@ impl<F: Field> ExecutionConfig<F> {
         height_map: &mut HashMap<ExecutionState, usize>,
         stored_expressions_map: &mut HashMap<ExecutionState, Vec<StoredExpression<F>>>,
     ) -> G {
+        println!("configure_gadget_{}", G::EXECUTION_STATE);
+
         // Configure the gadget with the max height first so we can find out the actual
         // height
         let height = {
@@ -624,6 +626,10 @@ impl<F: Field> ExecutionConfig<F> {
             height
         };
 
+        println!("    {}", height);
+
+        println!("configure_gadget_{}", G::EXECUTION_STATE);
+
         // Now actually configure the gadget with the correct minimal height
         let step_next = &Step::new(meta, advices, height, true);
         let mut cb = ConstraintBuilder::new(
@@ -636,6 +642,8 @@ impl<F: Field> ExecutionConfig<F> {
         );
 
         let gadget = G::configure(&mut cb);
+
+        println!("    {}", height);
 
         // Enforce the step height for this opcode
         let num_rows_until_next_step_next = query_expression(meta, |meta| {

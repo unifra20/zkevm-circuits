@@ -590,4 +590,27 @@ mod evm_circuit_stats {
             );
         }
     }
+
+   /// This function prints to stdout a table with all the implemented states
+    /// and their responsible opcodes with the following stats:
+    /// - height: number of rows in the EVM circuit used by the execution state
+    /// - gas: gas value used for the opcode execution
+    /// - height/gas: ratio between circuit cost and gas cost
+    ///
+    /// Run with:
+    /// `cargo test -p zkevm-circuits --release dummy_circuit -- --nocapture --ignored`
+    #[ignore]
+    #[test]
+    pub fn dummy_circuit() {
+        let mut meta = ConstraintSystem::<Fr>::default();
+        let circuit = EvmCircuit::configure(&mut meta);
+
+        let mut implemented_states = Vec::new();
+        for state in ExecutionState::iter() {
+            let height = circuit.0.execution.get_step_height_option(state);
+            if let Some(h) = height {
+                implemented_states.push((state, h));
+            }
+        }
+    }
 }

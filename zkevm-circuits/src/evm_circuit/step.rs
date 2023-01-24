@@ -15,11 +15,11 @@ use halo2_proofs::{
     plonk::{Advice, Column, ConstraintSystem, Error, Expression},
 };
 use std::iter;
-use strum::IntoEnumIterator;
+use strum::{IntoEnumIterator, Display};
 use strum_macros::EnumIter;
 
 #[allow(non_camel_case_types)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, EnumIter)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, EnumIter, Display)]
 pub enum ExecutionState {
     // Internal state
     BeginTx,

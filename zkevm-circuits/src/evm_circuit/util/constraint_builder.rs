@@ -1465,6 +1465,8 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
             MAX_DEGREE - IMPLICIT_DEGREE,
         );
         self.store_expression(name, compressed_expr, CellType::Lookup(lookup.table()));
+
+        println!("    {}|{}", &lookup.table().to_string(), name);
     }
 
     pub(crate) fn store_expression(

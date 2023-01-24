@@ -5,7 +5,7 @@ use bus_mapping::evm::OpcodeId;
 use eth_types::Field;
 use gadgets::util::Expr;
 use halo2_proofs::plonk::Expression;
-use strum::IntoEnumIterator;
+use strum::{IntoEnumIterator, Display};
 use strum_macros::EnumIter;
 
 #[derive(Clone, Copy, Debug, EnumIter)]
@@ -127,7 +127,7 @@ impl FixedTableTag {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, EnumIter)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, EnumIter, Display)]
 pub(crate) enum Table {
     Fixed,
     Tx,
