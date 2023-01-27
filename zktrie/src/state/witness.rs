@@ -110,7 +110,7 @@ impl WitnessGenerator {
                 value: HexBytes(word_buf),
             }
         };
-        let storage_before_proofs = trie.prove(key.as_ref());
+        let storage_before_proofs = trie.prove(key.as_ref()).expect(&format!("should has added storage key {:?}", key));
         let storage_before_path = decode_proof_for_mpt_path(storage_key, storage_before_proofs);
         if !new_value.is_zero() {
             trie.update_store(key.as_ref(), &store_after.value.0)
@@ -120,7 +120,7 @@ impl WitnessGenerator {
         } // notice if the value is both zero we never touch the trie layer
 
         let storage_root_after = H256(trie.root());
-        let storage_after_proofs = trie.prove(key.as_ref());
+        let storage_after_proofs = trie.prove(key.as_ref()).expect("should has added storage key");
         let storage_after_path = decode_proof_for_mpt_path(storage_key, storage_after_proofs);
 
         // sanity check
@@ -160,7 +160,7 @@ impl WitnessGenerator {
     {
         let account_data_before = self.accounts.get(&address).copied();
 
-        let proofs = self.trie.prove(address.as_bytes());
+        let proofs = self.trie.prove(address.as_bytes()).expect(&format!("should has added address key {:?}", address));
         let address_key = hash_zktrie_key(&extend_address_to_h256(&address));
 
         let account_path_before = decode_proof_for_mpt_path(address_key, proofs).unwrap();
@@ -187,7 +187,7 @@ impl WitnessGenerator {
             self.accounts.remove(&address);
         }
 
-        let proofs = self.trie.prove(address.as_bytes());
+        let proofs = self.trie.prove(address.as_bytes()).expect("should has added address key");
         let account_path_after = decode_proof_for_mpt_path(address_key, proofs).unwrap();
 
         SMTTrace {
