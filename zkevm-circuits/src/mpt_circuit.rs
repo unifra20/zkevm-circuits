@@ -65,9 +65,8 @@ impl<F: Field + Hashable> SubCircuit<F> for MptCircuit<F> {
                 .map(|tr| AccountOp::try_from(tr).unwrap()),
         );
         let (circuit, _) = eth_trie.to_circuits(
-            (block.circuits_params.max_rws / 3, None),
-            &block.mpt_updates.proof_types,
-        );
+            (block.circuits_params.max_rws, Some(block.circuits_params.max_rws)), 
+            &block.mpt_updates.proof_types);
         MptCircuit(circuit)
     }
 
