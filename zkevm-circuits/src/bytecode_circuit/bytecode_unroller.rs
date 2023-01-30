@@ -17,6 +17,9 @@ use halo2_proofs::{
 use keccak256::plain::Keccak;
 use std::vec;
 
+/// An extended circuit for binding with poseidon
+pub mod to_poseidon_hash;
+
 #[cfg(feature = "onephase")]
 use halo2_proofs::plonk::FirstPhase as SecondPhase;
 #[cfg(not(feature = "onephase"))]
@@ -414,164 +417,167 @@ impl<F: Field> BytecodeCircuitConfig<F> {
         witness: &[UnrolledBytecode<F>],
         challenges: &Challenges<Value<F>>,
     ) -> Result<(), Error> {
-        self.assign_internal(layouter, size, witness, challenges, true)
-    }
-
-    pub(crate) fn assign_internal(
-        &self,
-        layouter: &mut impl Layouter<F>,
-        size: usize,
-        witness: &[UnrolledBytecode<F>],
-        challenges: &Challenges<Value<F>>,
-        fail_fast: bool,
-    ) -> Result<(), Error> {
-        let push_rindex_is_zero_chip = IsZeroChip::construct(self.push_rindex_is_zero.clone());
-        let length_is_zero_chip = IsZeroChip::construct(self.length_is_zero.clone());
 
         // Subtract the unusable rows from the size
         assert!(size > self.minimum_rows);
-        let last_row_offset = size - self.minimum_rows + 1;
-
         let mut is_first_time = true;
 
         layouter.assign_region(
             || "assign bytecode",
             |mut region| {
-                if is_first_time {
-                    is_first_time = false;
+                is_first_time = false;
+                self.assign_internal(&mut region, size, witness, challenges, true, is_first_time)
+            }
+        )
+        
+    }
+
+    pub(crate) fn assign_internal(
+        &self,
+        region: &mut Region<'_, F>,
+        size: usize,
+        witness: &[UnrolledBytecode<F>],
+        challenges: &Challenges<Value<F>>,
+        fail_fast: bool,
+        is_first_time: bool,
+    ) -> Result<(), Error> {
+        let push_rindex_is_zero_chip = IsZeroChip::construct(self.push_rindex_is_zero.clone());
+        let length_is_zero_chip = IsZeroChip::construct(self.length_is_zero.clone());
+
+        let last_row_offset = size - self.minimum_rows + 1;
+
+        if is_first_time {
+            self.set_row(
+                region,
+                &push_rindex_is_zero_chip,
+                &length_is_zero_chip,
+                last_row_offset,
+                false,
+                true,
+                Value::known(F::zero()),
+                F::from(BytecodeFieldTag::Padding as u64),
+                F::zero(),
+                F::one(),
+                F::zero(),
+                0,
+                Value::known(F::zero()),
+                F::zero(),
+                F::zero(),
+                true,
+                true,
+                F::zero(),
+            )?;
+            return Ok(());
+        }
+
+        let mut offset = 0;
+        let mut push_rindex_prev = 0;
+        for bytecode in witness.iter() {
+            // Run over all the bytes
+            let mut push_rindex = 0;
+            let mut byte_push_size = 0;
+            let mut hash_input_rlc = challenges.keccak_input().map(|_| F::zero());
+            let code_length = F::from(bytecode.bytes.len() as u64);
+            for (idx, row) in bytecode.rows.iter().enumerate() {
+                if fail_fast && offset > last_row_offset {
+                    log::error!(
+                        "Bytecode Circuit: offset={} > last_row_offset={}",
+                        offset,
+                        last_row_offset
+                    );
+                    return Err(Error::Synthesis);
+                }
+
+                let code_hash = challenges.evm_word().map(|challenge| {
+                    RandomLinearCombination::<F, 32>::random_linear_combine(
+                        row.code_hash.to_le_bytes(),
+                        challenge,
+                    )
+                });
+                if idx == bytecode.rows.len() - 1 {
+                    log::trace!("bytecode len {}", bytecode.rows.len());
+                    log::trace!(
+                        "assign bytecode circuit at {}: codehash {:?}, rlc {:?}",
+                        offset,
+                        row.code_hash.to_le_bytes(),
+                        code_hash
+                    );
+                }
+
+                // Track which byte is an opcode and which is push
+                // data
+                let is_code = push_rindex == 0;
+                if idx > 0 {
+                    byte_push_size = get_push_size(row.value.get_lower_128() as u8);
+                    push_rindex = if is_code {
+                        byte_push_size
+                    } else {
+                        push_rindex - 1
+                    };
+                    hash_input_rlc.as_mut().zip(challenges.keccak_input()).map(
+                        |(hash_input_rlc, challenge)| {
+                            *hash_input_rlc = *hash_input_rlc * challenge + row.value
+                        },
+                    );
+                }
+
+                if idx == bytecode.rows.len() - 1 {
+                    log::trace!("assign bytecode circuit: input rlc {:?}", hash_input_rlc);
+                }
+
+                // Set the data for this row
+                if offset <= last_row_offset {
                     self.set_row(
-                        &mut region,
+                        region,
                         &push_rindex_is_zero_chip,
                         &length_is_zero_chip,
-                        last_row_offset,
+                        offset,
+                        true,
+                        offset == last_row_offset,
+                        code_hash,
+                        row.tag,
+                        row.index,
+                        row.is_code,
+                        row.value,
+                        push_rindex,
+                        hash_input_rlc,
+                        code_length,
+                        F::from(byte_push_size as u64),
+                        idx == bytecode.bytes.len(),
                         false,
-                        true,
-                        Value::known(F::zero()),
-                        F::from(BytecodeFieldTag::Padding as u64),
-                        F::zero(),
-                        F::one(),
-                        F::zero(),
-                        0,
-                        Value::known(F::zero()),
-                        F::zero(),
-                        F::zero(),
-                        true,
-                        true,
-                        F::zero(),
-                    )?;
-                    return Ok(());
-                }
-
-                let mut offset = 0;
-                let mut push_rindex_prev = 0;
-                for bytecode in witness.iter() {
-                    // Run over all the bytes
-                    let mut push_rindex = 0;
-                    let mut byte_push_size = 0;
-                    let mut hash_input_rlc = challenges.keccak_input().map(|_| F::zero());
-                    let code_length = F::from(bytecode.bytes.len() as u64);
-                    for (idx, row) in bytecode.rows.iter().enumerate() {
-                        if fail_fast && offset > last_row_offset {
-                            log::error!(
-                                "Bytecode Circuit: offset={} > last_row_offset={}",
-                                offset,
-                                last_row_offset
-                            );
-                            return Err(Error::Synthesis);
-                        }
-
-                        let code_hash = challenges.evm_word().map(|challenge| {
-                            RandomLinearCombination::<F, 32>::random_linear_combine(
-                                row.code_hash.to_le_bytes(),
-                                challenge,
-                            )
-                        });
-                        if idx == bytecode.rows.len() - 1 {
-                            log::trace!("bytecode len {}", bytecode.rows.len());
-                            log::trace!(
-                                "assign bytecode circuit at {}: codehash {:?}, rlc {:?}",
-                                offset,
-                                row.code_hash.to_le_bytes(),
-                                code_hash
-                            );
-                        }
-
-                        // Track which byte is an opcode and which is push
-                        // data
-                        let is_code = push_rindex == 0;
-                        if idx > 0 {
-                            byte_push_size = get_push_size(row.value.get_lower_128() as u8);
-                            push_rindex = if is_code {
-                                byte_push_size
-                            } else {
-                                push_rindex - 1
-                            };
-                            hash_input_rlc.as_mut().zip(challenges.keccak_input()).map(
-                                |(hash_input_rlc, challenge)| {
-                                    *hash_input_rlc = *hash_input_rlc * challenge + row.value
-                                },
-                            );
-                        }
-
-                        if idx == bytecode.rows.len() - 1 {
-                            log::trace!("assign bytecode circuit: input rlc {:?}", hash_input_rlc);
-                        }
-
-                        // Set the data for this row
-                        if offset <= last_row_offset {
-                            self.set_row(
-                                &mut region,
-                                &push_rindex_is_zero_chip,
-                                &length_is_zero_chip,
-                                offset,
-                                true,
-                                offset == last_row_offset,
-                                code_hash,
-                                row.tag,
-                                row.index,
-                                row.is_code,
-                                row.value,
-                                push_rindex,
-                                hash_input_rlc,
-                                code_length,
-                                F::from(byte_push_size as u64),
-                                idx == bytecode.bytes.len(),
-                                false,
-                                F::from(push_rindex_prev),
-                            )?;
-                            push_rindex_prev = push_rindex;
-                            offset += 1;
-                        }
-                    }
-                }
-
-                // Padding
-                for idx in offset..=last_row_offset {
-                    self.set_row(
-                        &mut region,
-                        &push_rindex_is_zero_chip,
-                        &length_is_zero_chip,
-                        idx,
-                        idx < last_row_offset,
-                        idx == last_row_offset,
-                        Value::known(F::zero()),
-                        F::from(BytecodeFieldTag::Padding as u64),
-                        F::zero(),
-                        F::one(),
-                        F::zero(),
-                        0,
-                        Value::known(F::zero()),
-                        F::zero(),
-                        F::zero(),
-                        true,
-                        true,
                         F::from(push_rindex_prev),
                     )?;
-                    push_rindex_prev = 0;
+                    push_rindex_prev = push_rindex;
+                    offset += 1;
                 }
-                Ok(())
-            },
-        )
+            }
+        }
+
+        // Padding
+        for idx in offset..= last_row_offset {
+            self.set_row(
+                region,
+                &push_rindex_is_zero_chip,
+                &length_is_zero_chip,
+                idx,
+                idx < last_row_offset,
+                idx == last_row_offset,
+                Value::known(F::zero()),
+                F::from(BytecodeFieldTag::Padding as u64),
+                F::zero(),
+                F::one(),
+                F::zero(),
+                0,
+                Value::known(F::zero()),
+                F::zero(),
+                F::zero(),
+                true,
+                true,
+                F::from(push_rindex_prev),
+            )?;
+            push_rindex_prev = 0;
+        }
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -818,7 +824,7 @@ impl<F: Field> SubCircuit<F> for BytecodeCircuit<F> {
         layouter: &mut impl Layouter<F>,
     ) -> Result<(), Error> {
         config.load_aux_tables(layouter)?;
-        config.assign_internal(layouter, self.size, &self.bytecodes, challenges, true)
+        config.assign(layouter, self.size, &self.bytecodes, challenges)
     }
 }
 

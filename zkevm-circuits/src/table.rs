@@ -612,6 +612,7 @@ impl MptTable {
 
 /// The Poseidon hash table shared between Hash Circuit, Mpt Circuit and
 /// Bytecode Circuit
+/// the 4 cols represent [index(final hash of inputs), input0, input1, control]
 #[derive(Clone, Copy, Debug)]
 pub struct PoseidonTable(pub [Column<Advice>; 4]);
 
@@ -622,6 +623,12 @@ impl DynamicTableColumns for PoseidonTable {
 }
 
 impl PoseidonTable {
+    /// the permutation width of current poseidon table
+    pub(crate) const WIDTH : usize = 3;
+
+    /// the input width of current poseidon table
+    pub(crate) const INPUT_WIDTH : usize = Self::WIDTH - 1;
+
     /// Construct a new PoseidonTable
     pub(crate) fn construct<F: FieldExt>(meta: &mut ConstraintSystem<F>) -> Self {
         Self([0; 4].map(|_| meta.advice_column()))
