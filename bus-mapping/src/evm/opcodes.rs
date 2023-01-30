@@ -12,10 +12,9 @@ use crate::{
 use core::fmt::Debug;
 use eth_types::{
     evm_types::{GasCost, MAX_REFUND_QUOTIENT_OF_GAS_USED},
-    evm_unimplemented, GethExecStep, ToAddress, ToWord, Word,
+    evm_unimplemented, GethExecStep, ToAddress, ToWord, Word, H256,
 };
 use ethers_core::utils::get_contract_address;
-use keccak256::EMPTY_HASH;
 
 use crate::util::CHECK_MEM_STRICT;
 
@@ -412,7 +411,7 @@ pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Er
     // Get code_hash of callee
     let (_, callee_account) = state.sdb.get_account(&call.address);
     let callee_exists = !callee_account.is_empty();
-    let code_hash = callee_account.code_hash;
+    let code_hash = callee_account.poseidon_code_hash;
     let callee_code_hash = call.code_hash;
     let (callee_code_hash_word, is_empty_code_hash) = if callee_exists {
         debug_assert_eq!(
@@ -422,7 +421,7 @@ pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Er
         );
         (
             callee_code_hash.to_word(),
-            callee_code_hash.to_fixed_bytes() == *EMPTY_HASH,
+            callee_code_hash.eq(&H256::zero()), // TODO(rohit): poseidon hash of empty bytes?
         )
     } else {
         (Word::zero(), true)
@@ -431,7 +430,7 @@ pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Er
     state.account_read(
         &mut exec_step,
         call.address,
-        AccountField::CodeHash,
+        AccountField::PoseidonCodeHash,
         callee_code_hash_word,
         callee_code_hash_word,
     )?;

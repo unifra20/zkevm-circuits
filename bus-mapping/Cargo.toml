@@ -15,6 +15,7 @@ ethers-core = "0.17.0"
 ethers-signers = "0.17.0"
 ethers-providers = "0.17.0"
 halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2.git", tag = "v2023_01_20" }
+mpt-circuits = { package = "halo2-mpt-circuits", git = "https://github.com/scroll-tech/mpt-circuit.git", branch = "scroll-dev-0111" }
 itertools = "0.10"
 lazy_static = "1.4"
 log = "0.4.14"

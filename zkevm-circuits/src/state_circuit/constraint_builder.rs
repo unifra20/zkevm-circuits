@@ -429,11 +429,11 @@ impl<F: Field> ConstraintBuilder<F> {
         let is_non_exist = q.is_non_exist()
             * generate_lagrange_base_polynomial(
                 q.field_tag(),
-                AccountFieldTag::CodeHash as usize,
+                AccountFieldTag::PoseidonCodeHash as usize,
                 [
                     AccountFieldTag::Nonce,
                     AccountFieldTag::Balance,
-                    AccountFieldTag::CodeHash,
+                    AccountFieldTag::PoseidonCodeHash,
                 ]
                 .iter()
                 .map(|t| *t as usize),

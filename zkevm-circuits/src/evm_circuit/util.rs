@@ -191,8 +191,13 @@ impl<'r, 'b, F: FieldExt> CachedRegion<'r, 'b, F> {
             .evm_word()
             .map(|r| Word::random_linear_combine(n.to_le_bytes(), r))
     }
-    pub fn empty_hash_rlc(&self) -> Value<F> {
+
+    pub fn empty_keccak_hash_rlc(&self) -> Value<F> {
         self.word_rlc(U256::from_little_endian(&*EMPTY_HASH_LE))
+    }
+
+    pub fn empty_poseidon_hash_rlc(&self) -> Value<F> {
+        self.word_rlc(U256::zero())
     }
 
     /// Constrains a cell to have a constant value.

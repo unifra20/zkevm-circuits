@@ -11,7 +11,7 @@ use crate::{
     },
     util::{build_tx_log_expression, Challenges, Expr},
 };
-use eth_types::Field;
+use eth_types::{Field, H256};
 use gadgets::util::{and, not};
 use halo2_proofs::{
     circuit::Value,
@@ -451,8 +451,12 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
         RandomLinearCombination::random_linear_combine_expr(bytes, self.word_powers_of_randomness)
     }
 
-    pub(crate) fn empty_hash_rlc(&self) -> Expression<F> {
+    pub(crate) fn empty_keccak_hash_rlc(&self) -> Expression<F> {
         self.word_rlc((*EMPTY_HASH_LE).map(|byte| byte.expr()))
+    }
+
+    pub(crate) fn empty_poseidon_hash_rlc(&self) -> Expression<F> {
+        self.word_rlc(H256::zero().0.map(|byte| byte.expr()))
     }
 
     // Common

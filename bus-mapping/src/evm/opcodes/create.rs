@@ -4,6 +4,7 @@ use crate::{
     },
     evm::Opcode,
     operation::{AccountField, AccountOp, CallContextField, MemoryOp, RW},
+    util::{CodeHash, PoseidonCodeHash, POSEIDON_HASH_BYTES_IN_FIELD},
     Error,
 };
 use eth_types::{
@@ -62,11 +63,12 @@ impl<const IS_CREATE2: bool> Opcode for Create<IS_CREATE2> {
             },
         )?;
 
-        let mut initialization_code = vec![];
-        if length > 0 {
-            initialization_code =
-                handle_copy(state, &mut exec_step, state.call()?.call_id, offset, length)?;
-        }
+        let (initialization_code, keccak_code_hash, poseidon_code_hash) = if length > 0 {
+            handle_copy(state, &mut exec_step, state.call()?.call_id, offset, length)?
+        } else {
+            // TODO(rohit): poseidon hash for empty bytes?
+            (vec![], H256(keccak256([])), H256::zero())
+        };
 
         let tx_id = state.tx_ctx.id();
         let caller = state.call()?.clone();
@@ -169,7 +171,6 @@ impl<const IS_CREATE2: bool> Opcode for Create<IS_CREATE2> {
             caller.depth.to_word(),
         );
 
-        let code_hash = keccak256(&initialization_code);
         for (field, value) in [
             (CallContextField::CallerId, caller.call_id.into()),
             (CallContextField::IsSuccess, callee.is_success.to_word()),
@@ -191,7 +192,7 @@ impl<const IS_CREATE2: bool> Opcode for Create<IS_CREATE2> {
             (CallContextField::IsRoot, false.to_word()),
             (CallContextField::IsStatic, false.to_word()),
             (CallContextField::IsCreate, true.to_word()),
-            (CallContextField::CodeHash, Word::from(code_hash)),
+            (CallContextField::CodeHash, poseidon_code_hash.to_word()),
         ] {
             state.call_context_write(&mut exec_step, callee.call_id, field, value);
         }
@@ -209,7 +210,7 @@ impl<const IS_CREATE2: bool> Opcode for Create<IS_CREATE2> {
             std::iter::once(0xffu8)
                 .chain(caller.address.to_fixed_bytes())
                 .chain(salt.to_be_bytes())
-                .chain(keccak256(&initialization_code))
+                .chain(keccak_code_hash.to_fixed_bytes())
                 .collect::<Vec<_>>()
         } else {
             let mut stream = rlp::RlpStream::new();
@@ -240,9 +241,11 @@ fn handle_copy(
     callee_id: usize,
     offset: usize,
     length: usize,
-) -> Result<Vec<u8>, Error> {
+) -> Result<(Vec<u8>, H256, H256), Error> {
     let initialization_bytes = state.call_ctx()?.memory.0[offset..offset + length].to_vec();
-    let dst_id = NumberOrHash::Hash(H256(keccak256(&initialization_bytes)));
+    let keccak_code_hash = H256(keccak256(&initialization_bytes));
+    let poseidon_code_hash =
+        PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD).hash_code(&initialization_bytes);
     let bytes: Vec<_> = Bytecode::from(initialization_bytes.clone())
         .code
         .iter()
@@ -266,11 +269,11 @@ fn handle_copy(
         src_addr: offset.try_into().unwrap(),
         src_addr_end: (offset + length).try_into().unwrap(),
         dst_type: CopyDataType::Bytecode,
-        dst_id,
+        dst_id: NumberOrHash::Hash(poseidon_code_hash),
         dst_addr: 0,
         log_id: None,
         bytes,
     });
 
-    Ok(initialization_bytes)
+    Ok((initialization_bytes, keccak_code_hash, poseidon_code_hash))
 }

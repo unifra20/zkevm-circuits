@@ -17,7 +17,7 @@ impl From<AccountData> for SMTAccount {
         let mut balance: [u8; 32] = [0; 32];
         acc.balance.to_big_endian(balance.as_mut_slice());
         let balance = BigUint::from_bytes_be(balance.as_slice());
-        let code_hash = BigUint::from_bytes_be(acc.code_hash.as_bytes());
+        let code_hash = BigUint::from_bytes_be(acc.poseidon_code_hash.as_bytes());
 
         Self {
             nonce: acc.nonce,
@@ -54,7 +54,9 @@ impl From<&ZktrieState> for WitnessGenerator {
                     AccountData {
                         nonce: acc_data.nonce.as_u64(),
                         balance: acc_data.balance,
-                        code_hash: acc_data.code_hash,
+                        poseidon_code_hash: acc_data.poseidon_code_hash,
+                        keccak_code_hash: acc_data.keccak_code_hash,
+                        code_size: acc_data.code_size.as_u64(),
                         storage_root: H256::from(storage_root),
                     },
                 )
@@ -175,7 +177,8 @@ impl WitnessGenerator {
                 .balance
                 .to_big_endian(balance.as_mut_slice());
             let mut code_hash = [0u8; 32];
-            U256::from(account_data_after.code_hash.0).to_big_endian(code_hash.as_mut_slice());
+            U256::from(account_data_after.poseidon_code_hash.0)
+                .to_big_endian(code_hash.as_mut_slice());
 
             let acc_data = [nonce, balance, code_hash, account_data_after.storage_root.0];
             self.trie
@@ -239,9 +242,9 @@ impl WitnessGenerator {
                     MPTProofType::CodeHashExists => {
                         let mut code_hash = [0u8; 32];
                         old_val.to_big_endian(code_hash.as_mut_slice());
-                        assert_eq!(H256::from(code_hash), acc_data.code_hash);
+                        assert_eq!(H256::from(code_hash), acc_data.poseidon_code_hash);
                         new_val.to_big_endian(code_hash.as_mut_slice());
-                        acc_data.code_hash = H256::from(code_hash);
+                        acc_data.poseidon_code_hash = H256::from(code_hash);
                     }
                     MPTProofType::AccountDoesNotExist => (),
                     _ => unreachable!("invalid proof type: {:?}", proof_type),

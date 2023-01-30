@@ -72,7 +72,7 @@ impl<F: Field> ExecutionGadget<F> for ExtcodecopyGadget<F> {
         let code_hash = cb.query_cell_phase2();
         cb.account_read(
             from_bytes::expr(&external_address.cells),
-            AccountFieldTag::CodeHash,
+            AccountFieldTag::PoseidonCodeHash,
             code_hash.expr(),
         );
         let code_size = cb.query_cell();

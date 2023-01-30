@@ -283,13 +283,21 @@ impl<'a> CircuitInputStateRef<'a> {
         let account_value_prev = match op.field {
             AccountField::Nonce => account.nonce,
             AccountField::Balance => account.balance,
-            AccountField::CodeHash => {
+            AccountField::KeccakCodeHash => {
                 if account.is_empty() {
                     Word::zero()
                 } else {
-                    account.code_hash.to_word()
+                    account.keccak_code_hash.to_word()
                 }
             }
+            AccountField::PoseidonCodeHash => {
+                if account.is_empty() {
+                    Word::zero()
+                } else {
+                    account.poseidon_code_hash.to_word()
+                }
+            }
+            AccountField::CodeSize => account.code_size,
         };
         // Verify that the previous value matches the account field value in the StateDB
         if op.value_prev != account_value_prev {
@@ -304,7 +312,7 @@ impl<'a> CircuitInputStateRef<'a> {
         // account (only CodeHash reads with value=0 can be done to non-existing
         // accounts, which the State Circuit translates to MPT
         // AccountNonExisting proofs lookups).
-        if (!matches!(op.field, AccountField::CodeHash)
+        if (!matches!(op.field, AccountField::PoseidonCodeHash | AccountField::KeccakCodeHash)
             && (matches!(rw, RW::READ) || (op.value_prev.is_zero() && op.value.is_zero())))
             && account.is_empty()
         {
@@ -319,7 +327,9 @@ impl<'a> CircuitInputStateRef<'a> {
             match op.field {
                 AccountField::Nonce => account.nonce = op.value,
                 AccountField::Balance => account.balance = op.value,
-                AccountField::CodeHash => account.code_hash = H256::from(op.value.to_be_bytes()),
+                AccountField::KeccakCodeHash => account.keccak_code_hash = H256::from(op.value.to_be_bytes()),
+                AccountField::PoseidonCodeHash => account.poseidon_code_hash = H256::from(op.value.to_be_bytes()),
+                AccountField::CodeSize => account.code_size = op.value,
             }
         }
     }
@@ -735,7 +745,7 @@ impl<'a> CircuitInputStateRef<'a> {
                     if !found {
                         return Err(Error::AccountNotFound(code_address));
                     }
-                    (CodeSource::Address(code_address), account.code_hash)
+                    (CodeSource::Address(code_address), account.keccak_code_hash)
                 }
             }
         };
@@ -868,7 +878,13 @@ impl<'a> CircuitInputStateRef<'a> {
                 match op.field {
                     AccountField::Nonce => account.nonce = op.value,
                     AccountField::Balance => account.balance = op.value,
-                    AccountField::CodeHash => account.code_hash = op.value.to_be_bytes().into(),
+                    AccountField::KeccakCodeHash => {
+                        account.keccak_code_hash = op.value.to_be_bytes().into()
+                    }
+                    AccountField::PoseidonCodeHash => {
+                        account.poseidon_code_hash = op.value.to_be_bytes().into()
+                    }
+                    AccountField::CodeSize => account.code_size = op.value,
                 }
             }
             OpEnum::TxRefund(op) => {
@@ -978,7 +994,7 @@ impl<'a> CircuitInputStateRef<'a> {
             if !found {
                 return Err(Error::AccountNotFound(call.address));
             }
-            callee_account.code_hash = code_hash;
+            callee_account.keccak_code_hash = code_hash;
         }
 
         // Handle reversion if this call doesn't end successfully

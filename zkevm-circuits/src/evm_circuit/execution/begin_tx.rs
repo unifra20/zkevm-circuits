@@ -162,7 +162,7 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
         let phase2_code_hash = cb.query_cell_phase2();
         cb.account_read(
             call_callee_address.expr(),
-            AccountFieldTag::CodeHash,
+            AccountFieldTag::PoseidonCodeHash,
             phase2_code_hash.expr(),
         );
 
@@ -181,7 +181,7 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
         // TODO: Handle precompiled
 
         let is_empty_code_hash =
-            IsEqualGadget::construct(cb, phase2_code_hash.expr(), cb.empty_hash_rlc());
+            IsEqualGadget::construct(cb, phase2_code_hash.expr(), cb.empty_poseidon_hash_rlc());
         let is_zero_code_hash = IsZeroGadget::construct(cb, phase2_code_hash.expr());
         let is_empty_code = or::expr([is_empty_code_hash.expr(), is_zero_code_hash.expr()]);
 
@@ -223,7 +223,7 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
                 //   - Write TxAccessListAccount
                 //   - Write Account Balance
                 //   - Write Account Balance
-                //   - Read Account CodeHash
+                //   - Read Account PoseidonCodeHash
                 rw_counter: Delta(10.expr() + not::expr(tx_value_is_zero.expr())),
                 call_id: To(call_id.expr()),
                 ..StepStateTransition::any()
@@ -269,7 +269,7 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
                 //   - Write TxAccessListAccount
                 //   - Write Account Balance
                 //   - Write Account Balance
-                //   - Read Account CodeHash
+                //   - Read Account PoseidonCodeHash
                 //   - Write CallContext Depth
                 //   - Write CallContext CallerAddress
                 //   - Write CallContext CalleeAddress
@@ -420,7 +420,7 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
             region,
             offset,
             region.word_rlc(callee_code_hash),
-            region.empty_hash_rlc(),
+            region.empty_poseidon_hash_rlc(),
         )?;
         self.is_zero_code_hash
             .assign_value(region, offset, region.word_rlc(callee_code_hash))?;

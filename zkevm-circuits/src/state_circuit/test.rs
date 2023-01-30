@@ -311,7 +311,7 @@ fn diff_1_problem_repro() {
             rw_counter: 1,
             is_write: true,
             account_address: Address::default(),
-            field_tag: AccountFieldTag::CodeHash,
+            field_tag: AccountFieldTag::PoseidonCodeHash,
             value: U256::zero(),
             value_prev: U256::zero(),
         },
@@ -319,7 +319,7 @@ fn diff_1_problem_repro() {
             rw_counter: 2,
             is_write: true,
             account_address: Address::default(),
-            field_tag: AccountFieldTag::CodeHash,
+            field_tag: AccountFieldTag::PoseidonCodeHash,
             value: U256::zero(),
             value_prev: U256::zero(),
         },
@@ -425,7 +425,7 @@ fn address_limb_mismatch() {
         rw_counter: 1,
         is_write: false,
         account_address: address!("0x000000000000000000000000000000000cafe002"),
-        field_tag: AccountFieldTag::CodeHash,
+        field_tag: AccountFieldTag::PoseidonCodeHash,
         value: U256::zero(),
         value_prev: U256::zero(),
     }];
@@ -442,7 +442,7 @@ fn address_limb_out_of_range() {
         rw_counter: 1,
         is_write: false,
         account_address: address!("0x0000000000000000000000000000000000010000"),
-        field_tag: AccountFieldTag::CodeHash,
+        field_tag: AccountFieldTag::PoseidonCodeHash,
         value: U256::zero(),
         value_prev: U256::zero(),
     }];
@@ -587,7 +587,7 @@ fn nonlexicographic_order_address() {
         rw_counter: 50,
         is_write: true,
         account_address: address!("0x1000000000000000000000000000000000000000"),
-        field_tag: AccountFieldTag::CodeHash,
+        field_tag: AccountFieldTag::PoseidonCodeHash,
         value: U256::zero(),
         value_prev: U256::zero(),
     };
@@ -595,7 +595,7 @@ fn nonlexicographic_order_address() {
         rw_counter: 30,
         is_write: true,
         account_address: address!("0x2000000000000000000000000000000000000000"),
-        field_tag: AccountFieldTag::CodeHash,
+        field_tag: AccountFieldTag::PoseidonCodeHash,
         value: U256::one(),
         value_prev: U256::zero(),
     };

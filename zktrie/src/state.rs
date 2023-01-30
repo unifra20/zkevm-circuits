@@ -119,9 +119,11 @@ impl ZktrieState {
                 sdb.set_account(
                     addr,
                     Account {
-                        nonce: U256::from(acc_data.nonce),
+                        nonce: acc_data.nonce.into(),
                         balance: acc_data.balance,
-                        code_hash: acc_data.code_hash,
+                        keccak_code_hash: acc_data.keccak_code_hash,
+                        poseidon_code_hash: acc_data.poseidon_code_hash,
+                        code_size: acc_data.code_size.into(),
                         storage: Default::default(),
                     },
                 );

@@ -4,8 +4,9 @@ use crate::{
     circuit_input_builder::BlockHead,
     circuit_input_builder::{Block, CircuitInputBuilder, CircuitsParams},
     state_db::{self, CodeDB, StateDB},
+    util::{CodeHash, PoseidonCodeHash, POSEIDON_HASH_BYTES_IN_FIELD},
 };
-use eth_types::{geth_types::GethData, Word};
+use eth_types::{geth_types::GethData, ToWord, Word, H256};
 
 const MOCK_OLD_STATE_ROOT: u64 = 0xcafeu64;
 
@@ -66,14 +67,22 @@ impl BlockData {
         }
 
         for account in geth_data.accounts {
-            let code_hash = code_db.insert(account.code.to_vec());
+            let keccak_code_hash = code_db.insert(account.code.to_vec());
+            let poseidon_code_hash = if account.code.is_empty() {
+                H256::zero()
+            } else {
+                PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD)
+                    .hash_code(&account.code.to_vec())
+            };
             sdb.set_account(
                 &account.address,
                 state_db::Account {
                     nonce: account.nonce,
                     balance: account.balance,
                     storage: account.storage,
-                    code_hash,
+                    keccak_code_hash,
+                    poseidon_code_hash,
+                    code_size: account.code.len().to_word(),
                 },
             );
         }
