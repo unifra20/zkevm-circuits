@@ -1,4 +1,4 @@
-use eth_types::{Hash, H256, U256};
+use eth_types::{Hash, H256};
 use ethers_core::utils::keccak256;
 use halo2_proofs::halo2curves::{bn256::Fr, group::ff::PrimeField};
 use mpt_circuits::hash::MessageHashable;
@@ -57,48 +57,70 @@ pub const POSEIDON_HASH_BYTES_IN_FIELD: usize = 16;
 /// Represents Poseidon hash of the account code.
 #[derive(Debug, Clone)]
 pub struct PoseidonCodeHash {
-    bytes_in_field: usize,
+    /// Number of bytes in the field.
+    n: usize,
 }
 
 impl PoseidonCodeHash {
     /// Build a new instance, provided the number of bytes in field.
-    pub fn new(bytes_in_field: usize) -> Self {
-        Self { bytes_in_field }
+    pub fn new(n: usize) -> Self {
+        Self { n }
     }
 }
 
 impl CodeHash for PoseidonCodeHash {
     fn hash_code(&self, code: &[u8]) -> Hash {
-        let fls = (0..(code.len() / self.bytes_in_field))
-            .map(|i| i * self.bytes_in_field)
-            .map(|i| {
-                let mut buf: [u8; 32] = [0; 32];
-                U256::from_big_endian(&code[i..i + self.bytes_in_field]).to_little_endian(&mut buf);
-                Fr::from_bytes(&buf).unwrap()
-            });
-        let msgs: Vec<_> = fls
-            .chain(if code.len() % self.bytes_in_field == 0 {
-                None
-            } else {
-                let last_code = &code[code.len() - code.len() % self.bytes_in_field..];
-                // pad to bytes_in_field
-                let mut last_buf = vec![0u8; self.bytes_in_field];
-                last_buf.as_mut_slice()[..last_code.len()].copy_from_slice(last_code);
-                let mut buf: [u8; 32] = [0; 32];
-                U256::from_big_endian(&last_buf).to_little_endian(&mut buf);
-                Some(Fr::from_bytes(&buf).unwrap())
+        let n = self.n;
+        let iter = code.chunks_exact(n);
+
+        let mut msgs = iter
+            .clone()
+            .map(|c| {
+                Fr::from_bytes(
+                    Hash::from_slice(
+                        c.iter()
+                            .rev()
+                            .cloned()
+                            .chain(std::iter::repeat(0).take(n))
+                            .collect::<Vec<u8>>()
+                            .as_slice(),
+                    )
+                    .as_fixed_bytes(),
+                )
+                .unwrap()
             })
-            .collect();
+            .collect::<Vec<Fr>>();
+        if !iter.remainder().is_empty() {
+            msgs.push(
+                Fr::from_bytes(
+                    Hash::from_slice(
+                        std::iter::repeat(0)
+                            .take(n - iter.remainder().len())
+                            .chain(iter.remainder().iter().rev().cloned())
+                            .chain(std::iter::repeat(0).take(n))
+                            .collect::<Vec<u8>>()
+                            .as_slice(),
+                    )
+                    .as_fixed_bytes(),
+                )
+                .unwrap(),
+            );
+        }
 
-        let h = Fr::hash_msg(&msgs, Some(code.len() as u64));
-
-        let mut buf: [u8; 32] = [0; 32];
-        U256::from_little_endian(h.to_repr().as_ref()).to_big_endian(&mut buf);
-        Hash::from_slice(&buf)
+        Hash::from_slice(
+            Fr::hash_msg(&msgs, Some(code.len() as u64))
+                .to_repr()
+                .as_ref()
+                .iter()
+                .cloned()
+                .rev()
+                .collect::<Vec<u8>>()
+                .as_slice(),
+        )
     }
 
     fn empty_hash(&self) -> Hash {
-        H256::zero()
+        Hash::zero()
     }
 }
 
