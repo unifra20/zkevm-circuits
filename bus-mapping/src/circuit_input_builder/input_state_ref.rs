@@ -312,8 +312,10 @@ impl<'a> CircuitInputStateRef<'a> {
         // account (only CodeHash reads with value=0 can be done to non-existing
         // accounts, which the State Circuit translates to MPT
         // AccountNonExisting proofs lookups).
-        if (!matches!(op.field, AccountField::PoseidonCodeHash | AccountField::KeccakCodeHash)
-            && (matches!(rw, RW::READ) || (op.value_prev.is_zero() && op.value.is_zero())))
+        if (!matches!(
+            op.field,
+            AccountField::PoseidonCodeHash | AccountField::KeccakCodeHash
+        ) && (matches!(rw, RW::READ) || (op.value_prev.is_zero() && op.value.is_zero())))
             && account.is_empty()
         {
             panic!(
@@ -327,8 +329,12 @@ impl<'a> CircuitInputStateRef<'a> {
             match op.field {
                 AccountField::Nonce => account.nonce = op.value,
                 AccountField::Balance => account.balance = op.value,
-                AccountField::KeccakCodeHash => account.keccak_code_hash = H256::from(op.value.to_be_bytes()),
-                AccountField::PoseidonCodeHash => account.poseidon_code_hash = H256::from(op.value.to_be_bytes()),
+                AccountField::KeccakCodeHash => {
+                    account.keccak_code_hash = H256::from(op.value.to_be_bytes())
+                }
+                AccountField::PoseidonCodeHash => {
+                    account.poseidon_code_hash = H256::from(op.value.to_be_bytes())
+                }
                 AccountField::CodeSize => account.code_size = op.value,
             }
         }

@@ -188,18 +188,30 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
         // TODO: we should use "!tx_is_create && is_empty_code && !(1 <= addr <= 9)".
         // check callop.rs
         let native_transfer = not::expr(tx_is_create.expr()) * is_empty_code.expr();
-        cb.condition(
-            native_transfer.expr() * not::expr(tx_value_is_zero.expr()),
-            |cb| {
-                cb.account_write(
-                    call_callee_address.expr(),
-                    AccountFieldTag::CodeHash,
-                    cb.empty_hash_rlc(),
-                    cb.empty_hash_rlc(),
-                    None, // native transfer cannot fail
-                );
-            },
-        );
+        let native_nonzero_transfer = native_transfer.expr() * not::expr(tx_value_is_zero.expr());
+        cb.condition(native_nonzero_transfer.clone(), |cb| {
+            cb.account_write(
+                call_callee_address.expr(),
+                AccountFieldTag::KeccakCodeHash,
+                cb.empty_keccak_hash_rlc(),
+                cb.empty_keccak_hash_rlc(),
+                None, // native transfer cannot fail
+            );
+            cb.account_write(
+                call_callee_address.expr(),
+                AccountFieldTag::PoseidonCodeHash,
+                cb.empty_poseidon_hash_rlc(),
+                cb.empty_poseidon_hash_rlc(),
+                None, // native transfer cannot fail
+            );
+            cb.account_write(
+                call_callee_address.expr(),
+                AccountFieldTag::CodeSize,
+                0.expr(),
+                0.expr(),
+                None, // native transfer cannot fail
+            );
+        });
         cb.condition(native_transfer, |cb| {
             cb.require_equal(
                 "Tx to account with empty code should be persistent",
@@ -259,7 +271,7 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
             }
 
             cb.require_step_state_transition(StepStateTransition {
-                // 22-23 reads and writes:
+                //   - 23 reads and writes:
                 //   - Write CallContext TxId
                 //   - Write CallContext RwCounterEndOfReversion
                 //   - Write CallContext IsPersistent

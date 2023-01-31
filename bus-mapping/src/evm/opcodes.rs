@@ -6,7 +6,6 @@ use crate::{
     operation::{
         AccountField, CallContextField, TxAccessListAccountOp, TxReceiptField, TxRefundOp, RW,
     },
-    state_db::CodeDB,
     Error,
 };
 use core::fmt::Debug;
@@ -15,6 +14,7 @@ use eth_types::{
     evm_unimplemented, GethExecStep, ToAddress, ToWord, Word, H256,
 };
 use ethers_core::utils::get_contract_address;
+use keccak256::EMPTY_HASH;
 
 use crate::util::CHECK_MEM_STRICT;
 
@@ -503,9 +503,23 @@ pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Er
                     state.account_write(
                         &mut exec_step,
                         call.address,
-                        AccountField::CodeHash,
-                        CodeDB::empty_code_hash().to_word(),
-                        CodeDB::empty_code_hash().to_word(), // or Word::zero()?
+                        AccountField::KeccakCodeHash,
+                        Word::from_big_endian(&*EMPTY_HASH),
+                        Word::from_big_endian(&*EMPTY_HASH),
+                    )?;
+                    state.account_write(
+                        &mut exec_step,
+                        call.address,
+                        AccountField::PoseidonCodeHash,
+                        Word::zero(), // TODO(rohit): poseidon hash of empty bytes?
+                        Word::zero(), // TODO(rohit): poseidon hash of empty bytes?
+                    )?;
+                    state.account_write(
+                        &mut exec_step,
+                        call.address,
+                        AccountField::CodeSize,
+                        Word::zero(),
+                        Word::zero(),
                     )?;
                 }
                 return Ok(exec_step);
