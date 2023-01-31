@@ -2,7 +2,7 @@
 
 use std::marker::PhantomData;
 
-use bus_mapping::{circuit_input_builder::ExpEvent, operation::RWCounter};
+use bus_mapping::circuit_input_builder::ExpEvent;
 use eth_types::{Field, ToScalar, U256};
 use gadgets::{
     mul_add::{MulAddChip, MulAddConfig},
@@ -10,12 +10,12 @@ use gadgets::{
 };
 use halo2_proofs::{
     circuit::{Layouter, Region, SimpleFloorPlanner, Value},
-    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Selector},
+    plonk::{Circuit, ConstraintSystem, Error, Selector},
     poly::Rotation,
 };
 
 use crate::{
-    evm_circuit::{util::constraint_builder::BaseConstraintBuilder, witness::Block},
+    evm_circuit::util::constraint_builder::BaseConstraintBuilder,
     table::ExpTable,
     util::{Challenges, SubCircuit, SubCircuitConfig},
     witness,
@@ -30,7 +30,6 @@ pub const ROWS_PER_STEP: usize = 4usize;
 /// Layout for the Exponentiation circuit.
 #[derive(Clone, Debug)]
 pub struct ExpCircuitConfig<F> {
-    minimum_rows: usize,
     /// Whether the row is enabled.
     pub q_usable: Selector,
     /// The Exponentiation circuit's table.
@@ -50,13 +49,13 @@ impl<F: Field> SubCircuitConfig<F> for ExpCircuitConfig<F> {
         let mul_gadget = MulAddChip::configure(meta, |meta| {
             and::expr([
                 meta.query_selector(q_usable),
-                meta.query_advice(exp_table.is_step, Rotation::cur()),
+                meta.query_fixed(exp_table.is_step, Rotation::cur()),
             ])
         });
         let parity_check = MulAddChip::configure(meta, |meta| {
             and::expr([
                 meta.query_selector(q_usable),
-                meta.query_advice(exp_table.is_step, Rotation::cur()),
+                meta.query_fixed(exp_table.is_step, Rotation::cur()),
             ])
         });
 
@@ -106,7 +105,7 @@ impl<F: Field> SubCircuitConfig<F> for ExpCircuitConfig<F> {
 
             cb.gate(and::expr([
                 meta.query_selector(q_usable),
-                meta.query_advice(exp_table.is_step, Rotation::cur()),
+                meta.query_fixed(exp_table.is_step, Rotation::cur()),
                 not::expr(meta.query_advice(exp_table.is_last, Rotation::cur())),
             ]))
         });
@@ -117,7 +116,7 @@ impl<F: Field> SubCircuitConfig<F> for ExpCircuitConfig<F> {
             // is_step is boolean.
             cb.require_boolean(
                 "is_step is boolean",
-                meta.query_advice(exp_table.is_step, Rotation::cur()),
+                meta.query_fixed(exp_table.is_step, Rotation::cur()),
             );
 
             // is_last is boolean.
@@ -268,12 +267,11 @@ impl<F: Field> SubCircuitConfig<F> for ExpCircuitConfig<F> {
 
             cb.gate(and::expr([
                 meta.query_selector(q_usable),
-                meta.query_advice(exp_table.is_step, Rotation::cur()),
+                meta.query_fixed(exp_table.is_step, Rotation::cur()),
             ]))
         });
 
         Self {
-            minimum_rows: meta.minimum_rows(),
             q_usable,
             exp_table,
             mul_gadget,
@@ -288,20 +286,22 @@ impl<F: Field> ExpCircuitConfig<F> {
         &self,
         layouter: &mut impl Layouter<F>,
         exp_events: &[ExpEvent],
-        max_exp_rows: usize,
+        max_exp_steps: usize,
     ) -> Result<(), Error> {
-        let mut mul_chip = MulAddChip::construct(self.mul_gadget.clone());
-        let mut parity_check_chip = MulAddChip::construct(self.parity_check.clone());
+        let min_num_rows = Self::min_num_rows(exp_events);
+        debug_assert!(
+            max_exp_steps * OFFSET_INCREMENT >= min_num_rows,
+            "max_exp_steps: {}, minimum rows needed: {}",
+            max_exp_steps,
+            min_num_rows,
+        );
+
+        let mul_chip = MulAddChip::construct(self.mul_gadget.clone());
+        let parity_check_chip = MulAddChip::construct(self.parity_check.clone());
 
         layouter.assign_region(
             || "exponentiation circuit",
             |mut region| {
-                debug_assert!(
-                    max_exp_rows >= self.minimum_rows,
-                    "max_exp_rows: {}, minimum_rows: {}",
-                    max_exp_rows,
-                    self.minimum_rows,
-                );
                 // assign everything except the exp table.
                 let mut offset = 0;
                 for exp_event in exp_events.iter() {
@@ -356,24 +356,35 @@ impl<F: Field> ExpCircuitConfig<F> {
                                 )?;
                             }
                         }
+                        region.assign_fixed(
+                            || format!("exp_circuit: {:?}: {}", self.exp_table.is_step, offset),
+                            self.exp_table.is_step,
+                            offset,
+                            || Value::known(F::one()),
+                        )?;
+                        for i in 1..OFFSET_INCREMENT {
+                            region.assign_fixed(
+                                || {
+                                    format!(
+                                        "exp_circuit: {:?}: {}",
+                                        self.exp_table.is_step,
+                                        offset + i
+                                    )
+                                },
+                                self.exp_table.is_step,
+                                offset + i,
+                                || Value::known(F::zero()),
+                            )?;
+                        }
                         offset += OFFSET_INCREMENT;
                     }
                 }
-                let padding_start_offset = offset;
-                let padding_end_offset = max_exp_rows - self.minimum_rows + 1;
-                dbg!("total rows", max_exp_rows);
-                dbg!("start offset ", padding_start_offset);
-                dbg!("end offset ", padding_end_offset);
-                dbg!("min rows ", self.minimum_rows);
+
                 // end with padding rows.
-                for offset in padding_start_offset..padding_end_offset {
-                    // dbg!(offset);
-                    self.assign_padding_rows(
-                        &mut region,
-                        offset,
-                        &mut mul_chip,
-                        &mut parity_check_chip,
-                    )?;
+                let padding_start_offset = offset;
+                let padding_end_offset = (max_exp_steps - 1) * OFFSET_INCREMENT;
+                for offset in (padding_start_offset..padding_end_offset).step_by(OFFSET_INCREMENT) {
+                    self.assign_padding_rows(&mut region, &mul_chip, &parity_check_chip, offset)?;
                 }
 
                 Ok(())
@@ -384,56 +395,61 @@ impl<F: Field> ExpCircuitConfig<F> {
     fn assign_padding_rows(
         &self,
         region: &mut Region<'_, F>,
-        offset: usize,
-        mul_chip: &mut MulAddChip<F>,
-        parity_check_chip: &mut MulAddChip<F>,
+        mul_chip: &MulAddChip<F>,
+        parity_check_chip: &MulAddChip<F>,
+        mut offset: usize,
     ) -> Result<(), Error> {
         // assign exponentiation trace
-        self.q_usable.enable(region, offset)?;
+        for i in 0..OFFSET_INCREMENT {
+            self.q_usable.enable(region, offset + i)?;
+        }
+
+        let two = U256::from(2);
+        let four = U256::from(4);
+        // assign mul_chip: 2 * 2 + 0 == 4
+        mul_chip.assign(region, offset, [two, two, U256::zero(), four])?;
+        // assign parity: 2 * 1 + 0 == 2
+        parity_check_chip.assign(region, offset, [two, U256::one(), U256::zero(), two])?;
 
         // assign exp table
-        for column in [
-            self.exp_table.is_step,
-            self.exp_table.is_last,
-            self.exp_table.identifier,
-        ]
-        .into_iter()
+        for step_assignments in
+            ExpTable::assignments::<F>(&ExpEvent::default()).chunks_exact(OFFSET_INCREMENT)
         {
-            region.assign_advice(
-                || format!("padding row, offset: {}", offset),
-                column,
-                offset,
-                || Value::known(F::zero()),
-            )?;
-        }
-        for column in [
-            self.exp_table.base_limb,
-            self.exp_table.exponent_lo_hi,
-            self.exp_table.exponentiation_lo_hi,
-        ]
-        .into_iter()
-        {
-            region.assign_advice(
-                || format!("padding row, offset: {}", offset),
-                column,
+            for (i, assignment) in step_assignments.iter().enumerate() {
+                for (column, value) in self.exp_table.columns().iter().zip(assignment) {
+                    region.assign_advice(
+                        || format!("exp circuit: {:?}: {}", *column, offset + i),
+                        *column,
+                        offset + i,
+                        || Value::known(*value),
+                    )?;
+                }
+            }
+            region.assign_fixed(
+                || format!("exp_circuit: {:?}: {}", self.exp_table.is_step, offset),
+                self.exp_table.is_step,
                 offset,
                 || Value::known(F::one()),
             )?;
+            for i in 1..OFFSET_INCREMENT {
+                region.assign_fixed(
+                    || format!("exp_circuit: {:?}: {}", self.exp_table.is_step, offset + i),
+                    self.exp_table.is_step,
+                    offset + i,
+                    || Value::known(F::zero()),
+                )?;
+            }
+            offset += OFFSET_INCREMENT;
         }
 
-        // assign mul_chip
-        mul_chip.assign(
-            region,
-            offset,
-            [U256::one(), U256::one(), U256::zero(), U256::one()],
-        )?;
-
-        // assign parity
-        let exponent = U256::one();
-        let two = U256::from(2);
-        parity_check_chip.assign(region, offset, [two, U256::zero(), U256::one(), exponent])?;
-
         Ok(())
+    }
+
+    fn min_num_rows(exp_events: &[ExpEvent]) -> usize {
+        exp_events
+            .iter()
+            .map(|e| e.steps.len() * OFFSET_INCREMENT)
+            .sum()
     }
 }
 
@@ -442,17 +458,18 @@ impl<F: Field> ExpCircuitConfig<F> {
 pub struct ExpCircuit<F> {
     /// Exp events
     pub exp_events: Vec<ExpEvent>,
-    /// Max number of rows in exp circuit
-    pub max_exp_rows: usize,
+    /// Max number of steps in EXP circuit. Each step is expressed in
+    /// OFFSET_INCREMENT number of rows, i.e. 7 rows.
+    pub max_exp_steps: usize,
     _marker: PhantomData<F>,
 }
 
 impl<F: Field> ExpCircuit<F> {
     /// Return a new ExpCircuit
-    pub fn new(exp_events: Vec<ExpEvent>, max_exp_rows: usize) -> Self {
+    pub fn new(exp_events: Vec<ExpEvent>, max_exp_steps: usize) -> Self {
         Self {
             exp_events,
-            max_exp_rows,
+            max_exp_steps,
             _marker: PhantomData::default(),
         }
     }
@@ -462,17 +479,18 @@ impl<F: Field> SubCircuit<F> for ExpCircuit<F> {
     type Config = ExpCircuitConfig<F>;
 
     fn new_from_block(block: &witness::Block<F>) -> Self {
-        Self::new(block.exp_events.clone(), block.circuits_params.max_exp_rows)
+        Self::new(
+            block.exp_events.clone(),
+            block.circuits_params.max_exp_steps,
+        )
     }
 
     /// Return the minimum number of rows required to prove the block
     fn min_num_rows_block(block: &witness::Block<F>) -> (usize, usize) {
-        let rows = block
-            .exp_events
-            .iter()
-            .map(|e| e.steps.len() * OFFSET_INCREMENT)
-            .sum();
-        (rows, block.circuits_params.max_exp_rows)
+        (
+            Self::Config::min_num_rows(&block.exp_events),
+            block.circuits_params.max_exp_steps,
+        )
     }
 
     /// Make the assignments to the ExpCircuit
@@ -482,7 +500,7 @@ impl<F: Field> SubCircuit<F> for ExpCircuit<F> {
         _challenges: &Challenges<Value<F>>,
         layouter: &mut impl Layouter<F>,
     ) -> Result<(), Error> {
-        config.assign_exp_events(layouter, &self.exp_events, self.max_exp_rows)
+        config.assign_exp_events(layouter, &self.exp_events, self.max_exp_steps)
     }
 }
 
@@ -521,10 +539,15 @@ pub mod dev {
     use crate::evm_circuit::witness::Block;
 
     /// Test exponentiation circuit with the provided block witness
-    pub fn test_exp_circuit<F: Field>(k: u32, block: Block<F>) -> Result<(), Vec<VerifyFailure>> {
-        let circuit =
-            ExpCircuit::<F>::new(block.exp_events.clone(), block.circuits_params.max_exp_rows);
-        dbg!(1 << k);
+    pub fn test_exp_circuit<F: Field>(
+        k: u32,
+        max_exp_steps: Option<usize>,
+        block: Block<F>,
+    ) -> Result<(), Vec<VerifyFailure>> {
+        let circuit = ExpCircuit::<F>::new(
+            block.exp_events.clone(),
+            max_exp_steps.unwrap_or(block.circuits_params.max_exp_steps),
+        );
         let prover = MockProver::<F>::run(k, &circuit, vec![]).unwrap();
         prover.verify()
     }
@@ -576,24 +599,30 @@ mod tests {
         builder
     }
 
-    fn test_ok(base: Word, exponent: Word, k: Option<u32>) {
+    fn test_ok(base: Word, exponent: Word, k: Option<u32>, max_exp_steps: Option<usize>) {
         let code = gen_code_single(base, exponent);
         let builder = gen_data(code);
         log::debug!("generating block");
         let block = block_convert::<Fr>(&builder.block, &builder.code_db).unwrap();
-        assert_eq!(test_exp_circuit(k.unwrap_or(18), block), Ok(()));
+        assert_eq!(
+            test_exp_circuit(k.unwrap_or(18), max_exp_steps, block),
+            Ok(())
+        );
     }
 
-    fn test_ok_multiple(args: Vec<(Word, Word)>) {
+    fn test_ok_multiple(k: Option<u32>, max_exp_steps: Option<usize>, args: Vec<(Word, Word)>) {
         let code = gen_code_multiple(args);
         let builder = gen_data(code);
         let block = block_convert::<Fr>(&builder.block, &builder.code_db).unwrap();
-        assert_eq!(test_exp_circuit(20, block), Ok(()));
+        assert_eq!(
+            test_exp_circuit(k.unwrap_or(18), max_exp_steps, block),
+            Ok(())
+        );
     }
 
     #[test]
     fn exp_circuit_single() {
-        test_ok(2.into(), 2.into(), None);
+        test_ok(2.into(), 2.into(), Some(6), Some(4));
         // test_ok(3.into(), 7.into(), None);
         // test_ok(5.into(), 11.into(), None);
         // test_ok(7.into(), 13.into(), None);
@@ -609,20 +638,25 @@ mod tests {
             2.into(),
             Word::from_str_radix("0x1FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFE", 16).unwrap(),
             Some(20),
+            None,
         );
     }
 
     #[test]
     fn exp_circuit_multiple() {
-        test_ok_multiple(vec![
-            (3.into(), 7.into()),
-            (5.into(), 11.into()),
-            (7.into(), 13.into()),
-            (11.into(), 17.into()),
-            (13.into(), 23.into()),
-            (29.into(), 43.into()),
-            (41.into(), 259.into()),
-        ]);
+        test_ok_multiple(
+            None,
+            None,
+            vec![
+                (3.into(), 7.into()),
+                (5.into(), 11.into()),
+                (7.into(), 13.into()),
+                (11.into(), 17.into()),
+                (13.into(), 23.into()),
+                (29.into(), 43.into()),
+                (41.into(), 259.into()),
+            ],
+        );
     }
 
     #[test]
@@ -640,7 +674,7 @@ mod tests {
             .unwrap();
         let block = block_convert::<Fr>(&builder.block, &builder.code_db).unwrap();
         let circuit =
-            ExpCircuit::<Fr>::new(block.exp_events.clone(), block.circuits_params.max_exp_rows);
+            ExpCircuit::<Fr>::new(block.exp_events.clone(), block.circuits_params.max_exp_steps);
         let prover1 = MockProver::<Fr>::run(k, &circuit, vec![]).unwrap();
 
         // Non-empty
@@ -656,7 +690,7 @@ mod tests {
         let builder = gen_data(code);
         let block = block_convert::<Fr>(&builder.block, &builder.code_db).unwrap();
         let circuit =
-            ExpCircuit::<Fr>::new(block.exp_events.clone(), block.circuits_params.max_exp_rows);
+            ExpCircuit::<Fr>::new(block.exp_events.clone(), block.circuits_params.max_exp_steps);
         let prover2 = MockProver::<Fr>::run(k, &circuit, vec![]).unwrap();
 
         assert_eq!(prover1.fixed(), prover2.fixed());
