@@ -2,19 +2,19 @@ use crate::{
     evm_circuit::util::{
         and, constraint_builder::BaseConstraintBuilder, not, or, select,
     },
-    table::{BytecodeFieldTag, BytecodeTable, DynamicTableColumns, PoseidonTable},
-    util::{Challenges, Expr, SubCircuit, SubCircuitConfig},
+    table::{BytecodeFieldTag, KeccakTable, DynamicTableColumns, PoseidonTable},
+    util::{Challenges, Expr, SubCircuitConfig},
 };
-use eth_types::{Field, ToLittleEndian, Word};
-use gadgets::is_zero::{IsZeroChip, IsZeroConfig, IsZeroInstruction};
+use eth_types::Field;
+//use gadgets::is_zero::{IsZeroChip, IsZeroConfig, IsZeroInstruction};
 use halo2_proofs::{
     circuit::{Layouter, Region, Value},
-    plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed, Selector, VirtualCells},
+    plonk::{Advice, Column, ConstraintSystem, Error, VirtualCells},
     poly::Rotation,
 };
 use std::vec;
 
-use super::{BytecodeRow, UnrolledBytecode, BytecodeCircuitConfig, into_words};
+use super::{BytecodeRow, UnrolledBytecode, BytecodeCircuitConfig, BytecodeCircuitConfigArgs};
 
 /// specify byte in field for encoding bytecode
 pub const HASHBLOCK_BYTES_IN_FIELD : usize = 16;
@@ -37,7 +37,8 @@ pub struct ToHashBlockCircuitConfig<F, const BYTES_IN_FIELD: usize> {
     field_index: Column<Advice>,
     field_index_inv: Column<Advice>,
     // External table
-    pub(crate) hash_table: PoseidonTable,
+    pub(crate) poseidon_table: PoseidonTable,
+    pub(crate) keccak_table: KeccakTable,
 }
 
 impl<F: Field, const BYTES_IN_FIELD: usize> ToHashBlockCircuitConfig<F, BYTES_IN_FIELD> {
@@ -45,7 +46,7 @@ impl<F: Field, const BYTES_IN_FIELD: usize> ToHashBlockCircuitConfig<F, BYTES_IN
     pub(crate) fn configure(
         meta: &mut ConstraintSystem<F>,
         base_conf: BytecodeCircuitConfig<F>,
-        hash_table: PoseidonTable,
+        poseidon_table: PoseidonTable,
     ) -> Self {
 
         let base_conf_cl = base_conf.clone();
@@ -276,7 +277,7 @@ impl<F: Field, const BYTES_IN_FIELD: usize> ToHashBlockCircuitConfig<F, BYTES_IN
 
         let lookup_columns = [code_hash, field_input, control_length];
         let pick_hash_tbl_cols = |inp_i|{
-            let cols = hash_table.columns();
+            let cols = poseidon_table.columns();
             [cols[0], cols[inp_i+1], *cols.last().unwrap()]
         };
 
@@ -348,6 +349,8 @@ impl<F: Field, const BYTES_IN_FIELD: usize> ToHashBlockCircuitConfig<F, BYTES_IN
             constraints
         });
 
+        // re-export keccak table in extended config
+        let keccak_table = base_conf.keccak_table.clone();
         Self {
             base_conf: base_conf_cl,
             control_length,
@@ -358,7 +361,8 @@ impl<F: Field, const BYTES_IN_FIELD: usize> ToHashBlockCircuitConfig<F, BYTES_IN
             padding_shift,
             field_index,
             field_index_inv,
-            hash_table,
+            poseidon_table,
+            keccak_table,
         }
     }
 
@@ -513,8 +517,45 @@ impl<F: Field, const BYTES_IN_FIELD: usize> ToHashBlockCircuitConfig<F, BYTES_IN
         Ok(())
     }    
 
+
+    /// re-export load fixed tables
+    pub(crate) fn load_aux_tables(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
+        self.base_conf.load_aux_tables(layouter)
+    }
+
 }
 
+
+/// Circuit configuration arguments
+pub struct ToHashBlockBytecodeCircuitConfigArgs<F: Field> {
+    /// arg for base config
+    pub base_args: BytecodeCircuitConfigArgs<F>,
+    /// BytecodeTable
+    pub poseidon_table: PoseidonTable,
+}
+
+
+impl<F: Field> SubCircuitConfig<F> for ToHashBlockCircuitConfig<F, HASHBLOCK_BYTES_IN_FIELD> {
+    type ConfigArgs = ToHashBlockBytecodeCircuitConfigArgs<F>;
+
+    /// Return a new BytecodeCircuitConfig
+    fn new(
+        meta: &mut ConstraintSystem<F>,
+        Self::ConfigArgs {
+            base_args,
+            poseidon_table,
+        }: Self::ConfigArgs,
+    ) -> Self {
+        let base_conf = BytecodeCircuitConfig::new(meta, base_args);
+        Self::configure(meta, base_conf, poseidon_table)
+    }
+}
+
+/// Apply default constants in mod
+pub fn unroll_to_hash_input_default<F: Field>(code: impl ExactSizeIterator<Item=u8>)
+    -> Vec<[F;PoseidonTable::INPUT_WIDTH]> {
+    unroll_to_hash_input::<F, HASHBLOCK_BYTES_IN_FIELD, {PoseidonTable::INPUT_WIDTH}>(code)
+}
 
 /// Get unrolled hash inputs as inputs to hash circuit
 pub fn unroll_to_hash_input<
@@ -614,4 +655,7 @@ pub mod tests {
         assert_eq!(out[1][2], Fr::zero());       
 
     }
+
+
+
 }

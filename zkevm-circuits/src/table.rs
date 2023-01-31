@@ -668,6 +668,51 @@ impl PoseidonTable {
         }
         Ok(())
     }
+
+    /// Provide this function for the case that we want to consume a keccak
+    /// table but without running the full keccak circuit
+    pub fn dev_load<'a, F: Field>(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        inputs: impl IntoIterator<Item = &'a Vec<u8>> + Clone,
+    ) -> Result<(), Error> {
+
+        use crate::bytecode_circuit::bytecode_unroller::to_poseidon_hash::unroll_to_hash_input_default;
+
+        layouter.assign_region(
+            || "poseidon table",
+            |mut region| {
+                let mut offset = 0;
+                for column in self.columns() {
+                    region.assign_advice(
+                        || "keccak table all-zero row",
+                        column,
+                        offset,
+                        || Value::known(F::zero()),
+                    )?;
+                }
+                offset += 1;
+
+                let poseidon_table_columns = self.columns();
+                for input in inputs.clone() {
+                    for row in unroll_to_hash_input_default::<F>(input.iter().copied()) {
+
+                        for (column, value) in poseidon_table_columns.iter().zip_eq(row) {
+                            region.assign_advice(
+                                || format!("poseidon table row {}", offset),
+                                *column,
+                                offset,
+                                || Value::known(value),
+                            )?;
+                        }
+                        offset += 1;
+                    }
+                }
+                Ok(())
+            },
+        )        
+    }
+
 }
 
 /// Tag to identify the field in a Bytecode Table row
