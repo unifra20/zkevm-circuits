@@ -12,6 +12,7 @@ use crate::witness::{
 };
 use bus_mapping::circuit_input_builder::{CopyDataType, CopyEvent, CopyStep, ExpEvent};
 use core::iter::once;
+use std::iter::repeat;
 use eth_types::{Field, ToLittleEndian, ToScalar, Word, U256};
 use gadgets::binary_number::{BinaryNumberChip, BinaryNumberConfig};
 use gadgets::util::{split_u256, split_u256_limb64};
@@ -675,38 +676,61 @@ impl PoseidonTable {
         &self,
         layouter: &mut impl Layouter<F>,
         inputs: impl IntoIterator<Item = &'a Vec<u8>> + Clone,
+        challenges: &Challenges<Value<F>>,
     ) -> Result<(), Error> {
 
-        use crate::bytecode_circuit::bytecode_unroller::to_poseidon_hash::unroll_to_hash_input_default;
+        use crate::bytecode_circuit::bytecode_unroller::to_poseidon_hash::{unroll_to_hash_input_default, HASHBLOCK_BYTES_IN_FIELD};
 
         layouter.assign_region(
             || "poseidon table",
             |mut region| {
                 let mut offset = 0;
-                for column in self.columns() {
+                let poseidon_table_columns = self.columns();
+                for column in poseidon_table_columns.iter().copied() {
                     region.assign_advice(
-                        || "keccak table all-zero row",
+                        || "poseidon table all-zero row",
                         column,
                         offset,
                         || Value::known(F::zero()),
                     )?;
                 }
                 offset += 1;
-
-                let poseidon_table_columns = self.columns();
+                let nil_hash = KeccakTable::assignments(&[], challenges)[0][3];            
+                for (column, value) in poseidon_table_columns.iter().copied()
+                    .zip(once(nil_hash).chain(repeat(Value::known(F::zero())))) {
+                    region.assign_advice(
+                        || "poseidon table nil input row",
+                        column,
+                        offset,
+                        || value,
+                    )?;
+                }
+                offset += 1;
+                
                 for input in inputs.clone() {
+                    let mut control_len = input.len();
+                    let ref_hash = KeccakTable::assignments(&input, challenges)[0][3];
                     for row in unroll_to_hash_input_default::<F>(input.iter().copied()) {
+                        assert_ne!(control_len, 0, "must have enough len left (original size {})", input.len());
+                        let block_size = HASHBLOCK_BYTES_IN_FIELD * row.len();
 
-                        for (column, value) in poseidon_table_columns.iter().zip_eq(row) {
+                        for (column, value) in poseidon_table_columns
+                            .iter().zip_eq(
+                                once(ref_hash)
+                                .chain(row.map(Value::known))                                
+                                .chain(once(Value::known(F::from(control_len as u64))))
+                        ) {
                             region.assign_advice(
                                 || format!("poseidon table row {}", offset),
                                 *column,
                                 offset,
-                                || Value::known(value),
+                                || value,
                             )?;
                         }
                         offset += 1;
+                        control_len = if control_len > block_size {control_len - block_size} else {0};
                     }
+                    assert_eq!(control_len, 0, "should have exhaust all bytes (original size {})", input.len());
                 }
                 Ok(())
             },

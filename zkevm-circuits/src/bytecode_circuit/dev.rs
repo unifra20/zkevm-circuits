@@ -80,6 +80,7 @@ impl<F: Field> Circuit<F> for BytecodeCircuit<F> {
         config.poseidon_table.dev_load(
             &mut layouter,
             self.bytecodes.iter().map(|b| &b.bytes),
+            &challenges,
         )?;
 
         self.synthesize_sub(&config, &challenges, &mut layouter)?;

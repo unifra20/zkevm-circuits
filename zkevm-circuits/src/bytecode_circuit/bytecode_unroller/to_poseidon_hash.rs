@@ -144,15 +144,23 @@ impl<F: Field, const BYTES_IN_FIELD: usize> ToHashBlockCircuitConfig<F, BYTES_IN
                 ),
             );
 
-            cb.require_equal(
-                "padding_shift = 1 if is_field_border else padding_shift_prev / 256",
-                meta.query_advice(padding_shift, Rotation::cur()) * 256.expr(),
-                select::expr(
-                    meta.query_advice(is_field_border, Rotation::cur()),
-                    256.expr(),
+            cb.condition(not::expr(meta.query_advice(is_field_border, Rotation::prev())), |cb|{
+
+                cb.require_equal(
+                    "if field_continue (not is_field_border_prev) padding_shift := padding_shift_prev / 256",
+                    meta.query_advice(padding_shift, Rotation::cur()) * 256.expr(),
                     meta.query_advice(padding_shift, Rotation::prev()),
-                ),
-            );
+                );
+            });
+
+            cb.condition(meta.query_advice(is_field_border, Rotation::cur()), |cb|{
+
+                cb.require_equal(
+                    "if is_field_border padding_shift := 1",
+                    meta.query_advice(padding_shift, Rotation::cur()),
+                    1.expr(),
+                );
+            });
 
             // Conditions:
             // - Byte tag
@@ -398,13 +406,15 @@ impl<F: Field, const BYTES_IN_FIELD: usize> ToHashBlockCircuitConfig<F, BYTES_IN
     ) -> Result<(), Error> {
 
         let mut offset = 0;
+        let mut row_input = F::zero();
         for bytecode in witness.iter() {
             let code_length = bytecode.bytes.len();
             for (idx, row) in bytecode.rows.iter().enumerate() {
-                self.assign_row(
+                row_input = self.assign_row(
                     region, 
                     offset + idx, 
-                    row, 
+                    row,
+                    row_input,
                     code_length,
                 )?;
             }
@@ -452,12 +462,13 @@ impl<F: Field, const BYTES_IN_FIELD: usize> ToHashBlockCircuitConfig<F, BYTES_IN
         region: &mut Region<F>, 
         offset: usize, 
         row: &BytecodeRow<F>,
+        input_prev: F,
         code_length: usize,
-    ) -> Result<(), Error> {
+    ) -> Result<F, Error> {
 
         let code_index = row.index.get_lower_128() as usize;
         let tag = row.tag.get_lower_32();
-        match tag {
+        let row_input = match tag {
             i if i == BytecodeFieldTag::Byte as u32 => {
                 let block_size = BYTES_IN_FIELD * PoseidonTable::INPUT_WIDTH;
 
@@ -465,14 +476,12 @@ impl<F: Field, const BYTES_IN_FIELD: usize> ToHashBlockCircuitConfig<F, BYTES_IN
                 let control_length = code_length - prog_block * block_size;
                 let bytes_in_field_index = (code_index + 1) % BYTES_IN_FIELD;
                 let field_border = bytes_in_field_index == 0;
-                let bytes_in_field_index = if field_border {block_size} else {bytes_in_field_index};
+                let bytes_in_field_index = if field_border {BYTES_IN_FIELD} else {bytes_in_field_index};
                 let bytes_in_field_index_inv_f = F::from((BYTES_IN_FIELD - bytes_in_field_index) as u64).invert().unwrap_or(F::zero());
                 let padding_shift_f = F::from(256 as u64).pow_vartime(&[(BYTES_IN_FIELD - bytes_in_field_index) as u64]);
-                let input_f = row.value * padding_shift_f;
-        
-                let field_index = (code_index + 1) % block_size;
-                let field_index = if field_index == 0 {block_size} else {field_index};
-                let field_index = field_index / BYTES_IN_FIELD + 1;
+                let input_f = row.value * padding_shift_f + input_prev;
+
+                let field_index = (code_index % block_size) / BYTES_IN_FIELD + 1;
                 let field_index_inv_f = F::from((PoseidonTable::INPUT_WIDTH - field_index) as u64).invert().unwrap_or(F::zero());
         
                 for (tip, column, val) in [
@@ -492,6 +501,12 @@ impl<F: Field, const BYTES_IN_FIELD: usize> ToHashBlockCircuitConfig<F, BYTES_IN
                         || Value::known(val),
                     )?;
                 }
+
+                if field_border {
+                    F::zero()
+                } else {
+                    input_f
+                }
                 
             },
             i if i == BytecodeFieldTag::Length as u32 => {
@@ -509,12 +524,13 @@ impl<F: Field, const BYTES_IN_FIELD: usize> ToHashBlockCircuitConfig<F, BYTES_IN
                         || Value::known(val),
                     )?;
                 }
+                F::zero()
 
             },
             _ => unreachable!("unexpected tag number"),
-        }
+        };
 
-        Ok(())
+        Ok(row_input)
     }    
 
 
@@ -583,7 +599,10 @@ pub fn unroll_to_hash_input<
 
     let input_cnt = msgs.len() / INPUT_LEN;
     let input_cnt = if msgs.len() % INPUT_LEN != 0 {input_cnt+1} else {input_cnt};   
-    
+    if input_cnt == 0 {
+        return Vec::new();
+    }
+
     let (mut inputs, last) = msgs.into_iter().chain(std::iter::repeat(F::zero())).take(input_cnt * INPUT_LEN)
         .fold((Vec::new(), [None;INPUT_LEN]), |(mut msgs, mut v_arr), f|{
             if let Some(v) = v_arr.iter_mut().find(|v|v.is_none()) {
@@ -607,9 +626,9 @@ pub fn unroll_to_hash_input<
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use super::super::tests::get_randomness;
-    use crate::{bytecode_circuit::dev::test_bytecode_circuit_unrolled, util::DEFAULT_RAND};
-    use eth_types::Bytecode;
+    //use super::super::tests::get_randomness;
+    //use crate::{bytecode_circuit::dev::test_bytecode_circuit_unrolled, util::DEFAULT_RAND};
+    //use eth_types::Bytecode;
     use halo2_proofs::halo2curves::bn256::Fr;
 
 
