@@ -521,9 +521,44 @@ pub fn unroll_to_hash_input<
     F: Field, 
     const BYTES_IN_FIELD: usize, 
     const INPUT_LEN: usize
->(bytes: Vec<u8>) -> Vec<[F;INPUT_LEN]> {
+>(code: impl ExactSizeIterator<Item=u8>) -> Vec<[F;INPUT_LEN]> {
 
-    Vec::new()
+    use eth_types::U256;
+
+    let fl_cnt = code.len() / BYTES_IN_FIELD;
+    let fl_cnt = if code.len() % BYTES_IN_FIELD != 0 {fl_cnt+1} else {fl_cnt};
+
+    let (msgs, _) = code.chain(std::iter::repeat(0)).take(fl_cnt * BYTES_IN_FIELD)
+        .fold((Vec::new(), Vec::new()), |(mut msgs, mut cache), bt|{
+            cache.push(bt);
+            if cache.len() == BYTES_IN_FIELD {
+                let mut buf: [u8; 64] = [0; 64];
+                U256::from_big_endian(&cache).to_little_endian(&mut buf[0..32]);
+                msgs.push(F::from_bytes_wide(&buf));          
+                cache.clear();
+            }
+            (msgs, cache)
+        });
+
+    let input_cnt = msgs.len() / INPUT_LEN;
+    let input_cnt = if msgs.len() % INPUT_LEN != 0 {input_cnt+1} else {input_cnt};   
+    
+    let (mut inputs, last) = msgs.into_iter().chain(std::iter::repeat(F::zero())).take(input_cnt * INPUT_LEN)
+        .fold((Vec::new(), [None;INPUT_LEN]), |(mut msgs, mut v_arr), f|{
+            if let Some(v) = v_arr.iter_mut().find(|v|v.is_none()) {
+                v.replace(f);
+                (msgs, v_arr)
+            } else {
+                msgs.push(v_arr.map(|v|v.unwrap()));
+                let mut v_arr = [None;INPUT_LEN];
+                v_arr[0].replace(f);
+                (msgs, v_arr)
+            }
+        });
+    
+    inputs.push(last.map(|v|v.unwrap()));
+    inputs
+
 }
 
 /// test module
@@ -536,4 +571,47 @@ pub mod tests {
     use eth_types::Bytecode;
     use halo2_proofs::halo2curves::bn256::Fr;
 
+
+    #[test]
+    fn bytecode_unrolling_to_input() {
+        let bt = vec![1,2,3,4,5,6,7,8,9,10,11,12,13,14,15];
+
+        let out = unroll_to_hash_input::<Fr, 4, 2>(bt.iter().copied().take(6));
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0][0], Fr::from(0x01020304));
+        assert_eq!(out[0][1], Fr::from(0x05060000));
+
+        let out = unroll_to_hash_input::<Fr, 3, 2>(bt.iter().copied().take(9));
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0][0], Fr::from(0x010203));
+        assert_eq!(out[0][1], Fr::from(0x040506));
+        assert_eq!(out[1][0], Fr::from(0x070809));
+        assert_eq!(out[1][1], Fr::zero());
+
+        let out = unroll_to_hash_input::<Fr, 3, 2>(bt.iter().copied().take(12));
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0][0], Fr::from(0x010203));
+        assert_eq!(out[0][1], Fr::from(0x040506));
+        assert_eq!(out[1][0], Fr::from(0x070809));
+        assert_eq!(out[1][1], Fr::from(0x0A0B0C));
+
+        let out = unroll_to_hash_input::<Fr, 3, 3>(bt.iter().copied().take(12));
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0][0], Fr::from(0x010203));
+        assert_eq!(out[0][1], Fr::from(0x040506));
+        assert_eq!(out[0][2], Fr::from(0x070809));
+        assert_eq!(out[1][0], Fr::from(0x0A0B0C));
+        assert_eq!(out[1][1], Fr::zero());
+        assert_eq!(out[1][2], Fr::zero());
+
+        let out = unroll_to_hash_input::<Fr, 3, 3>(bt.iter().copied().take(14));
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0][0], Fr::from(0x010203));
+        assert_eq!(out[0][1], Fr::from(0x040506));
+        assert_eq!(out[0][2], Fr::from(0x070809));
+        assert_eq!(out[1][0], Fr::from(0x0A0B0C));
+        assert_eq!(out[1][1], Fr::from(0x0D0E00));
+        assert_eq!(out[1][2], Fr::zero());       
+
+    }
 }
