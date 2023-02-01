@@ -276,6 +276,7 @@ pub fn gen_associated_ops(
     geth_steps: &[GethExecStep],
 ) -> Result<Vec<ExecStep>, Error> {
     let fn_gen_associated_ops = fn_gen_associated_ops(opcode_id);
+    println!("{}", opcode_id.to_string());
 
     // if no errors, continue as normal
     let memory_enabled = !geth_steps.iter().all(|s| s.memory.is_empty());
@@ -348,6 +349,8 @@ pub fn gen_associated_ops(
 }
 
 pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Error> {
+    println!("begin_tx");
+
     let mut exec_step = state.new_begin_tx_step();
     let call = state.call()?.clone();
 
@@ -518,6 +521,8 @@ pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Er
 }
 
 pub fn gen_end_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Error> {
+    println!("end_tx");
+
     let mut exec_step = state.new_end_tx_step();
     let call = state.tx.calls()[0].clone();
 

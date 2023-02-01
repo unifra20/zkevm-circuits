@@ -224,7 +224,7 @@ impl<const IS_CREATE2: bool> Opcode for Create<IS_CREATE2> {
             H160(keccak256(&keccak_input)[12..].try_into().unwrap())
         );
 
-        state.block.sha3_inputs.push(keccak_input);
+        state.push_keccak(keccak_input);
 
         if length == 0 {
             state.handle_return(geth_step)?;

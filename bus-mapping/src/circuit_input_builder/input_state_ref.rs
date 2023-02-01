@@ -1045,13 +1045,21 @@ impl<'a> CircuitInputStateRef<'a> {
         Ok(())
     }
 
+    /// Push a keccak input
+    pub fn push_keccak(&mut self, memory: Vec<u8>) {
+        println!("  {}", "Keccak");
+        self.block.sha3_inputs.push(memory);
+    }
+
     /// Push a copy event to the state.
     pub fn push_copy(&mut self, event: CopyEvent) {
+        println!("  {}|{:?}|{:?}", "CopyEvent", event.clone().src_type, event.clone().dst_type);
         self.block.add_copy_event(event);
     }
 
     /// Push a exponentiation event to the state.
     pub fn push_exponentiation(&mut self, event: ExpEvent) {
+        println!("  {}", "ExpEvent");
         self.block.add_exp_event(event)
     }
 

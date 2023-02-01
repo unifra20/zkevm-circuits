@@ -96,6 +96,8 @@ impl OperationContainer {
         reversible: bool,
         op_enum: OpEnum,
     ) -> OperationRef {
+        println!("  {}|{}|{:?}", "RwOp", op_enum.to_string(), rw);
+
         match op_enum {
             OpEnum::Memory(op) => {
                 self.memory.push(Operation::new(rwc, rw, op));

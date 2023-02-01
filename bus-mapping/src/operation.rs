@@ -13,7 +13,7 @@ use core::cmp::Ordering;
 use core::fmt;
 use core::fmt::Debug;
 use eth_types::{Address, Word};
-use std::mem::swap;
+use std::{mem::swap, fmt::{Display, Formatter}};
 
 /// Marker that defines whether an Operation performs a `READ` or a `WRITE`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -983,6 +983,25 @@ pub enum OpEnum {
     TxLog(TxLogOp),
     /// Start
     Start(StartOp),
+}
+
+impl Display for OpEnum {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            OpEnum::Stack(_op) => write!(f, "Stack"),
+            OpEnum::Memory(_op) => write!(f, "Memory"),
+            OpEnum::Storage(_op) => write!(f, "Storage"),
+            OpEnum::TxAccessListAccount(_op) => write!(f, "TxAccessListAccount"),
+            OpEnum::TxAccessListAccountStorage(_op) => write!(f, "TxAccessListAccountStorage"),
+            OpEnum::TxRefund(_op) => write!(f, "TxRefund"),
+            OpEnum::Account(_op) => write!(f, "Account"),
+            OpEnum::AccountDestructed(_op) => write!(f, "AccountDestructed"),
+            OpEnum::CallContext(_op) => write!(f, "CallContext"),
+            OpEnum::TxReceipt(_op) => write!(f, "TxReceipt"),
+            OpEnum::TxLog(_op) => write!(f, "TxLog"),
+            OpEnum::Start(_op) => write!(f, "Start"),
+        }
+    }
 }
 
 /// Operation is a Wrapper over a type that implements Op with a RWCounter.
