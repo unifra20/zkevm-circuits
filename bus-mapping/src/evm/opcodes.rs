@@ -409,7 +409,18 @@ pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Er
     } + call_data_gas_cost;
     exec_step.gas_cost = GasCost(intrinsic_gas_cost);
 
-    // Get code_hash of callee
+    // Transfer with fee
+    state.transfer_with_fee(
+        &mut exec_step,
+        call.caller_address,
+        call.address,
+        call.value,
+        state.tx.gas_price * state.tx.gas,
+    )?;
+
+    // Get code_hash of callee when tx.create == false
+    // the `callee_code_hash_word` is only used when tx.create == false
+    // so we dont care its value when tx.create == true
     let (_, callee_account) = state.sdb.get_account(&call.address);
     let callee_exists = !callee_account.is_empty();
     // Be careful that callee_account.code_hash may not be call.codehash even when
@@ -431,21 +442,17 @@ pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Er
     //   1. normal contract call
     //   2. deployment, to non-existed or **existed** account
 
-    state.account_read(
-        &mut exec_step,
-        call.address,
-        AccountField::CodeHash,
-        callee_code_hash_word,
-        callee_code_hash_word,
-    )?;
-    // Transfer with fee
-    state.transfer_with_fee(
-        &mut exec_step,
-        call.caller_address,
-        call.address,
-        call.value,
-        state.tx.gas_price * state.tx.gas,
-    )?;
+    // we don't need to read code hash when tx.is_create == true
+    // since we need the code hash of the "executed" bytecode
+    if !call.is_create() {
+        state.account_read(
+            &mut exec_step,
+            call.address,
+            AccountField::CodeHash,
+            callee_code_hash_word,
+            callee_code_hash_word,
+        )?;
+    }
 
     // There are 4 branches from here.
     match (

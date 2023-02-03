@@ -45,7 +45,7 @@ pub(crate) struct BeginTxGadget<F> {
     transfer_with_gas_fee: TransferWithGasFeeGadget<F>,
     phase2_code_hash: Cell<F>,
     is_empty_code_hash: IsEqualGadget<F>,
-    //is_zero_code_hash: IsZeroGadget<F>,
+    is_zero_code_hash: IsZeroGadget<F>,
 }
 
 impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
@@ -194,8 +194,8 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
 
         let is_empty_code_hash =
             IsEqualGadget::construct(cb, phase2_code_hash.expr(), cb.empty_hash_rlc());
-        //let is_zero_code_hash = IsZeroGadget::construct(cb, phase2_code_hash.expr());
-        let is_empty_code = is_empty_code_hash.expr();// or::expr([is_empty_code_hash.expr(), is_zero_code_hash.expr()]);
+        let is_zero_code_hash = IsZeroGadget::construct(cb, phase2_code_hash.expr());
+        let is_empty_code = or::expr([is_empty_code_hash.expr(), is_zero_code_hash.expr()]);
 
         // TODO: we should use "!tx_is_create && is_empty_code && !(1 <= addr <= 9)".
         // check callop.rs
@@ -325,7 +325,7 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
             phase2_code_hash,
             intrinsic_gas_cost,
             is_empty_code_hash,
-            //is_zero_code_hash,
+            is_zero_code_hash,
         }
     }
 
@@ -341,10 +341,8 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
         let gas_fee = tx.gas_price * tx.gas;
         let [caller_balance_pair, callee_balance_pair] =
             [step.rw_indices[8], step.rw_indices[9]].map(|idx| block.rws[idx].account_value_pair());
-        #[allow(clippy::if_same_then_else)]
         let callee_code_hash = if tx.is_create {
-            //call.code_hash
-            block.rws[step.rw_indices[7]].account_value_pair().0
+            call.code_hash
         } else {
             block.rws[step.rw_indices[7]].account_value_pair().0
         };
@@ -431,8 +429,8 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
             region.word_rlc(callee_code_hash),
             region.empty_hash_rlc(),
         )?;
-        //self.is_zero_code_hash
-        //    .assign_value(region, offset, region.word_rlc(callee_code_hash))?;
+        self.is_zero_code_hash
+            .assign_value(region, offset, region.word_rlc(callee_code_hash))?;
         Ok(())
     }
 }
