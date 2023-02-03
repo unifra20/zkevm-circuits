@@ -412,15 +412,10 @@ pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Er
     // Get code_hash of callee
     let (_, callee_account) = state.sdb.get_account(&call.address);
     let callee_exists = !callee_account.is_empty();
-    let code_hash = callee_account.code_hash;
-    let callee_code_hash = call.code_hash;
+    // Be careful that callee_account.code_hash may not be call.codehash even when
+    // tx.is_create. See https://github.com/scroll-tech/zkevm-circuits/pull/259#discussion_r1094405058
+    let callee_code_hash  = callee_account.code_hash;
     let (callee_code_hash_word, is_empty_code_hash) = if callee_exists {
-        debug_assert_eq!(
-            callee_code_hash, code_hash,
-            "call.address {:?} callee_account {:?}",
-            call.address, callee_account
-        );
-
         (
             callee_code_hash.to_word(),
             callee_code_hash.to_fixed_bytes() == *EMPTY_HASH,
@@ -428,6 +423,13 @@ pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Er
     } else {
         (Word::zero(), true)
     };
+
+    // when is_empty_code_hash == true, there are 2 cases:
+    //   1. native transfer, to non-existed or existed account
+    //   2. call precompiles
+    // when is_empty_code_hash == false, there are 2 cases:
+    //   1. normal contract call
+    //   2. deployment, to non-existed or **existed** account
 
     state.account_read(
         &mut exec_step,
@@ -460,6 +462,8 @@ pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Er
                 1.into(),
                 0.into(),
             )?;
+            // the call context writes here must be in same order with "4. Call to account with non-empty code."
+            // since they shared the same rw lookups in gadget.
             for (field, value) in [
                 (CallContextField::Depth, call.depth.into()),
                 (

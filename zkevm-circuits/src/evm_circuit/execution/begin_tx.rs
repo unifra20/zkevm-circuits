@@ -45,7 +45,7 @@ pub(crate) struct BeginTxGadget<F> {
     transfer_with_gas_fee: TransferWithGasFeeGadget<F>,
     phase2_code_hash: Cell<F>,
     is_empty_code_hash: IsEqualGadget<F>,
-    is_zero_code_hash: IsZeroGadget<F>,
+    //is_zero_code_hash: IsZeroGadget<F>,
 }
 
 impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
@@ -84,6 +84,7 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
             ]
             .map(|field_tag| cb.tx_context(tx_id.expr(), field_tag, None));
 
+        // cal_callee_address == if tx.to == null { the deployment address } else { tx.to }
         let call_callee_address = cb.query_cell();
         cb.condition(tx_is_create.expr(), |_cb| {
             // TODO: require call_callee_address to be
@@ -158,13 +159,24 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
             None,
         );
 
-        // Read code_hash of callee
+        // phase2_code_hash will be:
+        //   account codehash when tx.to != null
+        //     empty(keccak("")) for native transfer and precompile calling (is_empty_code_hash: true)
+        //     account codehash for normal contract all (is_empty_code_hash: false)
+        //   initcode hash when tx.to == null (is_empty_code_hash: false)
         let phase2_code_hash = cb.query_cell_phase2();
-        cb.account_read(
-            call_callee_address.expr(),
-            AccountFieldTag::CodeHash,
-            phase2_code_hash.expr(),
-        );
+
+        cb.condition(not::expr(tx_is_create.expr()), |cb| {
+            cb.account_read(
+                call_callee_address.expr(),
+                AccountFieldTag::CodeHash,
+                phase2_code_hash.expr(),
+            );
+        });
+        cb.condition(tx_is_create.expr(), |cb| {
+            // TODO: constraint phase2_code_hash here.
+            // it should be keccak(tx.input)
+        });
 
         // TODO: If value is 0, skip transfer, just like callop.
         // Transfer value from caller to callee
@@ -182,15 +194,14 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
 
         let is_empty_code_hash =
             IsEqualGadget::construct(cb, phase2_code_hash.expr(), cb.empty_hash_rlc());
-        let is_zero_code_hash = IsZeroGadget::construct(cb, phase2_code_hash.expr());
-        let is_empty_code = or::expr([is_empty_code_hash.expr(), is_zero_code_hash.expr()]);
+        //let is_zero_code_hash = IsZeroGadget::construct(cb, phase2_code_hash.expr());
+        let is_empty_code = is_empty_code_hash.expr();// or::expr([is_empty_code_hash.expr(), is_zero_code_hash.expr()]);
 
         // TODO: we should use "!tx_is_create && is_empty_code && !(1 <= addr <= 9)".
         // check callop.rs
-        let native_transfer = not::expr(tx_is_create.expr()) * is_empty_code.expr();
-        cb.condition(
-            native_transfer.expr() * not::expr(tx_value_is_zero.expr()),
-            |cb| {
+        //let native_transfer = not::expr(tx_is_create.expr()) * is_empty_code.expr();
+        cb.condition(is_empty_code, |cb| {
+            cb.condition(not::expr(tx_value_is_zero.expr()), |cb| {
                 cb.account_write(
                     call_callee_address.expr(),
                     AccountFieldTag::CodeHash,
@@ -198,9 +209,7 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
                     cb.empty_hash_rlc(),
                     None, // native transfer cannot fail
                 );
-            },
-        );
-        cb.condition(native_transfer, |cb| {
+            });
             cb.require_equal(
                 "Tx to account with empty code should be persistent",
                 reversion_info.is_persistent(),
@@ -230,9 +239,9 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
             });
         });
 
-        let normal_contract_call = not::expr(tx_is_create.expr()) * not::expr(is_empty_code.expr());
+        //let normal_contract_call = not::expr(tx_is_create.expr()) * not::expr(is_empty_code.expr());
 
-        cb.condition(normal_contract_call, |cb| {
+        cb.condition(not::expr(is_empty_code.expr()), |cb| {
             // Setup first call's context.
             for (field_tag, value) in [
                 (CallContextFieldTag::Depth, 1.expr()),
@@ -269,7 +278,7 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
                 //   - Write TxAccessListAccount
                 //   - Write Account Balance
                 //   - Write Account Balance
-                //   - Read Account CodeHash
+                //   - Read Account CodeHash (only if tx is not create)
                 //   - Write CallContext Depth
                 //   - Write CallContext CallerAddress
                 //   - Write CallContext CalleeAddress
@@ -283,7 +292,7 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
                 //   - Write CallContext IsRoot
                 //   - Write CallContext IsCreate
                 //   - Write CallContext CodeHash
-                rw_counter: Delta(23.expr()),
+                rw_counter: Delta(22.expr() + (1.expr() - tx_is_create.expr())),
                 call_id: To(call_id.expr()),
                 is_root: To(true.expr()),
                 is_create: To(tx_is_create.expr()),
@@ -316,7 +325,7 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
             phase2_code_hash,
             intrinsic_gas_cost,
             is_empty_code_hash,
-            is_zero_code_hash,
+            //is_zero_code_hash,
         }
     }
 
@@ -422,8 +431,8 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
             region.word_rlc(callee_code_hash),
             region.empty_hash_rlc(),
         )?;
-        self.is_zero_code_hash
-            .assign_value(region, offset, region.word_rlc(callee_code_hash))?;
+        //self.is_zero_code_hash
+        //    .assign_value(region, offset, region.word_rlc(callee_code_hash))?;
         Ok(())
     }
 }

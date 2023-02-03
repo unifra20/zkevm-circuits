@@ -116,6 +116,7 @@ impl ZktrieState {
             );
             if acc_proof.key.is_some() {
                 let acc_data = acc_proof.data;
+                log::trace!("set account {:?} balance {:?}", addr, acc_data.balance);
                 sdb.set_account(
                     addr,
                     Account {
