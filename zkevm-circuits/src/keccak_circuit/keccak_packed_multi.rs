@@ -2276,16 +2276,15 @@ mod tests {
 
         // Check that other digests are the digest of the empty message.
         assert_eq!(F::zero(), rlc_input(&inputs[0]));
-        let empty_digest_rlc = rlc_digest(&digests[0]);
+        let empty_hash = (F::zero(), F::zero(), rlc_digest(&digests[0]));
         for hash in hashes.iter().skip(inputs.len()) {
-            let expected = (F::zero(), F::zero(), empty_digest_rlc);
-            assert_eq!(*hash, expected);
+            assert_eq!(*hash, empty_hash);
         }
     }
 
     #[test]
     fn packed_multi_keccak_simple() {
-        let k = 12;
+        let k = 14;
         let inputs = vec![
             vec![],
             vec![0],

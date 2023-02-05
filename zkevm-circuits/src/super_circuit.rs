@@ -190,6 +190,7 @@ impl<F: Field> SubCircuitConfig<F> for SuperCircuitConfig<F> {
 
         let poseidon_circuit =
             PoseidonCircuitConfig::new(meta, PoseidonCircuitConfigArgs { poseidon_table });
+        log_circuit_info(meta, "poseidon circuit");
 
         let rlp_circuit = RlpCircuitConfig::configure(meta, &rlp_table, &challenges);
         log_circuit_info(meta, "rlp circuit");
@@ -656,7 +657,7 @@ impl<
 }
 
 #[cfg(test)]
-mod super_circuit_tests {
+pub(crate) mod super_circuit_tests {
     use super::*;
     use ethers_signers::{LocalWallet, Signer};
     use halo2_proofs::dev::MockProver;
@@ -749,7 +750,7 @@ mod super_circuit_tests {
         block
     }
 
-    fn block_1tx() -> GethData {
+    pub(crate) fn block_1tx() -> GethData {
         let mut rng = ChaCha20Rng::seed_from_u64(2);
 
         let chain_id = (*MOCK_CHAIN_ID).as_u64();
@@ -851,6 +852,7 @@ mod super_circuit_tests {
             max_calldata: MAX_CALLDATA,
             max_rws: 256,
             max_copy_rows: 256,
+            max_exp_steps: 256,
             max_bytecode: 512,
             keccak_padding: None,
             max_inner_blocks: MAX_INNER_BLOCKS,
@@ -877,6 +879,7 @@ mod super_circuit_tests {
             max_bytecode: 512,
             keccak_padding: None,
             max_inner_blocks: MAX_INNER_BLOCKS,
+            max_exp_steps: 256,
         };
         test_super_circuit::<MAX_TXS, MAX_CALLDATA, MAX_INNER_BLOCKS, TEST_MOCK_RANDOMNESS>(
             block,
@@ -896,6 +899,7 @@ mod super_circuit_tests {
             max_calldata: MAX_CALLDATA,
             max_rws: 256,
             max_copy_rows: 256,
+            max_exp_steps: 256,
             max_bytecode: 512,
             keccak_padding: None,
             max_inner_blocks: MAX_INNER_BLOCKS,
@@ -922,6 +926,7 @@ mod super_circuit_tests {
             max_bytecode: 512,
             keccak_padding: None,
             max_inner_blocks: MAX_INNER_BLOCKS,
+            max_exp_steps: 256,
         };
         test_super_circuit::<MAX_TXS, MAX_CALLDATA, MAX_INNER_BLOCKS, TEST_MOCK_RANDOMNESS>(
             block,
@@ -940,6 +945,7 @@ mod super_circuit_tests {
             max_calldata: MAX_CALLDATA,
             max_rws: 256,
             max_copy_rows: 256,
+            max_exp_steps: 256,
             max_bytecode: 512,
             keccak_padding: None,
             max_inner_blocks: MAX_INNER_BLOCKS,

@@ -11,11 +11,11 @@ members = [
     "eth-types",
     "external-tracer",
     "mock",
+    "testool"
 ]
 
 [patch."https://github.com/privacy-scaling-explorations/halo2.git"]
-#halo2_proofs = { git = "https://github.com/scroll-tech/halo2.git", branch = "scroll-dev-0220" }
-halo2_proofs = { path = "../halo2/halo2_proofs" }
+halo2_proofs = { git = "https://github.com/scroll-tech/halo2.git", branch = "scroll-dev-0220" }
 
 # Definition of benchmarks profile to use.
 [profile.bench]
