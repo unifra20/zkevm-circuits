@@ -52,8 +52,8 @@ use itertools::Itertools;
 use keccak256::plain::Keccak;
 use log::error;
 use maingate::{MainGate, MainGateConfig, RegionCtx};
-use rayon::{iter::ParallelIterator, prelude::IndexedParallelIterator};
 use rayon::prelude::IntoParallelIterator;
+use rayon::{iter::ParallelIterator, prelude::IndexedParallelIterator};
 use std::{iter, marker::PhantomData};
 
 /// Hard coded parameters.
@@ -600,9 +600,12 @@ impl<F: Field> SignVerifyChip<F> {
         };
 
         // let ecdsa = start_timer!(|| "ecdsa chip verification");
-        let assigned_ecdsas: Vec<_> = (0..self.max_verif)
+        let assigned_ecdsas: Vec<_> = signatures
+            .iter()
+            .chain(vec![SignData::default(); self.max_verif - signatures.len()].iter())
+            .collect_vec()
             .into_par_iter()
-            .map(|i| {
+            .map(|sig| {
                 layouter
                     .assign_region(
                         || "ecdsa chip verification",
@@ -613,19 +616,40 @@ impl<F: Field> SignVerifyChip<F> {
                                     num_advice: vec![("ecdsa chip".to_string(), NUM_ADVICE)],
                                 },
                             );
-
-                            let signature = if i < signatures.len() {
-                                signatures[i].clone()
-                            } else {
-                                // padding (enabled when address == 0)
-                                SignData::default()
-                            };
-                            self.assign_ecdsa(&mut ctx, &chips, &signature)
+                            self.assign_ecdsa(&mut ctx, &chips, &sig)
                         },
                     )
                     .unwrap()
             })
             .collect();
+
+        // let assigned_ecdsas: Vec<_> =
+        // (0..self.max_verif)
+        //     .into_par_iter()
+        //     .map(|i| {
+        //         layouter
+        //             .assign_region(
+        //                 || "ecdsa chip verification",
+        //                 |region| {
+        //                     let mut ctx = Context::new(
+        //                         region,
+        //                         ContextParams {
+        //                             num_advice: vec![("ecdsa chip".to_string(),
+        // NUM_ADVICE)],                         },
+        //                     );
+
+        //                     let signature = if i < signatures.len() {
+        //                         signatures[i].clone()
+        //                     } else {
+        //                         // padding (enabled when address == 0)
+        //                         SignData::default()
+        //                     };
+        //                     self.assign_ecdsa(&mut ctx, &chips, &signature)
+        //                 },
+        //             )
+        //             .unwrap()
+        //     })
+        //     .collect();
 
         // end_timer!(ecdsa);
         // let rlc = start_timer!(|| "rlc verification");
