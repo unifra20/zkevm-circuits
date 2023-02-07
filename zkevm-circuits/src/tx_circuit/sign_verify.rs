@@ -598,37 +598,30 @@ impl<F: Field> SignVerifyChip<F> {
         };
 
         // let ecdsa = start_timer!(|| "ecdsa chip verification");
-        let assigned_ecdsas = layouter.assign_region(
-            || "ecdsa chip verification",
-            |region| {
-                let mut assigned_ecdsas = Vec::new();
-                let mut ctx = Context::new(
-                    region,
-                    ContextParams {
-                        num_advice: vec![("ecdsa chip".to_string(), NUM_ADVICE)],
-                    },
-                );
-                for i in 0..self.max_verif {
-                    let signature = if i < signatures.len() {
-                        signatures[i].clone()
-                    } else {
-                        // padding (enabled when address == 0)
-                        SignData::default()
-                    };
-                    let assigned_ecdsa = self.assign_ecdsa(&mut ctx, &chips, &signature)?;
-                    assigned_ecdsas.push(assigned_ecdsa);
-                }
+        let assigned_ecdsas = (0..self.max_verif)
+            .map(|i| {
+                layouter.assign_region(
+                    || "ecdsa chip verification",
+                    |region| {
+                        let mut ctx = Context::new(
+                            region,
+                            ContextParams {
+                                num_advice: vec![("ecdsa chip".to_string(), NUM_ADVICE)],
+                            },
+                        );
 
-                // let advice_rows = ctx.advice_rows["ecdsa chip"].iter();
-                // let max_rows = advice_rows.clone().max().or(Some(&0)).unwrap();
-                // println!(
-                //     "total rows: {}; rows per sig: {}",
-                //     max_rows,
-                //     max_rows / self.max_verif,
-                // );
-                Ok(assigned_ecdsas)
-            },
-        )?;
+                        let signature = if i < signatures.len() {
+                            signatures[i].clone()
+                        } else {
+                            // padding (enabled when address == 0)
+                            SignData::default()
+                        };
+                        self.assign_ecdsa(&mut ctx, &chips, &signature)
+                    },
+                ).unwrap()
+            })
+            .collect_vec();
+
         // end_timer!(ecdsa);
         // let rlc = start_timer!(|| "rlc verification");
         let (deferred_keccak_check, assigned_sig_verifs) = layouter.assign_region(
