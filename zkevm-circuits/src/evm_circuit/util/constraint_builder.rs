@@ -12,7 +12,7 @@ use crate::{
     util::{build_tx_log_expression, Challenges, Expr},
 };
 use eth_types::Field;
-use gadgets::util::{and, not};
+use gadgets::util::{and, not, sum};
 use halo2_proofs::{
     circuit::Value,
     plonk::{
@@ -1392,6 +1392,10 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
         ret
     }
 
+    pub(crate) fn mutex_condition<'b>(&'b mut self) -> MutexConstraintBuilder<'b, 'a, F> {
+        MutexConstraintBuilder::new(self)
+    }
+
     /// This function needs to be used with extra precaution. You need to make
     /// sure the layout is the same as the gadget for `next_step_state`.
     /// `query_cell` will return cells in the next step in the `constraint`
@@ -1597,5 +1601,36 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
             Some(condition) => condition.clone(),
             None => 1.expr(),
         }
+    }
+}
+
+pub(crate) struct MutexConstraintBuilder<'a, 'b, F> {
+    conditions: Vec<Expression<F>>,
+    cb: &'a mut ConstraintBuilder<'b, F>,
+}
+
+impl<'a, 'b: 'a, F: Field> MutexConstraintBuilder<'a, 'b, F> {
+    pub(crate) fn new(cb: &'a mut ConstraintBuilder<'b, F>) -> MutexConstraintBuilder<'a, 'b, F> {
+        MutexConstraintBuilder {
+            conditions: Vec::new(),
+            cb,
+        }
+    }
+
+    pub(crate) fn condition<R>(
+        &mut self,
+        condition: Expression<F>,
+        constraint: impl FnOnce(&mut ConstraintBuilder<'b, F>) -> R,
+    ) -> R {
+        self.conditions.push(condition.expr());
+        self.cb.condition(condition, constraint)
+    }
+
+    pub(crate) fn build(self) {
+        self.cb.require_equal(
+            "Mutex conditions should have one and only one condition be true",
+            sum::expr(self.conditions),
+            1.expr(),
+        );
     }
 }
