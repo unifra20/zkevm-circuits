@@ -358,23 +358,19 @@ impl<F: Field> SignVerifyChip<F> {
             .map(|x| QuantumCell::Constant(x))
             .collect_vec();
 
-        let evm_challenge_powers = iter::successors(Some(F::one()), |coeff| {
-            Some(challenges.evm_word().inner.unwrap() * *coeff)
+        let evm_challenge_powers = iter::successors(Some(Value::known(F::one())), |coeff| {
+            Some(challenges.evm_word() * coeff)
         })
-        .take(32);
+        .take(32)
+        .map(|x| QuantumCell::Witness(x))
+        .collect_vec();
 
-        let evm_challenge_powers = evm_challenge_powers
-            .map(|x| QuantumCell::Witness(Value::known(x)))
-            .collect_vec();
-
-        let keccak_challenge_powers = iter::successors(Some(F::one()), |coeff| {
-            Some(challenges.keccak_input().inner.unwrap() * *coeff)
+        let keccak_challenge_powers = iter::successors(Some(Value::known(F::one())), |coeff| {
+            Some(challenges.keccak_input() * coeff)
         })
-        .take(64);
-
-        let keccak_challenge_powers = keccak_challenge_powers
-            .map(|x| QuantumCell::Witness(Value::known(x)))
-            .collect_vec();
+        .take(64)
+        .map(|x| QuantumCell::Witness(x))
+        .collect_vec();
         // ================================================
         // step 1. convert pk hash into address
         // ================================================
