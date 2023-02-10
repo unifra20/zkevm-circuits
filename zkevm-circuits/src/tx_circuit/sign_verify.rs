@@ -55,6 +55,7 @@ use maingate::{MainGate, MainGateConfig, RegionCtx};
 use rayon::prelude::IntoParallelIterator;
 use rayon::{iter::ParallelIterator, prelude::IndexedParallelIterator};
 use std::{iter, marker::PhantomData};
+use halo2_proofs::circuit::Region;
 
 /// Hard coded parameters.
 // FIXME: allow for a configurable param.
@@ -600,28 +601,21 @@ impl<F: Field> SignVerifyChip<F> {
         };
 
         // let ecdsa = start_timer!(|| "ecdsa chip verification");
-        let assigned_ecdsas: Vec<_> = signatures
+        let ecdsa_assignments = signatures
             .iter()
-            .chain(vec![SignData::default(); self.max_verif - signatures.len()].iter())
-            .collect_vec()
-            .into_par_iter()
             .map(|sig| {
-                layouter
-                    .assign_region(
-                        || "ecdsa chip verification",
-                        |region| {
-                            let mut ctx = Context::new(
-                                region,
-                                ContextParams {
-                                    num_advice: vec![("ecdsa chip".to_string(), NUM_ADVICE)],
-                                },
-                            );
-                            self.assign_ecdsa(&mut ctx, &chips, &sig)
+                |region: Region<'_, F>| -> Result<AssignedECDSA<F, FpChip<F>>, Error>{
+                    let mut ctx = Context::new(
+                        region,
+                        ContextParams {
+                            num_advice: vec![("ecdsa chip".to_string(), NUM_ADVICE)],
                         },
-                    )
-                    .unwrap()
+                    );
+                    self.assign_ecdsa(&mut ctx, &chips, sig)
+                }
             })
             .collect();
+        let assigned_ecdsas = layouter.assign_regions(|| "ecdsa_sig", ecdsa_assignments)?;
 
         // let assigned_ecdsas: Vec<_> =
         // (0..self.max_verif)
