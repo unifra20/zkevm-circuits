@@ -3,7 +3,7 @@
 
 use crate::{
     precompile::is_precompiled,
-    util::{CodeHashCopy, EthCodeHash},
+    util::{CodeHashCopy, PoseidonCodeHash, POSEIDON_HASH_BYTES_IN_FIELD},
 };
 use eth_types::{Address, Hash, Word, H256, U256};
 use ethers_core::utils::keccak256;
@@ -40,7 +40,9 @@ impl CodeDB {
     }
     /// Create a new empty Self.
     pub fn new() -> Self {
-        Self::new_with_code_hasher(Box::new(EthCodeHash))
+        Self::new_with_code_hasher(Box::new(PoseidonCodeHash::new(
+            POSEIDON_HASH_BYTES_IN_FIELD,
+        )))
     }
     /// Insert code indexed by code hash, and return the code hash.
     pub fn insert(&mut self, code: Vec<u8>) -> Hash {

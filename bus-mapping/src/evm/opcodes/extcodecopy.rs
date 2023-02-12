@@ -27,7 +27,7 @@ impl Opcode for Extcodecopy {
         let length = geth_steps[0].stack.nth_last(3)?.as_u64();
 
         let (_, account) = state.sdb.get_account(&address);
-        let code_hash = account.keccak_code_hash;
+        let code_hash = account.poseidon_code_hash;
         let code = state.code(code_hash)?;
 
         let call_ctx = state.call_ctx_mut()?;
@@ -243,11 +243,8 @@ mod extcodecopy_tests {
         });
 
         let bytecode_ext = Bytecode::from(code_ext.to_vec());
-        let code_hash = if code_ext.is_empty() {
-            Default::default()
-        } else {
-            PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD).hash_code(&code_ext.to_vec())
-        };
+        let code_hash =
+            PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD).hash_code(&code_ext.to_vec());
 
         // Get the execution steps from the external tracer
         let block: GethData = TestContext::<3, 1>::new(

@@ -53,14 +53,14 @@ impl Opcode for Extcodesize {
         let account = state.sdb.get_account(&address).1;
         let exists = !account.is_empty();
         let (code_hash, code_size) = if exists {
-            (account.poseidon_code_hash, account.code_size)
+            (account.keccak_code_hash, account.code_size)
         } else {
             (H256::zero(), Word::zero())
         };
         state.account_read(
             &mut exec_step,
             address,
-            AccountField::PoseidonCodeHash,
+            AccountField::KeccakCodeHash,
             code_hash.to_word(),
             code_hash.to_word(),
         )?;
@@ -92,7 +92,7 @@ mod extcodesize_tests {
     use crate::circuit_input_builder::ExecState;
     use crate::mock::BlockData;
     use crate::operation::{AccountOp, CallContextOp, StackOp};
-    use crate::{CodeHash, PoseidonCodeHash, POSEIDON_HASH_BYTES_IN_FIELD};
+    use crate::{CodeHash, EthCodeHash};
     use eth_types::evm_types::{OpcodeId, StackAddress};
     use eth_types::geth_types::{Account, GethData};
     use eth_types::{bytecode, Bytecode, Word, U256};
@@ -232,9 +232,7 @@ mod extcodesize_tests {
             }
         );
 
-        let code_hash = PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD)
-            .hash_code(&account.code)
-            .to_word();
+        let code_hash = EthCodeHash {}.hash_code(&account.code).to_word();
         let code_size = account.code.len().to_word();
         let operation = &container.account[indices[5].as_usize()];
         assert_eq!(operation.rw(), RW::READ);
@@ -242,7 +240,7 @@ mod extcodesize_tests {
             operation.op(),
             &AccountOp {
                 address: account.address,
-                field: AccountField::PoseidonCodeHash,
+                field: AccountField::KeccakCodeHash,
                 value: if exists { code_hash } else { Word::zero() },
                 value_prev: if exists { code_hash } else { Word::zero() },
             }

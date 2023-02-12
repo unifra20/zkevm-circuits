@@ -751,7 +751,10 @@ impl<'a> CircuitInputStateRef<'a> {
                     if !found {
                         return Err(Error::AccountNotFound(code_address));
                     }
-                    (CodeSource::Address(code_address), account.keccak_code_hash)
+                    (
+                        CodeSource::Address(code_address),
+                        account.poseidon_code_hash,
+                    )
                 }
             }
         };

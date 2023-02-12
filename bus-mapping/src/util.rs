@@ -51,7 +51,7 @@ impl CodeHash for EthCodeHash {
     }
 }
 
-/// Default bytes in the field.
+/// Default number of bytes to pack into a field element.
 pub const POSEIDON_HASH_BYTES_IN_FIELD: usize = 16;
 
 /// Represents Poseidon hash of the account code.
@@ -70,6 +70,9 @@ impl PoseidonCodeHash {
 
 impl CodeHash for PoseidonCodeHash {
     fn hash_code(&self, code: &[u8]) -> Hash {
+        if code.len() == 0 {
+            return self.empty_hash();
+        }
         let n = self.n;
         let iter = code.chunks_exact(n);
 

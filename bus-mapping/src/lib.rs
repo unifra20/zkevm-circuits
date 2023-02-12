@@ -241,6 +241,6 @@ pub mod operation;
 pub mod precompile;
 pub mod rpc;
 pub mod state_db;
-pub use util::{CodeHash, PoseidonCodeHash, POSEIDON_HASH_BYTES_IN_FIELD};
+pub use util::{CodeHash, EthCodeHash, PoseidonCodeHash, POSEIDON_HASH_BYTES_IN_FIELD};
 
 pub use error::Error;

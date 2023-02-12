@@ -142,9 +142,8 @@ mod codecopy_tests {
         bytecode,
         evm_types::{MemoryAddress, OpcodeId, StackAddress},
         geth_types::GethData,
-        Word, H256,
+        Word,
     };
-    use ethers_core::utils::keccak256;
     use mock::{
         test_ctx::helpers::{account_0_code_account_1_no_code, tx_from_1_to_0},
         TestContext,
@@ -154,6 +153,7 @@ mod codecopy_tests {
         circuit_input_builder::{CopyDataType, ExecState, NumberOrHash},
         mock::BlockData,
         operation::{MemoryOp, StackOp, RW},
+        CodeHash, PoseidonCodeHash, POSEIDON_HASH_BYTES_IN_FIELD,
     };
 
     #[test]
@@ -240,10 +240,9 @@ mod codecopy_tests {
         let copy_events = builder.block.copy_events.clone();
         assert_eq!(copy_events.len(), 1);
         assert_eq!(copy_events[0].bytes.len(), size);
-        assert_eq!(
-            copy_events[0].src_id,
-            NumberOrHash::Hash(H256(keccak256(&code.to_vec())))
-        );
+        let code_hash =
+            PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD).hash_code(&code.to_vec());
+        assert_eq!(copy_events[0].src_id, NumberOrHash::Hash(code_hash));
         assert_eq!(copy_events[0].src_addr as usize, code_offset);
         assert_eq!(copy_events[0].src_addr_end as usize, code.to_vec().len());
         assert_eq!(copy_events[0].src_type, CopyDataType::Bytecode);
