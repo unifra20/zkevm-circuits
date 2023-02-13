@@ -335,6 +335,7 @@ impl<F: Field> StateCircuitConfig<F> {
                 committed_value_value,
             )?;
             let mpt_proof_type = committed_value_value.map(|pair| {
+                // hmmmmmmmmm
                 F::from(match row {
                     Rw::AccountStorage { .. } => {
                         if pair[0].is_zero_vartime() && pair[1].is_zero_vartime() {

@@ -56,6 +56,7 @@ impl Opcode for Balance {
 
         // Read account balance.
         let account = state.sdb.get_account(&address).1;
+        dbg!(account, account.is_empty());
         let exists = !account.is_empty();
         let balance = account.balance;
         let code_hash = if exists {
@@ -121,6 +122,8 @@ mod balance_tests {
         test_ok(true, true, Some(vec![2, 3, 4]))
     }
 
+    // account_code = None should be the same as exists = false, so we can remove
+    // it.
     fn test_ok(exists: bool, is_warm: bool, account_code: Option<Vec<u8>>) {
         let address = address!("0xaabbccddee000000000000000000000000000000");
 
@@ -259,6 +262,12 @@ mod balance_tests {
             U256::from(
                 PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD)
                     .hash_code(&code)
+                    .0,
+            )
+        } else if exists {
+            U256::from(
+                PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD)
+                    .empty_hash()
                     .0,
             )
         } else {

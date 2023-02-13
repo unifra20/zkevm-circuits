@@ -3,7 +3,7 @@
 
 use crate::{
     precompile::is_precompiled,
-    util::{CodeHashCopy, PoseidonCodeHash, POSEIDON_HASH_BYTES_IN_FIELD},
+    util::{CodeHash, CodeHashCopy, PoseidonCodeHash, POSEIDON_HASH_BYTES_IN_FIELD},
 };
 use eth_types::{Address, Hash, Word, H256, U256};
 use ethers_core::utils::keccak256;
@@ -14,7 +14,8 @@ lazy_static! {
     static ref ACCOUNT_ZERO: Account = Account::zero();
     static ref VALUE_ZERO: Word = Word::zero();
     static ref KECCAK_CODE_HASH_ZERO: Hash = H256(keccak256([]));
-    static ref POSEIDON_CODE_HASH_ZERO: Hash = H256::zero();
+    static ref POSEIDON_CODE_HASH_ZERO: Hash =
+        PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD).empty_hash();
 }
 
 /// Memory storage for contract code by code hash.

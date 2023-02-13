@@ -11,7 +11,8 @@ use crate::{
     },
     util::{build_tx_log_expression, Challenges, Expr},
 };
-use eth_types::{Field, H256};
+use bus_mapping::{CodeHash, PoseidonCodeHash, POSEIDON_HASH_BYTES_IN_FIELD};
+use eth_types::{Field, H256, ToWord, ToLittleEndian};
 use gadgets::util::{and, not};
 use halo2_proofs::{
     circuit::Value,
@@ -456,7 +457,11 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
     }
 
     pub(crate) fn empty_poseidon_hash_rlc(&self) -> Expression<F> {
-        self.word_rlc(H256::zero().0.map(|byte| byte.expr()))
+        let bytes = PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD)
+            .empty_hash()
+            .to_word()
+            .to_le_bytes();
+        self.word_rlc(bytes.map(|byte| byte.expr()))
     }
 
     // Common

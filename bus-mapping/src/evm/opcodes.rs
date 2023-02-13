@@ -6,6 +6,7 @@ use crate::{
     operation::{
         AccountField, CallContextField, TxAccessListAccountOp, TxReceiptField, TxRefundOp, RW,
     },
+    util::{CodeHash, PoseidonCodeHash, POSEIDON_HASH_BYTES_IN_FIELD},
     Error,
 };
 use core::fmt::Debug;
@@ -349,6 +350,7 @@ pub fn gen_associated_ops(
 }
 
 pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Error> {
+    dbg!("hiiii");
     let mut exec_step = state.new_begin_tx_step();
     let call = state.call()?.clone();
 
@@ -421,9 +423,11 @@ pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Er
         );
         (
             callee_code_hash.to_word(),
-            callee_code_hash.eq(&H256::zero()), // TODO(rohit): poseidon hash of empty bytes?
+            // TODO: fix this.... but it can't be the reason the current test is failing?
+            callee_code_hash.eq(&PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD).empty_hash()), /* TODO(rohit): poseidon hash of empty bytes? */
         )
     } else {
+        // not sure if this should still be the case.
         (Word::zero(), true)
     };
 
@@ -435,6 +439,7 @@ pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Er
         callee_code_hash_word,
     )?;
     // Transfer with fee
+    // here????
     state.transfer_with_fee(
         &mut exec_step,
         call.caller_address,
@@ -500,6 +505,7 @@ pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Er
                 // if the transfer values make an account from non-exist to exist
                 // we need to handle to codehash change
                 if !call.value.is_zero() {
+                    // these should be reads?
                     state.account_write(
                         &mut exec_step,
                         call.address,
@@ -507,12 +513,33 @@ pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Er
                         Word::from_big_endian(&*EMPTY_HASH),
                         Word::from_big_endian(&*EMPTY_HASH),
                     )?;
+                    assert_eq!(
+                        Word::from_big_endian(
+                            PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD)
+                                .empty_hash()
+                                .0
+                                .as_slice()
+                        ),
+                        PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD)
+                            .empty_hash()
+                            .to_word()
+                    );
                     state.account_write(
                         &mut exec_step,
                         call.address,
                         AccountField::PoseidonCodeHash,
-                        Word::zero(), // TODO(rohit): poseidon hash of empty bytes?
-                        Word::zero(), // TODO(rohit): poseidon hash of empty bytes?
+                        Word::from_big_endian(
+                            PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD)
+                                .empty_hash()
+                                .0
+                                .as_slice(),
+                        ),
+                        Word::from_big_endian(
+                            PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD)
+                                .empty_hash()
+                                .0
+                                .as_slice(),
+                        ),
                     )?;
                     state.account_write(
                         &mut exec_step,

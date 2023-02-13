@@ -213,7 +213,7 @@ mod extcodecopy_tests {
     use eth_types::{
         evm_types::{MemoryAddress, OpcodeId, StackAddress},
         geth_types::GethData,
-        U256,
+        H256, U256,
     };
     use mock::TestContext;
 
@@ -243,8 +243,13 @@ mod extcodecopy_tests {
         });
 
         let bytecode_ext = Bytecode::from(code_ext.to_vec());
-        let code_hash =
-            PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD).hash_code(&code_ext.to_vec());
+        // TODO: bytecode_ext = vec![] is being used to indicate an empty account.
+        // Should be an optional vec and we need to add tests for EOA vs. non-EOA.
+        let code_hash = if bytecode_ext.code.len() == 0 {
+            H256::zero()
+        } else {
+            PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD).hash_code(&code_ext.to_vec())
+        };
 
         // Get the execution steps from the external tracer
         let block: GethData = TestContext::<3, 1>::new(

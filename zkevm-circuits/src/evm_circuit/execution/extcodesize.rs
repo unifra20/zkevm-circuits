@@ -52,10 +52,12 @@ impl<F: Field> ExecutionGadget<F> for ExtcodesizeGadget<F> {
         );
 
         let code_hash = cb.query_cell_phase2();
+        // This seems redundant? We're checking that if the code size == 0 <=> code hash
+        // is that of the empty string, but this is should constrained already?
         // For non-existing accounts the code_hash must be 0 in the rw_table.
         cb.account_read(
             address.expr(),
-            AccountFieldTag::PoseidonCodeHash,
+            AccountFieldTag::KeccakCodeHash,
             code_hash.expr(),
         );
         let not_exists = IsZeroGadget::construct(cb, code_hash.expr());

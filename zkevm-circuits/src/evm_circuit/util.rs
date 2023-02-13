@@ -7,8 +7,9 @@ use crate::{
     },
     util::{query_expression, Challenges, Expr},
 };
-use eth_types::ToLittleEndian;
+use bus_mapping::{CodeHash, PoseidonCodeHash, POSEIDON_HASH_BYTES_IN_FIELD};
 use eth_types::U256;
+use eth_types::{ToLittleEndian, ToWord};
 use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Region, Value},
@@ -197,7 +198,11 @@ impl<'r, 'b, F: FieldExt> CachedRegion<'r, 'b, F> {
     }
 
     pub fn empty_poseidon_hash_rlc(&self) -> Value<F> {
-        self.word_rlc(U256::zero())
+        self.word_rlc(
+            PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD)
+                .empty_hash()
+                .to_word(),
+        )
     }
 
     /// Constrains a cell to have a constant value.

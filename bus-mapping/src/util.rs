@@ -123,7 +123,10 @@ impl CodeHash for PoseidonCodeHash {
     }
 
     fn empty_hash(&self) -> Hash {
-        Hash::zero()
+        // // TODO: replace this with the correct empty hash
+        let mut hash = [0; 32];
+        hash[31] = 6;
+        hash.into()
     }
 }
 

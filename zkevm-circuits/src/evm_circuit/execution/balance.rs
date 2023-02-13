@@ -128,11 +128,15 @@ impl<F: Field> ExecutionGadget<F> for BalanceGadget<F> {
             .assign(region, offset, Value::known(F::from(is_warm)))?;
 
         let code_hash = block.rws[step.rw_indices[5]].account_value_pair().0;
+        dbg!(code_hash);
+        // assign 0 here....
         self.code_hash
             .assign(region, offset, region.word_rlc(code_hash))?;
         self.not_exists
             .assign_value(region, offset, region.word_rlc(code_hash))?;
         let balance = if code_hash.is_zero() {
+            // assert_eq!(block.rws[step.rw_indices[6]].account_value_pair().0,
+            // eth_types::Word::zero());
             eth_types::Word::zero()
         } else {
             block.rws[step.rw_indices[6]].account_value_pair().0
@@ -166,11 +170,32 @@ mod test {
     }
 
     #[test]
-    fn balance_gadget_empty_account() {
+    fn balance_gadget_empty_account_a() {
+        // this means an EOA?
         let account = Some(Account::default());
 
         test_root_ok(&account, false);
+        // test_internal_ok(0x20, 0x00, &account, false);
+        // test_internal_ok(0x1010, 0xff, &account, false);
+    }
+
+    #[test]
+    fn balance_gadget_empty_account_b() {
+        // this means an EOA?
+        let account = Some(Account::default());
+
+        // test_root_ok(&account, false);
         test_internal_ok(0x20, 0x00, &account, false);
+        // test_internal_ok(0x1010, 0xff, &account, false);
+    }
+
+    #[test]
+    fn balance_gadget_empty_account_c() {
+        // this means an EOA?
+        let account = Some(Account::default());
+
+        // test_root_ok(&account, false);
+        // test_internal_ok(0x20, 0x00, &account, false);
         test_internal_ok(0x1010, 0xff, &account, false);
     }
 
@@ -217,6 +242,7 @@ mod test {
             STOP
         });
 
+        // this does not actually test a non-existent account is account is None.
         let ctx = TestContext::<3, 1>::new(
             None,
             |accs| {
