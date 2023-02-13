@@ -34,7 +34,7 @@ env_logger = "0.9"
 halo2_base = { git = "https://github.com/scroll-tech/halo2-lib", branch = "parallel_syn", default-features = false }
 halo2_ecc = { git = "https://github.com/scroll-tech/halo2-lib", branch = "parallel_syn", default-features = false }
 
-maingate = { git = "https://github.com/privacy-scaling-explorations/halo2wrong", tag = "v2022_09_09" }
+maingate = { git = "https://github.com/scroll-tech/halo2wrong", branch = "parallel_syn" }
 libsecp256k1 = "0.7"
 num-bigint = { version = "0.4" }
 rlp = "0.5.1"
