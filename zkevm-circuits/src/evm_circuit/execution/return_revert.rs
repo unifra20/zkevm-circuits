@@ -197,11 +197,11 @@ impl<F: Field> ExecutionGadget<F> for ReturnRevertGadget<F> {
             RestoreContextGadget::construct(
                 cb,
                 is_success.expr(),
-                not::expr(is_create.clone()) * (7.expr() + copy_rw_increase.expr()), // subsequent .... rw counter increases....
+                not::expr(is_create.clone()) * (5.expr() + copy_rw_increase.expr()),
                 range.offset(),
                 range.length(),
                 memory_expansion.gas_cost(),
-                3.expr() * is_contract_deployment, // There are three reversible writes in this case. // reversible rw counter increases....
+                3.expr() * is_contract_deployment, // There are three reversible writes in this case.
             )
         });
 
