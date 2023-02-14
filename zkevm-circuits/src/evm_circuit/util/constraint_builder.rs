@@ -12,7 +12,7 @@ use crate::{
     util::{build_tx_log_expression, Challenges, Expr},
 };
 use bus_mapping::{CodeHash, PoseidonCodeHash, POSEIDON_HASH_BYTES_IN_FIELD};
-use eth_types::{Field, H256, ToWord, ToLittleEndian};
+use eth_types::{Field, ToLittleEndian, ToWord, H256};
 use gadgets::util::{and, not};
 use halo2_proofs::{
     circuit::Value,

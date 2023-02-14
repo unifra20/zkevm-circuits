@@ -1434,16 +1434,16 @@ impl<F: Field> ExecutionConfig<F> {
             }
             log_ctx_done = true;
             log::error!("assigned_rw_values {:?}", assigned_rw_values);
-            for (idx, rw_idx) in step.rw_indices.iter().enumerate() {
-                log::error!(
-                    "{}th rw of step: {:?} rlc {:?}",
-                    idx,
-                    block.rws[*rw_idx],
-                    block.rws[*rw_idx]
-                        .table_assignment_aux(evm_randomness)
-                        .rlc(lookup_randomness)
-                );
-            }
+            // for (idx, rw_idx) in step.rw_indices.iter().enumerate() {
+            //     log::error!(
+            //         "{}th rw of step: {:?} rlc {:?}",
+            //         idx,
+            //         block.rws[*rw_idx],
+            //         block.rws[*rw_idx]
+            //             .table_assignment_aux(evm_randomness)
+            //             .rlc(lookup_randomness)
+            //     );
+            // }
             let mut tx = transaction.clone();
             tx.call_data.clear();
             tx.calls.clear();
@@ -1473,13 +1473,14 @@ impl<F: Field> ExecutionConfig<F> {
             if !rlc_assignments.contains(value) {
                 log_ctx(&assigned_rw_values);
                 log::error!(
-                    "incorrect rw witness. input_value {:?}, name \"{}\". table_value {:?}, table_assignments {:?}, rw {:?}, index {:?}, {}th rw of step",
+                    "incorrect rw witness. input_value {:?}, name \"{}\". table_value {:?}, table_assignments {:?}, rw {:#?}, index {:?}, {}th rw of step",
                     assigned_rw_values[idx].1,
                     assigned_rw_values[idx].0,
                     rlc,
                     table_assignments,
                     rw,
                     rw_idx, idx);
+                log::error!("{:#?}", step.execution_state);
 
                 //debug_assert_eq!(
                 //    rlc, assigned_rw_values[idx].1,

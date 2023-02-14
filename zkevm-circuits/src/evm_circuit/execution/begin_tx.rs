@@ -241,7 +241,7 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
                 //   - Write Account Balance
                 //   - Write Account Balance
                 //   - Read Account PoseidonCodeHash
-                rw_counter: Delta(12.expr() + 1.expr() * not::expr(tx_value_is_zero.expr())),
+                rw_counter: Delta(10.expr() + 3.expr() * not::expr(tx_value_is_zero.expr())),
                 call_id: To(call_id.expr()),
                 ..StepStateTransition::any()
             });

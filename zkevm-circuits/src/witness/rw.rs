@@ -545,7 +545,8 @@ impl Rw {
                 AccountFieldTag::KeccakCodeHash
                 | AccountFieldTag::Balance
                 | AccountFieldTag::PoseidonCodeHash => {
-                    RandomLinearCombination::random_linear_combine(value.to_le_bytes(), randomness) // here we use le bytes.....
+                    RandomLinearCombination::random_linear_combine(value.to_le_bytes(), randomness)
+                    // here we use le bytes.....
                 }
                 AccountFieldTag::Nonce
                 | AccountFieldTag::NonExisting
@@ -579,7 +580,9 @@ impl Rw {
                 field_tag,
                 ..
             } => Some(match field_tag {
-                AccountFieldTag::KeccakCodeHash | AccountFieldTag::Balance | AccountFieldTag::PoseidonCodeHash => {
+                AccountFieldTag::KeccakCodeHash
+                | AccountFieldTag::Balance
+                | AccountFieldTag::PoseidonCodeHash => {
                     RandomLinearCombination::random_linear_combine(
                         value_prev.to_le_bytes(),
                         randomness,

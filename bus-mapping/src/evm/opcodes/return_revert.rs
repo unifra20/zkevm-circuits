@@ -91,7 +91,9 @@ impl Opcode for ReturnRevert {
                     address: state.call()?.address,
                     field: AccountField::PoseidonCodeHash,
                     value: code_info.poseidon_hash.to_word(),
-                    value_prev: Word::zero(), // TODO(rohit): poseidon hash for empty code?
+                    value_prev: PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD)
+                        .empty_hash()
+                        .to_word(),
                 },
             )?;
             state.push_op_reversible(

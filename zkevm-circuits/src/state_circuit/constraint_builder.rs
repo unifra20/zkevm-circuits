@@ -331,14 +331,14 @@ impl<F: Field> ConstraintBuilder<F> {
         //     "mpt_proof_type is field_tag or StorageDoesNotExist",
         //     q.mpt_proof_type(),
         //     is_non_exist.expr() * ProofType::StorageDoesNotExist.expr()
-        //         + (1.expr() - is_non_exist) * ProofType::StorageChanged.expr(),
-        // );
+        //         + (1.expr() - is_non_exist) *
+        // ProofType::StorageChanged.expr(), );
 
         // ref. spec 4.1. MPT lookup for last access to (address, storage_key)
         // self.condition(q.last_access(), |cb| {
         //     cb.add_lookup(
-        //         "mpt_update exists in mpt circuit for AccountStorage last access",
-        //         vec![
+        //         "mpt_update exists in mpt circuit for AccountStorage last
+        // access",         vec![
         //             (
         //                 q.rw_table.address.clone(),
         //                 q.mpt_update_table.address.clone(),
@@ -347,11 +347,13 @@ impl<F: Field> ConstraintBuilder<F> {
         //                 q.rw_table.storage_key.clone(),
         //                 q.mpt_update_table.storage_key.clone(),
         //             ),
-        //             (q.mpt_proof_type(), q.mpt_update_table.proof_type.clone()),
-        //             (q.state_root(), q.mpt_update_table.new_root.clone()),
-        //             (q.state_root_prev(), q.mpt_update_table.old_root.clone()),
-        //             (q.value(), q.mpt_update_table.new_value.clone()),
-        //             (q.initial_value(), q.mpt_update_table.old_value.clone()),
+        //             (q.mpt_proof_type(),
+        // q.mpt_update_table.proof_type.clone()),
+        // (q.state_root(), q.mpt_update_table.new_root.clone()),
+        //             (q.state_root_prev(),
+        // q.mpt_update_table.old_root.clone()),             (q.value(),
+        // q.mpt_update_table.new_value.clone()),
+        // (q.initial_value(), q.mpt_update_table.old_value.clone()),
         //         ],
         //     );
         // });
@@ -439,13 +441,13 @@ impl<F: Field> ConstraintBuilder<F> {
                 .iter()
                 .map(|t| *t as usize),
             );
-        self.require_equal(
-            "mpt_proof_type is field_tag or AccountDoesNotExists",
-            q.mpt_proof_type(),
-            // degree = max(4, 4 + 1) = 5
-            is_non_exist.expr() * ProofType::AccountDoesNotExist.expr()
-                + (1.expr() - is_non_exist) * q.field_tag(),
-        );
+        // self.require_equal(
+        //     "mpt_proof_type is field_tag or AccountDoesNotExists",
+        //     q.mpt_proof_type(),
+        //     // degree = max(4, 4 + 1) = 5
+        //     is_non_exist.expr() * ProofType::AccountDoesNotExist.expr()
+        //         + (1.expr() - is_non_exist) * q.field_tag(),
+        // );
 
         // last_access degree = 1
         // self.condition(q.last_access(), |cb| {
@@ -460,11 +462,13 @@ impl<F: Field> ConstraintBuilder<F> {
         //                 q.rw_table.storage_key.clone(),
         //                 q.mpt_update_table.storage_key.clone(),
         //             ),
-        //             (q.mpt_proof_type(), q.mpt_update_table.proof_type.clone()),
-        //             (q.state_root(), q.mpt_update_table.new_root.clone()),
-        //             (q.state_root_prev(), q.mpt_update_table.old_root.clone()),
-        //             (q.value(), q.mpt_update_table.new_value.clone()),
-        //             (q.initial_value(), q.mpt_update_table.old_value.clone()),
+        //             (q.mpt_proof_type(),
+        // q.mpt_update_table.proof_type.clone()),
+        // (q.state_root(), q.mpt_update_table.new_root.clone()),
+        //             (q.state_root_prev(),
+        // q.mpt_update_table.old_root.clone()),             (q.value(),
+        // q.mpt_update_table.new_value.clone()),
+        // (q.initial_value(), q.mpt_update_table.old_value.clone()),
         //         ],
         //     );
         // });

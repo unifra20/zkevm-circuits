@@ -67,7 +67,11 @@ impl<const IS_CREATE2: bool> Opcode for Create<IS_CREATE2> {
             handle_copy(state, &mut exec_step, state.call()?.call_id, offset, length)?
         } else {
             // TODO(rohit): poseidon hash for empty bytes?
-            (vec![], H256(keccak256([])), H256::zero())
+            (
+                vec![],
+                H256(keccak256([])),
+                PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD).empty_hash(),
+            )
         };
 
         let tx_id = state.tx_ctx.id();
