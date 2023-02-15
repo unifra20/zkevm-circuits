@@ -616,35 +616,6 @@ impl<F: Field> SignVerifyChip<F> {
             })
             .collect();
         let assigned_ecdsas = layouter.assign_regions(|| "ecdsa_sig", ecdsa_assignments)?;
-
-        // let assigned_ecdsas: Vec<_> =
-        // (0..self.max_verif)
-        //     .into_par_iter()
-        //     .map(|i| {
-        //         layouter
-        //             .assign_region(
-        //                 || "ecdsa chip verification",
-        //                 |region| {
-        //                     let mut ctx = Context::new(
-        //                         region,
-        //                         ContextParams {
-        //                             num_advice: vec![("ecdsa chip".to_string(),
-        // NUM_ADVICE)],                         },
-        //                     );
-
-        //                     let signature = if i < signatures.len() {
-        //                         signatures[i].clone()
-        //                     } else {
-        //                         // padding (enabled when address == 0)
-        //                         SignData::default()
-        //                     };
-        //                     self.assign_ecdsa(&mut ctx, &chips, &signature)
-        //                 },
-        //             )
-        //             .unwrap()
-        //     })
-        //     .collect();
-
         // end_timer!(ecdsa);
         // let rlc = start_timer!(|| "rlc verification");
         let (deferred_keccak_check, assigned_sig_verifs) = layouter.assign_region(
