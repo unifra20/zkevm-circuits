@@ -243,6 +243,7 @@ impl<F: Field> SignVerifyChip<F> {
         chips: &ChipsRef<F>,
         sign_data: &SignData,
     ) -> Result<AssignedECDSA<F, FpChip<F>>, Error> {
+        // let timer = start_timer!(|| "assign ecdsa");
         let SignData {
             signature,
             pk,
@@ -265,26 +266,36 @@ impl<F: Field> SignVerifyChip<F> {
         // println!("r: {:?}", sig_r);
         // println!("s: {:?}", sig_s);
         // println!("msg: {:?}", msg_hash);
-
+        // let timer_r = start_timer!(||"integer r");
         let integer_r = fq_chip.load_private(
             ctx,
             FqOverflowChip::<F>::fe_to_witness(&Value::known(*sig_r)),
         )?;
+        // end_timer!(timer_r);
+
+        // let timer_s = start_timer!(||"integer s");
         let integer_s = fq_chip.load_private(
             ctx,
             FqOverflowChip::<F>::fe_to_witness(&Value::known(*sig_s)),
         )?;
+        // end_timer!(timer_s);
+
+        // let timer_msg = start_timer!(||"msg_hash");
         let msg_hash = fq_chip.load_private(
             ctx,
             FqOverflowChip::<F>::fe_to_witness(&Value::known(*msg_hash)),
         )?;
+        // end_timer!(timer_msg);
 
+        // let timer_pk = start_timer!(||"pk");
         let pk_assigned = ecc_chip.load_private(ctx, (Value::known(pk.x), Value::known(pk.y)))?;
-
+        // end_timer!(timer_pk);
         // returns the verification result of ecdsa signature
         //
         // WARNING: this circuit does not enforce the returned value to be true
         // make sure the caller checks this result!
+
+        // let timer_ecdsa = start_timer!(|| "ecdsa");
         let ecdsa_is_valid = ecdsa_verify_no_pubkey_check::<F, Fp, Fq, Secp256k1Affine>(
             ecc_chip.field_chip,
             ctx,
@@ -296,13 +307,9 @@ impl<F: Field> SignVerifyChip<F> {
             4,
         )?;
         // println!("ECDSA res {:?}", ecdsa_is_valid);
+        // end_timer!(timer_ecdsa);
 
-        // IMPORTANT: this assigns all constants to the fixed columns
-        // IMPORTANT: this copies cells to the lookup advice column to perform range
-        // check lookups
-        // This is not optional.
-        let (_const_rows, _total_fixed, _lookup_rows) = ecc_chip.field_chip.finalize(ctx)?;
-
+        // end_timer!(timer);
         Ok(AssignedECDSA {
             pk: pk_assigned,
             msg_hash,
@@ -613,9 +620,11 @@ impl<F: Field> SignVerifyChip<F> {
                     );
                     self.assign_ecdsa(&mut ctx, &chips, sig)
                 }
+
             })
             .collect();
         let assigned_ecdsas = layouter.assign_regions(|| "ecdsa_sig", ecdsa_assignments)?;
+        
         // end_timer!(ecdsa);
         // let rlc = start_timer!(|| "rlc verification");
         let (deferred_keccak_check, assigned_sig_verifs) = layouter.assign_region(
@@ -958,7 +967,7 @@ mod sign_verify_tests {
         // pk_hash: d90e2e9d267cbcfd94de06fa7adbe6857c2c733025c0b8938a76beeefc85d6c7
         // addr: 0x7adbe6857c2c733025c0b8938a76beeefc85d6c7
         let mut rng = XorShiftRng::seed_from_u64(1);
-        let k = 17;
+        let k = 18;
         for max_verif in [2, 4, 8] {
             println!("#sigs: {}", max_verif);
             let num_sigs = max_verif;
