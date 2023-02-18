@@ -6,6 +6,8 @@ use halo2_proofs::plonk::Assignment;
 use itertools::izip;
 use log::error;
 
+const EMPTY_DIGEST: &str = "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470";
+
 fn verify<F: Field>(k: u32, inputs: Vec<Vec<u8>>, digests: Vec<String>, success: bool) {
     let circuit = KeccakCircuit::new(Some(2usize.pow(k)), inputs.clone());
     let prover = MockProver::<F>::run(k, &circuit, vec![]).unwrap();
@@ -25,7 +27,7 @@ fn verify<F: Field>(k: u32, inputs: Vec<Vec<u8>>, digests: Vec<String>, success:
     }
 
     // Extract the content of the lookup table.
-    let hashes = {
+    let hash_lookup_table = {
         // Find the columns of the table.
         let is_enabled = prover.advice_values(config.keccak_table.is_enabled);
         let input_rlc = prover.advice_values(config.keccak_table.input_rlc);
@@ -51,18 +53,17 @@ fn verify<F: Field>(k: u32, inputs: Vec<Vec<u8>>, digests: Vec<String>, success:
     };
 
     // Check that all the digests are there.
-    assert!(hashes.len() >= inputs.len());
+    assert!(hash_lookup_table.len() >= inputs.len());
     assert_eq!(inputs.len(), digests.len());
-    for (input, digest, hash) in izip!(&inputs, &digests, &hashes) {
+    for (input, digest, hash) in izip!(&inputs, &digests, &hash_lookup_table) {
         let len = F::from(input.len() as u64);
         let expected = (rlc_input(input), len, rlc_digest(digest));
         assert_eq!(*hash, expected);
     }
 
     // Check that other digests are the digest of the empty message.
-    assert_eq!(F::zero(), rlc_input(&inputs[0]));
-    let empty_hash = (F::zero(), F::zero(), rlc_digest(&digests[0]));
-    for hash in hashes.iter().skip(inputs.len()) {
+    let empty_hash = (F::zero(), F::zero(), rlc_digest(EMPTY_DIGEST));
+    for hash in hash_lookup_table.iter().skip(inputs.len()) {
         assert_eq!(*hash, empty_hash);
     }
 }
@@ -79,7 +80,7 @@ fn packed_multi_keccak_simple() {
         (0..400).map(|i| (1 + 3 * i) as u8).collect::<Vec<_>>(),
     ];
     let digests = vec![
-        "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470".to_string(),
+        EMPTY_DIGEST.to_string(),
         "bc36789e7a1e281436464229828f817d6612f7b477d66591ff96a9e064bcc98a".to_string(),
         "cbdfd9dee5faad3818d6b06f95a219fd290b0e1706f6a82e5a595b9ce9faca62".to_string(),
         "7ce759f1ab7f9ce437719970c26b0a66ff11fe3e38e17df89cf5d29c7d7f807e".to_string(),
