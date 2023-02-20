@@ -178,7 +178,8 @@ impl MptUpdate {
     pub(crate) fn value_assignments<F: Field>(&self, word_randomness: F) -> (F, F) {
         let assign = |x: Word| match self.key {
             Key::Account {
-                field_tag: AccountFieldTag::Nonce | AccountFieldTag::NonExisting,
+                field_tag:
+                    AccountFieldTag::Nonce | AccountFieldTag::NonExisting | AccountFieldTag::CodeSize,
                 ..
             } => x.to_scalar().unwrap(),
             _ => RandomLinearCombination::random_linear_combine(x.to_le_bytes(), word_randomness),
