@@ -62,7 +62,9 @@ const NODE_TYPE_EMPTY: u8 = 2;
 pub(crate) struct AccountData {
     pub nonce: u64,
     pub balance: U256,
-    pub code_hash: H256,
+    pub keccak_code_hash: H256,
+    pub poseidon_code_hash: H256,
+    pub code_size: u64,
     pub storage_root: H256,
 }
 
@@ -93,19 +95,17 @@ impl CanRead for AccountData {
         let mut byte8_buf = [0u8; 8];
         let mut byte16_buf = [0u8; 16];
         let mut byte32_buf = [0; 32];
-
-        rd.read_exact(&mut byte16_buf)?;
-        rd.read_exact(&mut byte8_buf)?;
-        let code_size = U64::from_big_endian(&byte8_buf);
-        rd.read_exact(&mut byte8_buf)?;
-        let nonce = U64::from_big_endian(&byte8_buf);
-
-        //rd.read_exact(&mut byte32_buf)?; //nonce
-        //let nonce = U64::from_big_endian(&byte32_buf[24..]);
-        rd.read_exact(&mut byte32_buf)?; //balance
+        rd.read_exact(&mut byte32_buf)?; // nonce
+        let nonce = U64::from_big_endian(&byte32_buf[24..]);
+        //rd.read_exact(&mut byte32_buf)?; // code size
+        let code_size = U64::from_big_endian(&byte32_buf[24..]);
+        rd.read_exact(&mut byte32_buf)?; // balance
         let balance = U256::from_big_endian(&byte32_buf);
-
-        rd.read_exact(&mut byte32_buf)?; //storage root
+        rd.read_exact(&mut byte32_buf)?; // keccak hash of code
+        let keccak_code_hash = H256::from(&byte32_buf);
+        rd.read_exact(&mut byte32_buf)?; // poseidon hash of code
+        let poseidon_code_hash = H256::from(&byte32_buf);
+        rd.read_exact(&mut byte32_buf)?; //storage root, not need yet
         let storage_root = H256::from(&byte32_buf);
 
         rd.read_exact(&mut byte32_buf)?; //KeccakCodeHash
@@ -126,7 +126,9 @@ impl CanRead for AccountData {
         Ok(AccountData {
             nonce: nonce.as_u64(),
             balance,
-            code_hash,
+            keccak_code_hash,
+            poseidon_code_hash,
+            code_size: code_size.as_u64(),
             storage_root,
         })
     }

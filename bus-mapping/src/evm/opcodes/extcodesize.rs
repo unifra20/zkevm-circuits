@@ -2,7 +2,7 @@ use crate::circuit_input_builder::{CircuitInputStateRef, ExecStep};
 use crate::evm::Opcode;
 use crate::operation::{AccountField, CallContextField, TxAccessListAccountOp, RW};
 use crate::Error;
-use eth_types::{GethExecStep, ToAddress, ToWord, H256};
+use eth_types::{GethExecStep, ToAddress, ToWord, Word, H256};
 
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct Extcodesize;
@@ -52,30 +52,34 @@ impl Opcode for Extcodesize {
         // Read account code hash and get code length.
         let account = state.sdb.get_account(&address).1;
         let exists = !account.is_empty();
-        let code_hash = if exists {
-            account.code_hash
+        let (code_hash, code_size) = if exists {
+            (account.keccak_code_hash, account.code_size)
         } else {
-            H256::zero()
+            (H256::zero(), Word::zero())
         };
         state.account_read(
             &mut exec_step,
             address,
-            AccountField::CodeHash,
+            AccountField::KeccakCodeHash,
             code_hash.to_word(),
             code_hash.to_word(),
         )?;
-        let code_size = if exists {
-            state.code(code_hash)?.len()
-        } else {
-            0
-        };
+        if exists {
+            state.account_read(
+                &mut exec_step,
+                address,
+                AccountField::CodeSize,
+                code_size,
+                code_size,
+            )?;
+        }
 
         // Write the EXTCODESIZE result to stack.
-        debug_assert_eq!(code_size, geth_steps[1].stack.last()?.as_usize());
+        debug_assert_eq!(code_size, geth_steps[1].stack.last()?);
         state.stack_write(
             &mut exec_step,
             geth_steps[1].stack.nth_last_filled(0),
-            code_size.into(),
+            code_size,
         )?;
 
         Ok(vec![exec_step])
@@ -88,10 +92,10 @@ mod extcodesize_tests {
     use crate::circuit_input_builder::ExecState;
     use crate::mock::BlockData;
     use crate::operation::{AccountOp, CallContextOp, StackOp};
+    use crate::{CodeHash, EthCodeHash};
     use eth_types::evm_types::{OpcodeId, StackAddress};
     use eth_types::geth_types::{Account, GethData};
     use eth_types::{bytecode, Bytecode, Word, U256};
-    use ethers_core::utils::keccak256;
     use mock::{TestContext, MOCK_1_ETH, MOCK_ACCOUNTS, MOCK_CODES};
     use pretty_assertions::assert_eq;
 
@@ -228,20 +232,34 @@ mod extcodesize_tests {
             }
         );
 
-        let code_hash = Word::from(keccak256(account.code.clone()));
+        let code_hash = EthCodeHash {}.hash_code(&account.code).to_word();
+        let code_size = account.code.len().to_word();
         let operation = &container.account[indices[5].as_usize()];
         assert_eq!(operation.rw(), RW::READ);
         assert_eq!(
             operation.op(),
             &AccountOp {
                 address: account.address,
-                field: AccountField::CodeHash,
-                value: if exists { code_hash } else { U256::zero() },
-                value_prev: if exists { code_hash } else { U256::zero() },
+                field: AccountField::KeccakCodeHash,
+                value: if exists { code_hash } else { Word::zero() },
+                value_prev: if exists { code_hash } else { Word::zero() },
             }
         );
+        if exists {
+            let operation = &container.account[indices[6].as_usize()];
+            assert_eq!(operation.rw(), RW::READ);
+            assert_eq!(
+                operation.op(),
+                &AccountOp {
+                    address: account.address,
+                    field: AccountField::CodeSize,
+                    value: code_size,
+                    value_prev: code_size,
+                },
+            );
+        }
 
-        let operation = &container.stack[indices[6].as_usize()];
+        let operation = &container.stack[indices[if exists { 7 } else { 6 }].as_usize()];
         assert_eq!(operation.rw(), RW::WRITE);
         assert_eq!(
             operation.op(),

@@ -440,7 +440,9 @@ fn tracer_err_address_collision() {
             balance: Word::from(555u64), /* same value as in
                                           * `mock::new_tracer_account` */
             storage: HashMap::new(),
-            code_hash: Hash::zero(),
+            keccak_code_hash: Hash::zero(),
+            poseidon_code_hash: Hash::zero(),
+            code_size: Word::zero(),
         },
     );
     builder.builder.sdb.set_account(
@@ -449,7 +451,9 @@ fn tracer_err_address_collision() {
             nonce: Word::zero(),
             balance: Word::zero(),
             storage: HashMap::new(),
-            code_hash: Hash::zero(),
+            keccak_code_hash: Hash::zero(),
+            poseidon_code_hash: Hash::zero(),
+            code_size: Word::zero(),
         },
     );
     assert_eq!(
@@ -1728,7 +1732,9 @@ fn create_address() {
             nonce: Word::from(1),
             balance: Word::zero(),
             storage: HashMap::new(),
-            code_hash: Hash::zero(),
+            keccak_code_hash: Hash::zero(),
+            poseidon_code_hash: Hash::zero(),
+            code_size: Word::zero(),
         },
     );
     let addr = builder.state_ref().create_address().unwrap();

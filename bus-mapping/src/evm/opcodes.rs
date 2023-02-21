@@ -7,7 +7,7 @@ use crate::{
         AccountField, AccountOp, CallContextField, TxAccessListAccountOp, TxReceiptField,
         TxRefundOp, RW,
     },
-    state_db::CodeDB,
+    util::{CodeHash, PoseidonCodeHash, POSEIDON_HASH_BYTES_IN_FIELD},
     Error,
 };
 use core::fmt::Debug;
@@ -367,6 +367,7 @@ pub fn gen_associated_ops(
 }
 
 pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Error> {
+    dbg!("hiiii");
     let mut exec_step = state.new_begin_tx_step();
     let call = state.call()?.clone();
 
@@ -426,7 +427,36 @@ pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Er
     } + call_data_gas_cost;
     exec_step.gas_cost = GasCost(intrinsic_gas_cost);
 
+    // Get code_hash of callee
+    let (_, callee_account) = state.sdb.get_account(&call.address);
+    let callee_exists = !callee_account.is_empty();
+    let code_hash = callee_account.poseidon_code_hash;
+    let callee_code_hash = call.code_hash;
+    let (callee_code_hash_word, is_empty_code_hash) = if callee_exists {
+        debug_assert_eq!(
+            callee_code_hash, code_hash,
+            "call.address {:?} callee_account {:?}",
+            call.address, callee_account
+        );
+        (
+            callee_code_hash.to_word(),
+            // TODO: fix this.... but it can't be the reason the current test is failing?
+            callee_code_hash.eq(&PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD).empty_hash()), /* TODO(rohit): poseidon hash of empty bytes? */
+        )
+    } else {
+        // not sure if this should still be the case.
+        (Word::zero(), true)
+    };
+
+    state.account_read(
+        &mut exec_step,
+        call.address,
+        AccountField::PoseidonCodeHash,
+        callee_code_hash_word,
+        callee_code_hash_word,
+    )?;
     // Transfer with fee
+    // here????
     state.transfer_with_fee(
         &mut exec_step,
         call.caller_address,
@@ -542,12 +572,48 @@ pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Er
                 // if the transfer values make an account from non-exist to exist
                 // we need to handle to codehash change
                 if !call.value.is_zero() {
+                    // these should be reads?
                     state.account_write(
                         &mut exec_step,
                         call.address,
-                        AccountField::CodeHash,
-                        CodeDB::empty_code_hash().to_word(),
-                        CodeDB::empty_code_hash().to_word(), // or Word::zero()?
+                        AccountField::KeccakCodeHash,
+                        Word::from_big_endian(&*EMPTY_HASH),
+                        Word::from_big_endian(&*EMPTY_HASH),
+                    )?;
+                    assert_eq!(
+                        Word::from_big_endian(
+                            PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD)
+                                .empty_hash()
+                                .0
+                                .as_slice()
+                        ),
+                        PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD)
+                            .empty_hash()
+                            .to_word()
+                    );
+                    state.account_write(
+                        &mut exec_step,
+                        call.address,
+                        AccountField::PoseidonCodeHash,
+                        Word::from_big_endian(
+                            PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD)
+                                .empty_hash()
+                                .0
+                                .as_slice(),
+                        ),
+                        Word::from_big_endian(
+                            PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD)
+                                .empty_hash()
+                                .0
+                                .as_slice(),
+                        ),
+                    )?;
+                    state.account_write(
+                        &mut exec_step,
+                        call.address,
+                        AccountField::CodeSize,
+                        Word::zero(),
+                        Word::zero(),
                     )?;
                 }
                 return Ok(exec_step);

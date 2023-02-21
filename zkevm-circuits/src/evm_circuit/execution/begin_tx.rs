@@ -172,7 +172,7 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
                 eth_types::evm_types::GasCost::CREATION_TX.expr(),
                 eth_types::evm_types::GasCost::TX.expr(),
             ) + tx_call_data_gas_cost.expr(),
-        );
+
         let gas_left = tx_gas.expr() - intrinsic_gas_cost.expr();
         let sufficient_gas_left = RangeCheckGadget::construct(cb, gas_left.clone());
 
@@ -193,7 +193,7 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
         cb.condition(not::expr(tx_is_create.expr()), |cb| {
             cb.account_read(
                 call_callee_address.expr(),
-                AccountFieldTag::CodeHash,
+                AccountFieldTag::PoseidonCodeHash,
                 phase2_code_hash.expr(),
             );
         });
@@ -237,7 +237,7 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
         });
 
         let is_empty_code_hash =
-            IsEqualGadget::construct(cb, phase2_code_hash.expr(), cb.empty_hash_rlc());
+            IsEqualGadget::construct(cb, phase2_code_hash.expr(), cb.empty_poseidon_hash_rlc());
         let is_zero_code_hash = IsZeroGadget::construct(cb, phase2_code_hash.expr());
         let is_empty_code = or::expr([is_empty_code_hash.expr(), is_zero_code_hash.expr()]);
 
@@ -373,18 +373,32 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
             is_empty_code.expr(),
             not::expr(is_precompile.expr()),
         ]);
-        cb.condition(
-            native_transfer.expr() * not::expr(tx_value_is_zero.expr()),
-            |cb| {
-                cb.account_write(
-                    call_callee_address.expr(),
-                    AccountFieldTag::CodeHash,
-                    cb.empty_hash_rlc(),
-                    cb.empty_hash_rlc(),
-                    None, // native transfer cannot fail
-                );
-            },
-        );
+        let native_nonzero_transfer = native_transfer.expr() * not::expr(tx_value_is_zero.expr());
+        cb.condition(native_nonzero_transfer, |cb| {
+            // this should only happen if an account for transferring to an account that was
+            // previously non-existent.
+            cb.account_write(
+                call_callee_address.expr(),
+                AccountFieldTag::KeccakCodeHash,
+                cb.empty_keccak_hash_rlc(),
+                cb.empty_keccak_hash_rlc(),
+                None, // native transfer cannot fail
+            );
+            cb.account_write(
+                call_callee_address.expr(),
+                AccountFieldTag::PoseidonCodeHash,
+                cb.empty_poseidon_hash_rlc(),
+                cb.empty_poseidon_hash_rlc(),
+                None, // native transfer cannot fail
+            );
+            cb.account_write(
+                call_callee_address.expr(),
+                AccountFieldTag::CodeSize,
+                0.expr(),
+                0.expr(),
+                None, // native transfer cannot fail
+            );
+        });
         cb.condition(native_transfer, |cb| {
             cb.require_equal(
                 "Tx to account with empty code should be persistent",
@@ -408,8 +422,8 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
                 //   - Write TxAccessListAccount
                 //   - Write Account Balance
                 //   - Write Account Balance
-                //   - Read Account CodeHash
-                rw_counter: Delta(10.expr() + not::expr(tx_value_is_zero.expr())),
+                //   - Read Account PoseidonCodeHash
+                rw_counter: Delta(10.expr() + 3.expr() * not::expr(tx_value_is_zero.expr())),
                 call_id: To(call_id.expr()),
                 ..StepStateTransition::any()
             });
@@ -457,7 +471,7 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
                 //   - Write TxAccessListAccount
                 //   - Write Account Balance (Reversible)
                 //   - Write Account Balance (Reversible)
-                //   - Read Account CodeHash
+                //   - Read Account PoseidonCodeHash
                 //   - Write CallContext Depth
                 //   - Write CallContext CallerAddress
                 //   - Write CallContext CalleeAddress
@@ -638,7 +652,7 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
             region,
             offset,
             region.word_rlc(callee_code_hash),
-            region.empty_hash_rlc(),
+            region.empty_poseidon_hash_rlc(),
         )?;
         self.is_zero_code_hash
             .assign_value(region, offset, region.word_rlc(callee_code_hash))?;
