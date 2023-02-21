@@ -425,9 +425,9 @@ impl<F: Field> ConstraintBuilder<F> {
 
         // We use code_hash = 0 as non-existing account state.  code_hash: 0->0
         // transition requires a non-existing proof.
-        // is_non_exist degree = 4
+        // is_non_exist degree = 6
         //   q.is_non_exist() degree = 1
-        //   generate_lagrange_base_polynomial() degree = 3
+        //   generate_lagrange_base_polynomial() degree = 5
         let is_non_exist = q.is_non_exist()
             * generate_lagrange_base_polynomial(
                 q.field_tag(),
@@ -435,18 +435,20 @@ impl<F: Field> ConstraintBuilder<F> {
                 [
                     AccountFieldTag::Nonce,
                     AccountFieldTag::Balance,
+                    AccountFieldTag::KeccakCodeHash,
+                    AccountFieldTag::CodeSize,
                     AccountFieldTag::PoseidonCodeHash,
                 ]
                 .iter()
                 .map(|t| *t as usize),
             );
-        // self.require_equal(
-        //     "mpt_proof_type is field_tag or AccountDoesNotExists",
-        //     q.mpt_proof_type(),
-        //     // degree = max(4, 4 + 1) = 5
-        //     is_non_exist.expr() * ProofType::AccountDoesNotExist.expr()
-        //         + (1.expr() - is_non_exist) * q.field_tag(), // here we mix and match proof types and account field tags....
-        // );
+        self.require_equal(
+            "mpt_proof_type is field_tag or AccountDoesNotExists",
+            q.mpt_proof_type(),
+            // degree = max(6, 6 + 1) = 7
+            is_non_exist.expr() * ProofType::AccountDoesNotExist.expr()
+                + (1.expr() - is_non_exist) * q.field_tag(),
+        );
 
         // last_access degree = 1
         self.condition(q.last_access(), |cb| {
