@@ -8,7 +8,7 @@ use crate::Error;
 use eth_types::evm_types::gas_utils::{eip150_gas, memory_expansion_gas_cost};
 use eth_types::evm_types::GasCost;
 use eth_types::evm_types::OpcodeId;
-use eth_types::{GethExecStep, ToWord, Word, H256};
+use eth_types::{GethExecStep, ToWord, Word};
 use std::cmp::min;
 
 /// Placeholder structure used to implement [`Opcode`] trait over it
@@ -100,7 +100,7 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
             (
                 callee_code_hash.to_word(),
                 callee_code_hash
-                    .eq(&PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD).empty_hash()), /* TODO(rohit): poseidon hash for empty bytes? */
+                    .eq(&PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD).empty_hash()),
             )
         } else {
             (Word::zero(), true)

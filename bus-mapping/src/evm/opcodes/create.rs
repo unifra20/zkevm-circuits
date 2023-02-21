@@ -66,7 +66,6 @@ impl<const IS_CREATE2: bool> Opcode for Create<IS_CREATE2> {
         let (initialization_code, keccak_code_hash, poseidon_code_hash) = if length > 0 {
             handle_copy(state, &mut exec_step, state.call()?.call_id, offset, length)?
         } else {
-            // TODO(rohit): poseidon hash for empty bytes?
             (
                 vec![],
                 H256(keccak256([])),
@@ -208,7 +207,7 @@ impl<const IS_CREATE2: bool> Opcode for Create<IS_CREATE2> {
                 get_create2_address(
                     caller.address,
                     salt.to_be_bytes().to_vec(),
-                    initialization_code.clone()
+                    initialization_code
                 )
             );
             std::iter::once(0xffu8)

@@ -39,4 +39,4 @@ debug-assertions = true
 overflow-checks = true
 rpath = false
 lto = "thin"
-incremental = true
+incremental = false

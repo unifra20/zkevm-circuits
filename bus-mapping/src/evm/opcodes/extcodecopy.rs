@@ -245,7 +245,7 @@ mod extcodecopy_tests {
         let bytecode_ext = Bytecode::from(code_ext.to_vec());
         // TODO: bytecode_ext = vec![] is being used to indicate an empty account.
         // Should be an optional vec and we need to add tests for EOA vs. non-EOA.
-        let code_hash = if bytecode_ext.code.len() == 0 {
+        let code_hash = if bytecode_ext.code.is_empty() {
             H256::zero()
         } else {
             PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD).hash_code(&code_ext.to_vec())

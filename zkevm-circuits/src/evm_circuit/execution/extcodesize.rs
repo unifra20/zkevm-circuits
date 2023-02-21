@@ -14,7 +14,7 @@ use crate::evm_circuit::witness::{Block, Call, ExecStep, Transaction};
 use crate::table::{AccountFieldTag, CallContextFieldTag};
 use crate::util::Expr;
 use eth_types::evm_types::GasCost;
-use eth_types::{Field, ToLittleEndian, U256};
+use eth_types::{Field, ToLittleEndian};
 use halo2_proofs::circuit::Value;
 use halo2_proofs::plonk::Error;
 
@@ -52,8 +52,7 @@ impl<F: Field> ExecutionGadget<F> for ExtcodesizeGadget<F> {
         );
 
         let code_hash = cb.query_cell_phase2();
-        // This seems redundant? We're checking that if the code size == 0 <=> code hash
-        // is that of the empty string, but this is should constrained already?
+        // TODO: we don't need to lookup the keccak code hash here anymore.
         // For non-existing accounts the code_hash must be 0 in the rw_table.
         cb.account_read(
             address.expr(),
@@ -142,7 +141,7 @@ impl<F: Field> ExecutionGadget<F> for ExtcodesizeGadget<F> {
         self.not_exists
             .assign_value(region, offset, region.word_rlc(code_hash))?;
 
-        // TODO: we don't need the code hash anymore. 1 account read should suffice.
+        // TODO: we don't need the code hash anymore. 1 account read should be enough.
         let code_size = if code_hash.is_zero() {
             0u64
         } else {

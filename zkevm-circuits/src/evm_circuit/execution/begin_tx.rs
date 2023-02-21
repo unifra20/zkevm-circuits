@@ -160,8 +160,6 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
 
         // Read code_hash of callee
         let phase2_code_hash = cb.query_cell_phase2();
-        // this is also wrong somehow???
-        // presumable here????
         cb.account_read(
             call_callee_address.expr(),
             AccountFieldTag::PoseidonCodeHash,
@@ -182,7 +180,6 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
         // TODO: Handle creation transaction
         // TODO: Handle precompiled
 
-        // here????
         let is_empty_code_hash =
             IsEqualGadget::construct(cb, phase2_code_hash.expr(), cb.empty_poseidon_hash_rlc());
         let is_zero_code_hash = IsZeroGadget::construct(cb, phase2_code_hash.expr());
@@ -192,7 +189,7 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
         // check callop.rs
         let native_transfer = not::expr(tx_is_create.expr()) * is_empty_code.expr();
         let native_nonzero_transfer = native_transfer.expr() * not::expr(tx_value_is_zero.expr());
-        cb.condition(native_nonzero_transfer.clone(), |cb| {
+        cb.condition(native_nonzero_transfer, |cb| {
             // this should only happen if an account for transferring to an account that was
             // previously non-existent.
             cb.account_write(
@@ -351,8 +348,6 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
             [step.rw_indices[8], step.rw_indices[9]].map(|idx| block.rws[idx].account_value_pair());
         #[allow(clippy::if_same_then_else)]
         let callee_code_hash = if tx.is_create {
-            // call.code_hash
-            dbg!(call.code_hash, block.rws[step.rw_indices[7]]);
             block.rws[step.rw_indices[7]].account_value_pair().0
         } else {
             block.rws[step.rw_indices[7]].account_value_pair().0
@@ -432,7 +427,6 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
             tx.value,
             gas_fee,
         )?;
-        dbg!(callee_code_hash, region.word_rlc(callee_code_hash));
         self.phase2_code_hash
             .assign(region, offset, region.word_rlc(callee_code_hash))?;
         self.is_empty_code_hash.assign_value(
@@ -596,7 +590,6 @@ mod test {
             // Transfer nothing with random gas_price, tx reverts
             (eth(0), random_gas_price, vec![], Some(code_with_revert())),
         ] {
-            dbg!(value, gas_price, &calldata, &code);
             test_ok(mock_tx(value, gas_price, calldata), code);
         }
     }

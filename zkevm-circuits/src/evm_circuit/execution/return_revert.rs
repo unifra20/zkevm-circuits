@@ -332,7 +332,7 @@ impl<F: Field> ExecutionGadget<F> for ReturnRevertGadget<F> {
             self.poseidon_code_hash.assign(
                 region,
                 offset,
-                region.word_rlc(U256::from_big_endian(&poseidon_code_hash.as_bytes())),
+                region.word_rlc(U256::from_big_endian(poseidon_code_hash.as_bytes())),
             )?;
 
             // code size.

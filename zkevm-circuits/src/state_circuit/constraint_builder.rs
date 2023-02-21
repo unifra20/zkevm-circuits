@@ -326,7 +326,6 @@ impl<F: Field> ConstraintBuilder<F> {
         // value = 0 means the leaf doesn't exist. 0->0 transition requires a
         // non-existing proof.
         let is_non_exist = q.is_non_exist();
-        // TODO: we have to fix the integer mapping for some tags....
         self.require_equal(
             "mpt_proof_type is field_tag or StorageDoesNotExist",
             q.mpt_proof_type(),
@@ -416,7 +415,6 @@ impl<F: Field> ConstraintBuilder<F> {
             "storage_key is 0 for Account",
             q.rw_table.storage_key.clone(),
         );
-        // this is causing issues.....
         self.require_in_set(
             "field_tag in AccountFieldTag range",
             q.field_tag(),

@@ -12,7 +12,7 @@ use crate::{
 use core::fmt::Debug;
 use eth_types::{
     evm_types::{GasCost, MAX_REFUND_QUOTIENT_OF_GAS_USED},
-    evm_unimplemented, GethExecStep, ToAddress, ToWord, Word, H256,
+    evm_unimplemented, GethExecStep, ToAddress, ToWord, Word,
 };
 use ethers_core::utils::get_contract_address;
 use keccak256::EMPTY_HASH;

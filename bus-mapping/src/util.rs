@@ -70,7 +70,7 @@ impl PoseidonCodeHash {
 
 impl CodeHash for PoseidonCodeHash {
     fn hash_code(&self, code: &[u8]) -> Hash {
-        if code.len() == 0 {
+        if code.is_empty() {
             return self.empty_hash();
         }
         let n = self.n;
