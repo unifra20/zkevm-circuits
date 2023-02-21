@@ -201,7 +201,8 @@ impl<F: Field> ExecutionGadget<F> for ReturnRevertGadget<F> {
                 range.offset(),
                 range.length(),
                 memory_expansion.gas_cost(),
-                3.expr() * is_contract_deployment, // There are three reversible writes in this case.
+                3.expr() * is_contract_deployment, /* There are three reversible writes in this
+                                                    * case. */
             )
         });
 
