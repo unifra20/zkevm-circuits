@@ -98,7 +98,7 @@ mod balance_tests {
     use crate::circuit_input_builder::ExecState;
     use crate::mock::BlockData;
     use crate::operation::{AccountOp, CallContextOp, StackOp};
-    use crate::util::{CodeHash, PoseidonCodeHash, POSEIDON_HASH_BYTES_IN_FIELD};
+    use crate::util::POSEIDON_CODE_HASH_ZERO;
     use eth_types::evm_types::{OpcodeId, StackAddress};
     use eth_types::geth_types::GethData;
     use eth_types::{address, bytecode, Bytecode, ToWord, Word, U256};
@@ -259,17 +259,9 @@ mod balance_tests {
         );
 
         let code_hash = if let Some(code) = account_code {
-            U256::from(
-                PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD)
-                    .hash_code(&code)
-                    .0,
-            )
+            POSEIDON_CODE_HASH_ZERO.to_word()
         } else if exists {
-            U256::from(
-                PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD)
-                    .empty_hash()
-                    .0,
-            )
+            POSEIDON_CODE_HASH_ZERO.to_word()
         } else {
             U256::zero()
         };

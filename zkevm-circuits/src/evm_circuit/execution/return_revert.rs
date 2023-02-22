@@ -19,8 +19,7 @@ use crate::{
     util::Expr,
 };
 use bus_mapping::{
-    circuit_input_builder::CopyDataType, evm::OpcodeId, CodeHash, PoseidonCodeHash,
-    POSEIDON_HASH_BYTES_IN_FIELD,
+    circuit_input_builder::CopyDataType, evm::OpcodeId,
 };
 use eth_types::{Field, ToScalar, U256};
 use ethers_core::utils::keccak256;
@@ -328,7 +327,7 @@ impl<F: Field> ExecutionGadget<F> for ReturnRevertGadget<F> {
 
             // poseidon hash of code.
             let poseidon_code_hash =
-                PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD).hash_code(&values);
+                bus_mapping::util::hash_code(&values);
             self.poseidon_code_hash.assign(
                 region,
                 offset,

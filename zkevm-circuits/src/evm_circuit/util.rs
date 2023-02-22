@@ -7,7 +7,7 @@ use crate::{
     },
     util::{query_expression, Challenges, Expr},
 };
-use bus_mapping::{CodeHash, PoseidonCodeHash, POSEIDON_HASH_BYTES_IN_FIELD};
+use bus_mapping::util::POSEIDON_CODE_HASH_ZERO;
 use eth_types::U256;
 use eth_types::{ToLittleEndian, ToWord};
 use halo2_proofs::{
@@ -199,9 +199,7 @@ impl<'r, 'b, F: FieldExt> CachedRegion<'r, 'b, F> {
 
     pub fn empty_poseidon_hash_rlc(&self) -> Value<F> {
         self.word_rlc(
-            PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD)
-                .empty_hash()
-                .to_word(),
+            POSEIDON_CODE_HASH_ZERO.to_word(),
         )
     }
 

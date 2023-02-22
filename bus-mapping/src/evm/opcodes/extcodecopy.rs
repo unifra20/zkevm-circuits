@@ -207,13 +207,13 @@ mod extcodecopy_tests {
             AccountField, AccountOp, CallContextField, CallContextOp, MemoryOp, StackOp,
             TxAccessListAccountOp, RW,
         },
-        util::{CodeHash, PoseidonCodeHash, POSEIDON_HASH_BYTES_IN_FIELD},
+        util::{hash_code, POSEIDON_CODE_HASH_ZERO},
     };
     use eth_types::{address, bytecode, Bytecode, Bytes, ToWord, Word};
     use eth_types::{
         evm_types::{MemoryAddress, OpcodeId, StackAddress},
         geth_types::GethData,
-        H256, U256,
+        U256,
     };
     use mock::TestContext;
 
@@ -246,9 +246,9 @@ mod extcodecopy_tests {
         // TODO: bytecode_ext = vec![] is being used to indicate an empty account.
         // Should be an optional vec and we need to add tests for EOA vs. non-EOA.
         let code_hash = if bytecode_ext.code.is_empty() {
-            H256::zero()
+            *POSEIDON_CODE_HASH_ZERO
         } else {
-            PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD).hash_code(&code_ext.to_vec())
+            hash_code(&code_ext.to_vec())
         };
 
         // Get the execution steps from the external tracer

@@ -24,7 +24,8 @@ use eth_types::{
     evm_unimplemented, Address, GethExecStep, ToAddress, ToBigEndian, ToWord, Word, H256,
 };
 use ethers_core::utils::{get_contract_address, get_create2_address};
-use keccak256::EMPTY_HASH;
+//use keccak256::EMPTY_HASH;
+use crate::util::POSEIDON_CODE_HASH_ZERO;
 use std::cmp::max;
 
 /// Reference to the internal state of the CircuitInputBuilder in a particular
@@ -744,18 +745,14 @@ impl<'a> CircuitInputStateRef<'a> {
                     _ => address,
                 };
                 if is_precompiled(&code_address) {
-                    (CodeSource::Address(code_address), H256::from(*EMPTY_HASH))
+                    (CodeSource::Address(code_address), *POSEIDON_CODE_HASH_ZERO)
                 } else {
                     let (found, account) = self.sdb.get_account(&code_address);
                     if !found {
-                        (CodeSource::Address(code_address), H256::from(*EMPTY_HASH))
+                        (CodeSource::Address(code_address), *POSEIDON_CODE_HASH_ZERO)
                     } else {
-                        (CodeSource::Address(code_address), account.code_hash)
+                        (CodeSource::Address(code_address), account.poseidon_code_hash)
                     }
-                    (
-                        CodeSource::Address(code_address),
-                        account.poseidon_code_hash,
-                    )
                 }
             }
         };

@@ -251,9 +251,9 @@ impl WitnessGenerator {
                     MPTProofType::CodeHashExists => {
                         let mut code_hash = [0u8; 32];
                         old_val.to_big_endian(code_hash.as_mut_slice());
-                        if H256::from(code_hash) != acc_data.code_hash {
+                        if H256::from(code_hash) != acc_data.poseidon_code_hash {
                             if H256::from(code_hash).is_zero()
-                                && acc_data.code_hash == CodeDB::empty_code_hash()
+                                && acc_data.poseidon_code_hash == CodeDB::empty_code_hash()
                             {
                                 log::trace!("codehash 0->keccak(nil)");
                             } else {

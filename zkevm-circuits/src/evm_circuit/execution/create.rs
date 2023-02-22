@@ -23,8 +23,7 @@ use crate::{
     util::Expr,
 };
 use bus_mapping::{
-    circuit_input_builder::CopyDataType, evm::OpcodeId, CodeHash, PoseidonCodeHash,
-    POSEIDON_HASH_BYTES_IN_FIELD,
+    circuit_input_builder::CopyDataType, evm::OpcodeId,
 };
 use eth_types::{evm_types::GasCost, Field, ToBigEndian, ToLittleEndian, ToScalar, ToWord, U256};
 use ethers_core::utils::{keccak256, rlp};
@@ -416,8 +415,7 @@ impl<F: Field> ExecutionGadget<F> for CreateGadget<F> {
             offset,
             region.word_rlc(U256::from_big_endian(&keccak_code_hash)),
         )?;
-        let poseidon_code_hash =
-            PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD).hash_code(&values);
+        let poseidon_code_hash = bus_mapping::util::hash_code(&values);
         self.poseidon_code_hash.assign(
             region,
             offset,

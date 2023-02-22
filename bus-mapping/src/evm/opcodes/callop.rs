@@ -3,7 +3,7 @@ use crate::circuit_input_builder::{CallKind, CircuitInputStateRef, CodeSource, E
 use crate::operation::MemoryOp;
 use crate::operation::{AccountField, CallContextField, TxAccessListAccountOp, RW};
 use crate::precompile::{execute_precompiled, is_precompiled};
-use crate::util::{CodeHash, PoseidonCodeHash, POSEIDON_HASH_BYTES_IN_FIELD};
+use crate::util::POSEIDON_CODE_HASH_ZERO;
 use crate::Error;
 use eth_types::evm_types::gas_utils::{eip150_gas, memory_expansion_gas_cost};
 use eth_types::evm_types::GasCost;
@@ -100,7 +100,7 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
             (
                 callee_code_hash.to_word(),
                 callee_code_hash
-                    .eq(&PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD).empty_hash()),
+                    .eq(&*POSEIDON_CODE_HASH_ZERO),
             )
         } else {
             (Word::zero(), true)

@@ -3,28 +3,24 @@
 
 use crate::{
     precompile::is_precompiled,
-    util::{CodeHash, CodeHashCopy, PoseidonCodeHash, POSEIDON_HASH_BYTES_IN_FIELD},
+    util::{hash_code, KECCAK_CODE_HASH_ZERO, POSEIDON_CODE_HASH_ZERO},
 };
-use eth_types::{Address, Hash, Word, H256, U256};
-use ethers_core::utils::keccak256;
+use eth_types::{Address, Hash, Word, U256};
 use lazy_static::lazy_static;
 use std::collections::{HashMap, HashSet};
 
 lazy_static! {
     static ref ACCOUNT_ZERO: Account = Account::zero();
     static ref VALUE_ZERO: Word = Word::zero();
-    static ref KECCAK_CODE_HASH_ZERO: Hash = H256(keccak256([]));
-    static ref POSEIDON_CODE_HASH_ZERO: Hash =
-        PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD).empty_hash();
 }
 
 /// Memory storage for contract code by code hash.
 #[derive(Debug)]
-pub struct CodeDB(pub HashMap<Hash, Vec<u8>>, Box<dyn CodeHashCopy>);
+pub struct CodeDB(pub HashMap<Hash, Vec<u8>>);
 
 impl Clone for CodeDB {
     fn clone(&self) -> Self {
-        CodeDB(self.0.clone(), self.1.clone_box())
+        CodeDB(self.0.clone())
     }
 }
 
@@ -35,26 +31,24 @@ impl Default for CodeDB {
 }
 
 impl CodeDB {
-    /// Create a new empty Self with specified code hash method
-    pub fn new_with_code_hasher(hasher: Box<dyn CodeHashCopy>) -> Self {
-        Self(HashMap::new(), hasher)
-    }
     /// Create a new empty Self.
     pub fn new() -> Self {
-        Self::new_with_code_hasher(Box::new(PoseidonCodeHash::new(
-            POSEIDON_HASH_BYTES_IN_FIELD,
-        )))
+        Self(HashMap::new())
     }
     /// Insert code indexed by code hash, and return the code hash.
     pub fn insert(&mut self, code: Vec<u8>) -> Hash {
         let hash = if code.is_empty() {
-            self.1.empty_hash()
+            *POSEIDON_CODE_HASH_ZERO
         } else {
-            self.1.hash_code(&code)
+            hash_code(&code)
         };
         self.0.insert(hash, code);
         hash
     }
+    /// Specify code hash for empty code (nil)
+    pub fn empty_code_hash() -> Hash {
+        *POSEIDON_CODE_HASH_ZERO
+    }    
 }
 
 /// Account of the Ethereum State Trie, which contains an in-memory key-value

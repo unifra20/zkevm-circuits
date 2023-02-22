@@ -7,7 +7,7 @@ use crate::{
         AccountField, AccountOp, CallContextField, TxAccessListAccountOp, TxReceiptField,
         TxRefundOp, RW,
     },
-    util::{CodeHash, PoseidonCodeHash, POSEIDON_HASH_BYTES_IN_FIELD},
+    util::{KECCAK_CODE_HASH_ZERO, POSEIDON_CODE_HASH_ZERO},
     Error,
 };
 use core::fmt::Debug;
@@ -441,7 +441,7 @@ pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Er
         (
             callee_code_hash.to_word(),
             // TODO: fix this.... but it can't be the reason the current test is failing?
-            callee_code_hash.eq(&PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD).empty_hash()), /* TODO(rohit): poseidon hash of empty bytes? */
+            callee_code_hash.eq(&*POSEIDON_CODE_HASH_ZERO), /* TODO(rohit): poseidon hash of empty bytes? */
         )
     } else {
         // not sure if this should still be the case.
@@ -475,9 +475,9 @@ pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Er
         (true, _) => (call.code_hash.to_word(), false),
         (_, true) => {
             debug_assert_eq!(
-                callee_account.code_hash, call.code_hash,
+                callee_account.poseidon_code_hash, call.code_hash,
                 "callee account's code hash: {:?}, call's code hash: {:?}",
-                callee_account.code_hash, call.code_hash
+                callee_account.poseidon_code_hash, call.code_hash
             );
             (
                 call.code_hash.to_word(),
@@ -551,7 +551,7 @@ pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Er
             state.account_read(
                 &mut exec_step,
                 call.address,
-                AccountField::CodeHash,
+                AccountField::PoseidonCodeHash,
                 callee_code_hash,
                 callee_code_hash,
             )?;
@@ -562,7 +562,7 @@ pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Er
             state.account_read(
                 &mut exec_step,
                 call.address,
-                AccountField::CodeHash,
+                AccountField::PoseidonCodeHash,
                 callee_code_hash,
                 callee_code_hash,
             )?;
@@ -577,36 +577,15 @@ pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Er
                         &mut exec_step,
                         call.address,
                         AccountField::KeccakCodeHash,
-                        Word::from_big_endian(&*EMPTY_HASH),
-                        Word::from_big_endian(&*EMPTY_HASH),
+                        KECCAK_CODE_HASH_ZERO.to_word(),
+                        KECCAK_CODE_HASH_ZERO.to_word(),
                     )?;
-                    assert_eq!(
-                        Word::from_big_endian(
-                            PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD)
-                                .empty_hash()
-                                .0
-                                .as_slice()
-                        ),
-                        PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD)
-                            .empty_hash()
-                            .to_word()
-                    );
                     state.account_write(
                         &mut exec_step,
                         call.address,
                         AccountField::PoseidonCodeHash,
-                        Word::from_big_endian(
-                            PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD)
-                                .empty_hash()
-                                .0
-                                .as_slice(),
-                        ),
-                        Word::from_big_endian(
-                            PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD)
-                                .empty_hash()
-                                .0
-                                .as_slice(),
-                        ),
+                        POSEIDON_CODE_HASH_ZERO.to_word(),
+                        POSEIDON_CODE_HASH_ZERO.to_word(),
                     )?;
                     state.account_write(
                         &mut exec_step,

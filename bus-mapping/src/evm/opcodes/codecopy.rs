@@ -153,8 +153,8 @@ mod codecopy_tests {
         circuit_input_builder::{CopyDataType, ExecState, NumberOrHash},
         mock::BlockData,
         operation::{MemoryOp, StackOp, RW},
-        CodeHash, PoseidonCodeHash, POSEIDON_HASH_BYTES_IN_FIELD,
     };
+    use crate::util::hash_code;
 
     #[test]
     fn codecopy_opcode_impl() {
@@ -240,8 +240,7 @@ mod codecopy_tests {
         let copy_events = builder.block.copy_events.clone();
         assert_eq!(copy_events.len(), 1);
         assert_eq!(copy_events[0].bytes.len(), size);
-        let code_hash =
-            PoseidonCodeHash::new(POSEIDON_HASH_BYTES_IN_FIELD).hash_code(&code.to_vec());
+        let code_hash = hash_code(&code.to_vec());
         assert_eq!(copy_events[0].src_id, NumberOrHash::Hash(code_hash));
         assert_eq!(copy_events[0].src_addr as usize, code_offset);
         assert_eq!(copy_events[0].src_addr_end as usize, code.to_vec().len());

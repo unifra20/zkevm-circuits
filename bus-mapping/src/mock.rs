@@ -4,9 +4,9 @@ use crate::{
     circuit_input_builder::BlockHead,
     circuit_input_builder::{Block, CircuitInputBuilder, CircuitsParams},
     state_db::{self, CodeDB, StateDB},
-    util::{CodeHash, EthCodeHash},
 };
-use eth_types::{geth_types::GethData, ToWord, Word};
+use eth_types::{geth_types::GethData, ToWord, Word, H256};
+use ethers_core::utils::keccak256;
 
 const MOCK_OLD_STATE_ROOT: u64 = 0xcafeu64;
 
@@ -67,7 +67,7 @@ impl BlockData {
         }
 
         for account in geth_data.accounts {
-            let keccak_code_hash = EthCodeHash {}.hash_code(&account.code.to_vec());
+            let keccak_code_hash = H256(keccak256(account.code.to_vec()));
             log::trace!(
                 "trace code {:?} {:?}",
                 keccak_code_hash,

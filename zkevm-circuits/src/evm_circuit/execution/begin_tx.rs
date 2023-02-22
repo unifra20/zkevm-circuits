@@ -172,7 +172,7 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
                 eth_types::evm_types::GasCost::CREATION_TX.expr(),
                 eth_types::evm_types::GasCost::TX.expr(),
             ) + tx_call_data_gas_cost.expr(),
-
+        );
         let gas_left = tx_gas.expr() - intrinsic_gas_cost.expr();
         let sufficient_gas_left = RangeCheckGadget::construct(cb, gas_left.clone());
 
