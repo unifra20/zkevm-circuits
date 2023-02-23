@@ -18,7 +18,7 @@ use super::super::bytecode_unroller::{BytecodeRow, UnrolledBytecode};
 use super::{BytecodeCircuitConfig, BytecodeCircuitConfigArgs};
 
 /// specify byte in field for encoding bytecode
-pub const HASHBLOCK_BYTES_IN_FIELD: usize = 31;
+pub const HASHBLOCK_BYTES_IN_FIELD: usize = bus_mapping::util::POSEIDON_HASH_BYTES_IN_FIELD;
 
 #[derive(Clone, Debug)]
 /// Bytecode circuit (for hash block) configuration

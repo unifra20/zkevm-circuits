@@ -17,25 +17,16 @@ pub static CHECK_MEM_STRICT: Lazy<bool> =
     Lazy::new(|| read_env_var("CHECK_MEM_STRICT", false));
 
 /// Default number of bytes to pack into a field element.
-pub const POSEIDON_HASH_BYTES_IN_FIELD: usize = 16;
-
-/// Represents Poseidon hash of the account code.
-#[derive(Debug, Clone)]
-pub struct PoseidonCodeHash {
-    /// Number of bytes in the field.
-    n: usize,
-}
-
-impl PoseidonCodeHash {
-    /// Build a new instance, provided the number of bytes in field.
-    pub fn new(n: usize) -> Self {
-        Self { n }
-    }
-}
+pub const POSEIDON_HASH_BYTES_IN_FIELD: usize = 31;
 
 /// Default code hash (use poseidon hash now)
 pub fn hash_code(code: &[u8]) -> Hash {
-    use poseidon_circuit::hash::{MessageHashable, HASHABLE_DOMAIN_SPEC};
+    use poseidon_circuit::hash::{
+        Hashable, 
+        MessageHashable, 
+        HASHABLE_DOMAIN_SPEC
+    };
+
     let bytes_in_field = POSEIDON_HASH_BYTES_IN_FIELD;
     let fls = (0..(code.len() / bytes_in_field))
         .map(|i| i * bytes_in_field)
@@ -58,7 +49,13 @@ pub fn hash_code(code: &[u8]) -> Hash {
         })
         .collect();
 
-    let h = Fr::hash_msg(&msgs, Some(code.len() as u128 * HASHABLE_DOMAIN_SPEC));
+    let h = if msgs.is_empty() {
+        // the empty code hash is overlapped with simple hash on [0, 0]
+        // an issue in poseidon primitive prevent us calculate it from hash_msg
+        Fr::hash([Fr::zero(), Fr::zero()])
+    } else {
+        Fr::hash_msg(&msgs, Some(code.len() as u128 * HASHABLE_DOMAIN_SPEC))
+    };
 
     let mut buf: [u8; 32] = [0; 32];
     U256::from_little_endian(h.to_repr().as_ref()).to_big_endian(&mut buf);
@@ -68,6 +65,11 @@ pub fn hash_code(code: &[u8]) -> Hash {
 
 #[test]
 fn code_hashing() {
+    assert_eq!(
+        format!("{:?}", hash_code(&[])),
+        "0x2098f5fb9e239eab3ceac3f27b81e481dc3124d55ffed523a839ee8446b64864"
+    );
+
     let simple_byte: [u8; 1] = [0];
     assert_eq!(
         format!("{:?}", hash_code(&simple_byte)),
@@ -93,6 +95,7 @@ fn code_hashing() {
         format!("{:?}", hash_code(&bytes)),
         "0x26f706f949ff4faad54ee72308e9d30ece46e37cf8b9968bdb274e750a264937"
     );
+
 }
 
 /// the zero keccak code hash

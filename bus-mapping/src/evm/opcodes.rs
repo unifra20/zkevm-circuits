@@ -367,7 +367,7 @@ pub fn gen_associated_ops(
 }
 
 pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Error> {
-    dbg!("hiiii");
+    //dbg!("hiiii");
     let mut exec_step = state.new_begin_tx_step();
     let call = state.call()?.clone();
 
@@ -432,7 +432,8 @@ pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Er
     let callee_exists = !callee_account.is_empty();
     let code_hash = callee_account.poseidon_code_hash;
     let callee_code_hash = call.code_hash;
-    let (callee_code_hash_word, is_empty_code_hash) = if callee_exists {
+    let (callee_code_hash_word, _is_empty_code_hash) = if callee_exists {
+        
         debug_assert_eq!(
             callee_code_hash, code_hash,
             "call.address {:?} callee_account {:?}",
