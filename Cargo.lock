@@ -1561,7 +1561,6 @@ version = "0.1.0"
 dependencies = [
  "ethers-core",
  "ethers-signers",
- "halo2-mpt-circuits",
  "halo2_proofs",
  "hex",
  "itertools",
@@ -1569,6 +1568,7 @@ dependencies = [
  "libsecp256k1",
  "num",
  "num-bigint",
+ "poseidon-circuit",
  "regex",
  "serde",
  "serde_json",
@@ -2483,7 +2483,7 @@ checksum = "eabb4a44450da02c90444cf74558da904edde8fb4e9035a9a6a4e15445af0bd7"
 [[package]]
 name = "halo2-mpt-circuits"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/mpt-circuit.git?branch=scroll-dev-0216#051b5efc54512d1422eba35338364473fe3a65c0"
+source = "git+https://github.com/scroll-tech/mpt-circuit.git?branch=goerli-0215-dual-hash#eb59421948d5e755539cd1f3d2a777fe7f859005"
 dependencies = [
  "halo2_proofs",
  "hex",

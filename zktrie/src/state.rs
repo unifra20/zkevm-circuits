@@ -20,10 +20,12 @@ pub fn as_proof_type(v: i32) -> MPTProofType {
         1 => MPTProofType::NonceChanged,
         2 => MPTProofType::BalanceChanged,
         3 => MPTProofType::CodeHashExists,
-        4 => MPTProofType::AccountDoesNotExist,
-        5 => MPTProofType::AccountDestructed,
-        6 => MPTProofType::StorageChanged,
-        7 => MPTProofType::StorageDoesNotExist,
+        4 => MPTProofType::PoseidonCodeHashExists,
+        5 => MPTProofType::CodeSizeExists,
+        6 => MPTProofType::AccountDoesNotExist,
+        7 => MPTProofType::AccountDestructed,
+        8 => MPTProofType::StorageChanged,
+        9 => MPTProofType::StorageDoesNotExist,
         _ => unreachable!("unexpected proof type number {:?}", v),
     }
 }
