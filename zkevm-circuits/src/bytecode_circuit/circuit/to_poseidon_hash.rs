@@ -302,8 +302,8 @@ impl<F: Field, const BYTES_IN_FIELD: usize> ToHashBlockCircuitConfig<F, BYTES_IN
         //  * PoseidonTable::INPUT_WIDTH lookups for each input field
         //  * PoseidonTable::INPUT_WIDTH -1 lookups for the padded zero input
         //  so we have 2*PoseidonTable::INPUT_WIDTH -1 lookups
+        #[cfg(feature = "codehash")]
         for i in 0..PoseidonTable::INPUT_WIDTH {
-            #[cfg(feature = "codehash")]
             meta.lookup_any("poseidon input", |meta| {
                 // Conditions:
                 // - On the row at **field border** (`is_field_border == 1`)

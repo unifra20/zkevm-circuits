@@ -1,7 +1,7 @@
 //! Represent the storage state under zktrie as implement
 
 use bus_mapping::state_db::{Account, StateDB};
-use eth_types::{Address, Hash, Word, H256, U256};
+use eth_types::{Address, Hash, Word, H256};
 use mpt_circuits::MPTProofType;
 
 use std::collections::HashMap;

@@ -25,6 +25,7 @@ use eth_types::{
 };
 use ethers_core::utils::{get_contract_address, get_create2_address};
 //use keccak256::EMPTY_HASH;
+use ethers_core::utils::keccak256;
 use crate::util::POSEIDON_CODE_HASH_ZERO;
 use std::cmp::max;
 
@@ -996,12 +997,15 @@ impl<'a> CircuitInputStateRef<'a> {
             let code = call_ctx
                 .memory
                 .read_chunk(offset.low_u64().into(), length.low_u64().into());
-            let code_hash = self.code_db.insert(code);
+            let code_hash = H256(keccak256(&code));
+            let poseidon_code_hash = self.code_db.insert(code);
             let (found, callee_account) = self.sdb.get_account_mut(&call.address);
             if !found {
                 return Err(Error::AccountNotFound(call.address));
             }
+            callee_account.keccak_code_hash = poseidon_code_hash;
             callee_account.keccak_code_hash = code_hash;
+            callee_account.code_size = length;
         }
 
         // Handle reversion if this call doesn't end successfully

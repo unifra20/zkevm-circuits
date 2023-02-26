@@ -85,6 +85,12 @@ impl From<&ZktrieState> for WitnessGenerator {
 }
 
 impl WitnessGenerator {
+
+    /// dump inner data for debugging
+    pub fn dump(&self) {
+        log::info!("account data {:#?}", self.accounts);
+    }
+
     fn trace_storage_update(
         &mut self,
         address: Address,
@@ -175,23 +181,27 @@ impl WitnessGenerator {
         let account_data_after = update_account_data(&account_data_before.unwrap_or_default());
 
         if let Some(account_data_after) = account_data_after {
-            let mut nonce = [0u8; 32];
-            U256::from(account_data_after.nonce).to_big_endian(nonce.as_mut_slice());
+            let mut nonce_codesize = [0u8; 32];
+            let u64factor = U256::from(0x10000000000000000u128);
+            (U256::from(account_data_after.code_size) * u64factor 
+                + U256::from(account_data_after.nonce)).to_big_endian(nonce_codesize.as_mut_slice());
             let mut balance = [0u8; 32];
             account_data_after
                 .balance
                 .to_big_endian(balance.as_mut_slice());
-            let mut code_hash = [0u8; 32];
+            let mut poseidon_code_hash = [0u8; 32];
             U256::from(account_data_after.poseidon_code_hash.0)
+                .to_big_endian(poseidon_code_hash.as_mut_slice());
+            let mut code_hash = [0u8; 32];
+            U256::from(account_data_after.keccak_code_hash.0)
                 .to_big_endian(code_hash.as_mut_slice());
 
             let acc_data = [
-                [0u8; 32],
-                nonce,
+                nonce_codesize,
                 balance,
                 account_data_after.storage_root.0,
                 code_hash,
-                code_hash,
+                poseidon_code_hash,
             ];
             let rs = self.trie.update_account(address.as_bytes(), &acc_data);
             if rs.is_err() {
