@@ -1,7 +1,7 @@
 use crate::circuit_input_builder::{CircuitInputStateRef, ExecStep};
 use crate::evm::{Opcode, OpcodeId};
 use crate::Error;
-use eth_types::{GethExecStep, ToAddress, ToWord, Word};
+use eth_types::{GethExecStep, Word};
 
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct InvalidJump;
@@ -22,16 +22,12 @@ impl Opcode for InvalidJump {
         // assert op code can only be JUMP or JUMPI
         assert!(geth_step.op == OpcodeId::JUMP || geth_step.op == OpcodeId::JUMPI);
         let is_jumpi = geth_step.op == OpcodeId::JUMPI;
-        let dest = geth_steps[0].stack.last()?.to_address();
+        let dest_word = geth_steps[0].stack.last()?;
         let mut condition: Word = Word::zero();
         if is_jumpi {
             condition = geth_step.stack.nth_last(1)?;
         }
-        state.stack_read(
-            &mut exec_step,
-            geth_step.stack.last_filled(),
-            dest.to_word(),
-        )?;
+        state.stack_read(&mut exec_step, geth_step.stack.last_filled(), dest_word)?;
         if is_jumpi {
             state.stack_read(
                 &mut exec_step,

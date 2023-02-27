@@ -8,20 +8,20 @@ use crate::{
             constraint_builder::ConstraintBuilder,
             from_bytes,
             math_gadget::{IsEqualGadget, IsZeroGadget, LtGadget},
-            CachedRegion, Cell, RandomLinearCombination,
+            CachedRegion, Cell, Word,
         },
         witness::{Block, Call, ExecStep, Transaction},
     },
     util::Expr,
 };
-use eth_types::{evm_types::OpcodeId, Field, ToLittleEndian, Word};
+use eth_types::{evm_types::OpcodeId, Field, ToLittleEndian, U256};
 
 use halo2_proofs::{circuit::Value, plonk::Error};
 
 #[derive(Clone, Debug)]
 pub(crate) struct ErrorInvalidJumpGadget<F> {
     opcode: Cell<F>,
-    destination: RandomLinearCombination<F, N_BYTES_PROGRAM_COUNTER>,
+    destination_word: Word<F>,
     code_length: Cell<F>,
     value: Cell<F>,
     is_code: Cell<F>,
@@ -39,7 +39,9 @@ impl<F: Field> ExecutionGadget<F> for ErrorInvalidJumpGadget<F> {
     const EXECUTION_STATE: ExecutionState = ExecutionState::ErrorInvalidJump;
 
     fn configure(cb: &mut ConstraintBuilder<F>) -> Self {
-        let destination = cb.query_word_rlc();
+        let destination_word = cb.query_word_rlc();
+        let destination = from_bytes::expr(&destination_word.cells[..N_BYTES_PROGRAM_COUNTER]);
+
         let opcode = cb.query_cell();
         let value = cb.query_cell();
         let is_code = cb.query_cell();
@@ -61,7 +63,7 @@ impl<F: Field> ExecutionGadget<F> for ErrorInvalidJumpGadget<F> {
         let is_condition_zero = IsZeroGadget::construct(cb, phase2_condition.expr());
 
         // Pop the value from the stack
-        cb.stack_pop(destination.expr());
+        cb.stack_pop(destination_word.expr());
 
         cb.condition(is_jumpi.expr(), |cb| {
             cb.stack_pop(phase2_condition.expr());
@@ -72,15 +74,14 @@ impl<F: Field> ExecutionGadget<F> for ErrorInvalidJumpGadget<F> {
         // look up bytecode length
         let code_length = cb.query_cell();
         cb.bytecode_length(cb.curr.state.code_hash.expr(), code_length.expr());
-        let dest_value = from_bytes::expr(&destination.cells);
 
-        let within_range = LtGadget::construct(cb, dest_value.expr(), code_length.expr());
+        let within_range = LtGadget::construct(cb, destination.expr(), code_length.expr());
         //if not out of range, check `dest` is invalid
         cb.condition(within_range.expr(), |cb| {
             // if not out of range, Lookup real value
             cb.bytecode_lookup(
                 cb.curr.state.code_hash.expr(),
-                dest_value.clone(),
+                destination.expr(),
                 is_code.expr(),
                 value.expr(),
             );
@@ -94,7 +95,7 @@ impl<F: Field> ExecutionGadget<F> for ErrorInvalidJumpGadget<F> {
             CommonErrorGadget::construct(cb, opcode.expr(), 3.expr() + is_jumpi.expr());
         Self {
             opcode,
-            destination,
+            destination_word,
             code_length,
             value,
             is_code,
@@ -125,18 +126,11 @@ impl<F: Field> ExecutionGadget<F> for ErrorInvalidJumpGadget<F> {
         let condition = if is_jumpi {
             block.rws[step.rw_indices[1]].stack_value()
         } else {
-            Word::zero()
+            U256::zero()
         };
         let condition_rlc = region.word_rlc(condition);
-        self.destination.assign(
-            region,
-            offset,
-            Some(
-                destination.to_le_bytes()[..N_BYTES_PROGRAM_COUNTER]
-                    .try_into()
-                    .unwrap(),
-            ),
-        )?;
+        self.destination_word
+            .assign(region, offset, Some(destination.to_le_bytes()))?;
 
         let code = block
             .bytecodes

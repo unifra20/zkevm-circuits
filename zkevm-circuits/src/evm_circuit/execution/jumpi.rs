@@ -11,7 +11,7 @@ use crate::{
             },
             from_bytes,
             math_gadget::IsZeroGadget,
-            select, CachedRegion, Cell, RandomLinearCombination,
+            select, CachedRegion, Cell, Word,
         },
         witness::{Block, Call, ExecStep, Transaction},
     },
@@ -23,7 +23,7 @@ use halo2_proofs::plonk::Error;
 #[derive(Clone, Debug)]
 pub(crate) struct JumpiGadget<F> {
     same_context: SameContextGadget<F>,
-    destination: RandomLinearCombination<F, N_BYTES_PROGRAM_COUNTER>,
+    destination_word: Word<F>,
     phase2_condition: Cell<F>,
     is_condition_zero: IsZeroGadget<F>,
 }
@@ -34,11 +34,13 @@ impl<F: Field> ExecutionGadget<F> for JumpiGadget<F> {
     const EXECUTION_STATE: ExecutionState = ExecutionState::JUMPI;
 
     fn configure(cb: &mut ConstraintBuilder<F>) -> Self {
-        let destination = cb.query_word_rlc();
+        let destination_word = cb.query_word_rlc();
+        let destination = from_bytes::expr(&destination_word.cells[..N_BYTES_PROGRAM_COUNTER]);
+
         let phase2_condition = cb.query_cell_phase2();
 
         // Pop the value from the stack
-        cb.stack_pop(destination.expr());
+        cb.stack_pop(destination_word.expr());
         cb.stack_pop(phase2_condition.expr());
 
         // Determine if the jump condition is met
@@ -47,18 +49,14 @@ impl<F: Field> ExecutionGadget<F> for JumpiGadget<F> {
 
         // Lookup opcode at destination when should_jump
         cb.condition(should_jump.clone(), |cb| {
-            cb.opcode_lookup_at(
-                from_bytes::expr(&destination.cells),
-                OpcodeId::JUMPDEST.expr(),
-                1.expr(),
-            );
+            cb.opcode_lookup_at(destination.expr(), OpcodeId::JUMPDEST.expr(), 1.expr());
         });
 
         // Transit program_counter to destination when should_jump, otherwise by
         // delta 1.
         let next_program_counter = select::expr(
             should_jump,
-            from_bytes::expr(&destination.cells),
+            destination.expr(),
             cb.curr.state.program_counter.expr() + 1.expr(),
         );
 
@@ -75,7 +73,7 @@ impl<F: Field> ExecutionGadget<F> for JumpiGadget<F> {
 
         Self {
             same_context,
-            destination,
+            destination_word,
             phase2_condition,
             is_condition_zero,
         }
@@ -96,15 +94,8 @@ impl<F: Field> ExecutionGadget<F> for JumpiGadget<F> {
             [step.rw_indices[0], step.rw_indices[1]].map(|idx| block.rws[idx].stack_value());
         let condition = region.word_rlc(condition);
 
-        self.destination.assign(
-            region,
-            offset,
-            Some(
-                destination.to_le_bytes()[..N_BYTES_PROGRAM_COUNTER]
-                    .try_into()
-                    .unwrap(),
-            ),
-        )?;
+        self.destination_word
+            .assign(region, offset, Some(destination.to_le_bytes()))?;
         self.phase2_condition.assign(region, offset, condition)?;
         self.is_condition_zero
             .assign_value(region, offset, condition)?;
