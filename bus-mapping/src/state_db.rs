@@ -85,12 +85,20 @@ impl Account {
     /// Return if account is empty or not.
     pub fn is_empty(&self) -> bool {
         self.nonce.is_zero()
-            //&& self.balance.is_zero()
+            && self.balance.is_zero()
             && self.storage.is_empty()
             && self.keccak_code_hash.eq(&KECCAK_CODE_HASH_ZERO)
             && self.poseidon_code_hash.eq(&POSEIDON_CODE_HASH_ZERO)
             && self.code_size.is_zero()
     }
+
+    /// Return if account has empty code.
+    pub fn is_code_empty(&self) -> bool {
+            self.code_size.is_zero()
+            //&& self.keccak_code_hash.eq(&KECCAK_CODE_HASH_ZERO)
+            //&& self.poseidon_code_hash.eq(&POSEIDON_CODE_HASH_ZERO)
+    }
+
 }
 
 /// In-memory key-value database that represents the Ethereum State Trie.

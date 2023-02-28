@@ -434,16 +434,26 @@ pub fn gen_begin_tx_ops(state: &mut CircuitInputStateRef) -> Result<ExecStep, Er
     let callee_code_hash = call.code_hash;
     let (callee_code_hash_word, _is_empty_code_hash) = if callee_exists {
         
-        debug_assert_eq!(
-            callee_code_hash, code_hash,
-            "call.address {:?} callee_account {:?}",
-            call.address, callee_account
-        );
-        (
-            callee_code_hash.to_word(),
-            // TODO: fix this.... but it can't be the reason the current test is failing?
-            callee_code_hash.eq(&*POSEIDON_CODE_HASH_ZERO), /* TODO(rohit): poseidon hash of empty bytes? */
-        )
+        // if the callee has no code, the code_hash in call is the hash
+        // AFTER call finished so we must respect the current code hash
+        // when reading
+        if callee_account.is_code_empty() {
+            (
+                POSEIDON_CODE_HASH_ZERO.to_word(),
+                true,
+            )    
+
+        } else {
+            debug_assert_eq!(
+                callee_code_hash, code_hash,
+                "call.address {:?} callee_account {:?}",
+                call.address, callee_account
+            );
+            (
+                callee_code_hash.to_word(),
+                false,    
+            )    
+        }
     } else {
         // not sure if this should still be the case.
         (Word::zero(), true)
