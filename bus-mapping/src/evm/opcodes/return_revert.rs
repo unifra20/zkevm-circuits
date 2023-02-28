@@ -10,6 +10,7 @@ use crate::{
     Error,
 };
 use eth_types::{Bytecode, GethExecStep, ToWord, Word, H256};
+use eth_types::evm_types::GasCost;
 use ethers_core::utils::keccak256;
 use keccak256::EMPTY_HASH_LE;
 
@@ -61,6 +62,10 @@ impl Opcode for ReturnRevert {
                     length,
                 },
             )?;
+
+            // temporary fix: as EVM, cost is increased before code_hash is written
+            // outOfGas case is not handled yet!
+            exec_step.gas_cost.0 += GasCost::CODE_DEPOSIT_BYTE_COST.as_u64() * length as u64;
 
             for (field, value) in [
                 (CallContextField::CallerId, call.caller_id.to_word()),
