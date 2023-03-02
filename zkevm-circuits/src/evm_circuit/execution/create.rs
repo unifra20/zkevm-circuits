@@ -675,6 +675,7 @@ mod test {
 
     fn creater_bytecode(
         initialization_bytecode: Bytecode,
+        value: Word,
         is_create2: bool,
         is_persistent: bool,
     ) -> Bytecode {
@@ -690,7 +691,7 @@ mod test {
         code.append(&bytecode! {
             PUSH1(initialization_bytes.len()) // size
             PUSH1(32 - initialization_bytes.len()) // length
-            PUSH2(23414) // value
+            PUSH32(value) // value
         });
         code.write_op(if is_create2 {
             OpcodeId::CREATE2
@@ -735,7 +736,7 @@ mod test {
             .cartesian_product(&[true, false])
         {
             let init_code = initialization_bytecode(*is_success);
-            let root_code = creater_bytecode(init_code, *is_create2, *is_persistent);
+            let root_code = creater_bytecode(init_code, 23414.into(), *is_create2, *is_persistent);
             let caller = Account {
                 address: *CALLER_ADDRESS,
                 code: root_code.into(),
@@ -752,7 +753,8 @@ mod test {
         for nonce in [0, 1, 127, 128, 255, 256, 0x10000, u64::MAX - 1] {
             let caller = Account {
                 address: *CALLER_ADDRESS,
-                code: creater_bytecode(initialization_bytecode(true), false, true).into(),
+                code: creater_bytecode(initialization_bytecode(true), 23414.into(), false, true)
+                    .into(),
                 nonce: nonce.into(),
                 balance: eth(10),
                 ..Default::default()
@@ -766,9 +768,25 @@ mod test {
         for is_create2 in [true, false] {
             let caller = Account {
                 address: *CALLER_ADDRESS,
-                code: creater_bytecode(vec![].into(), is_create2, true).into(),
+                code: creater_bytecode(vec![].into(), 23414.into(), is_create2, true).into(),
                 nonce: 10.into(),
                 balance: eth(10),
+                ..Default::default()
+            };
+            run_test_circuits(test_context(caller));
+        }
+    }
+
+    #[test]
+    fn test_create_insufficient_balance() {
+        let value = 23414.into();
+        for is_create2 in [true, false] {
+            let caller = Account {
+                address: mock::MOCK_ACCOUNTS[0],
+                nonce: 1.into(),
+                code: creater_bytecode(initialization_bytecode(false), value, is_create2, true)
+                    .into(),
+                balance: value - 1,
                 ..Default::default()
             };
             run_test_circuits(test_context(caller));
