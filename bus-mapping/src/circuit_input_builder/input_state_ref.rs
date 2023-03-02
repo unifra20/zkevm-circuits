@@ -1271,12 +1271,9 @@ impl<'a> CircuitInputStateRef<'a> {
             }
 
             let sender = self.call()?.address;
-            let (found, account) = self.sdb.get_account(&sender);
+            let (found, _account) = self.sdb.get_account(&sender);
             if !found {
                 return Err(Error::AccountNotFound(sender));
-            }
-            if account.balance < value {
-                return Ok(Some(ExecError::InsufficientBalance));
             }
 
             // Address collision

@@ -81,7 +81,8 @@ pub enum ExecutionState {
     DUP,           // DUP1, DUP2, ..., DUP16
     SWAP,          // SWAP1, SWAP2, ..., SWAP16
     LOG,           // LOG0, LOG1, ..., LOG4
-    CREATE,        // CREATE, CREATE2
+    CREATE,        // CREATE
+    CREATE2,       // CREATE2
     CALL_OP,       // CALL, CALLCODE, DELEGATECALL, STATICCALL
     RETURN_REVERT, // RETURN, REVERT
     SELFDESTRUCT,
@@ -90,7 +91,6 @@ pub enum ExecutionState {
     ErrorStack,
     ErrorWriteProtection,
     ErrorDepth,
-    ErrorInsufficientBalance,
     ErrorContractAddressCollision,
     ErrorInvalidCreationCode,
     ErrorMaxCodeSizeExceeded,
@@ -135,7 +135,6 @@ impl ExecutionState {
                 | Self::ErrorStack
                 | Self::ErrorWriteProtection
                 | Self::ErrorDepth
-                | Self::ErrorInsufficientBalance
                 | Self::ErrorContractAddressCollision
                 | Self::ErrorInvalidCreationCode
                 | Self::ErrorMaxCodeSizeExceeded
@@ -304,7 +303,8 @@ impl ExecutionState {
                 OpcodeId::LOG3,
                 OpcodeId::LOG4,
             ],
-            Self::CREATE => vec![OpcodeId::CREATE, OpcodeId::CREATE2],
+            Self::CREATE => vec![OpcodeId::CREATE],
+            Self::CREATE2 => vec![OpcodeId::CREATE2],
             Self::CALL_OP => vec![
                 OpcodeId::CALL,
                 OpcodeId::CALLCODE,

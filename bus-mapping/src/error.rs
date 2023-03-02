@@ -116,8 +116,6 @@ pub enum ExecError {
     WriteProtection,
     /// For CALL, CALLCODE, DELEGATECALL, STATICCALL
     Depth,
-    /// For CALL, CALLCODE
-    InsufficientBalance,
     /// For CREATE, CREATE2
     ContractAddressCollision,
     /// contract must not begin with 0xef due to EIP #3541 EVM Object Format

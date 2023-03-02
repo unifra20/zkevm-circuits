@@ -10,7 +10,7 @@ use eth_types::{
     evm_types::gas_utils::memory_expansion_gas_cost, Bytecode, GethExecStep, ToBigEndian, ToWord,
     Word, H160, H256,
 };
-use ethers_core::utils::{get_create2_address, keccak256, rlp};
+use ethers_core::utils::{keccak256, rlp};
 
 #[derive(Debug, Copy, Clone)]
 pub struct Create<const IS_CREATE2: bool>;
@@ -35,7 +35,10 @@ impl<const IS_CREATE2: bool> Opcode for Create<IS_CREATE2> {
         }
         let next_memory_word_size = state.call_ctx()?.memory_word_size();
 
-        let callee = state.parse_call(geth_step)?;
+        let callee_call = state.parse_call(geth_step)?;
+        debug_assert!(state.sdb.get_nonce(&callee_call.address) == 0);
+        let caller_call = state.call()?.clone();
+        let tx_id = state.tx_ctx.id();
 
         let n_pop = if IS_CREATE2 { 4 } else { 3 };
         for i in 0..n_pop {
@@ -46,7 +49,7 @@ impl<const IS_CREATE2: bool> Opcode for Create<IS_CREATE2> {
             )?;
         }
 
-        let address = if IS_CREATE2 {
+        let contract_address = if IS_CREATE2 {
             state.create2_address(&geth_steps[0])?
         } else {
             state.create_address()?
@@ -54,85 +57,80 @@ impl<const IS_CREATE2: bool> Opcode for Create<IS_CREATE2> {
         state.stack_write(
             &mut exec_step,
             geth_step.stack.nth_last_filled(n_pop - 1),
-            if callee.is_success {
-                address.to_word()
+            if callee_call.is_success {
+                contract_address.to_word()
             } else {
                 Word::zero()
             },
         )?;
 
-        let mut initialization_code = vec![];
-        if length > 0 {
-            initialization_code =
-                handle_copy(state, &mut exec_step, state.call()?.call_id, offset, length)?;
-        }
-
-        let tx_id = state.tx_ctx.id();
-        let caller = state.call()?.clone();
-
         state.call_context_read(
             &mut exec_step,
-            caller.call_id,
+            caller_call.call_id,
             CallContextField::TxId,
             tx_id.to_word(),
         );
-        state.reversion_info_read(&mut exec_step, &caller);
-        state.tx_access_list_write(&mut exec_step, address)?;
-
+        state.reversion_info_read(&mut exec_step, &caller_call);
+        state.tx_access_list_write(&mut exec_step, contract_address)?;
         state.call_context_read(
             &mut exec_step,
-            caller.call_id,
+            caller_call.call_id,
             CallContextField::CalleeAddress,
-            caller.address.to_word(),
+            caller_call.address.to_word(),
         );
 
         // Increase caller's nonce
-        let caller_nonce = state.sdb.get_nonce(&caller.address);
+        let caller_nonce = state.sdb.get_nonce(&caller_call.address);
         state.push_op_reversible(
             &mut exec_step,
             RW::WRITE,
             AccountOp {
-                address: caller.address,
+                address: caller_call.address,
                 field: AccountField::Nonce,
                 value: (caller_nonce + 1).into(),
                 value_prev: caller_nonce.into(),
             },
         )?;
 
+        let caller_balance = state.sdb.get_balance(&callee_call.caller_address);
+        let insufficient_balance = callee_call.value > caller_balance;
+
         // TODO: look into when this can be pushed. Could it be done in parse call?
-        state.push_call(callee.clone());
+        state.push_call(callee_call.clone());
 
         for (field, value) in [
             (
                 CallContextField::RwCounterEndOfReversion,
-                callee.rw_counter_end_of_reversion.to_word(),
+                callee_call.rw_counter_end_of_reversion.to_word(),
             ),
             (
                 CallContextField::IsPersistent,
-                callee.is_persistent.to_word(),
+                callee_call.is_persistent.to_word(),
             ),
         ] {
-            state.call_context_write(&mut exec_step, callee.call_id, field, value);
+            state.call_context_write(&mut exec_step, callee_call.call_id, field, value);
         }
 
-        debug_assert!(state.sdb.get_nonce(&callee.address) == 0);
-        state.push_op_reversible(
-            &mut exec_step,
-            RW::WRITE,
-            AccountOp {
-                address: callee.address,
-                field: AccountField::Nonce,
-                value: 1.into(),
-                value_prev: 0.into(),
-            },
-        )?;
-
-        state.transfer(
-            &mut exec_step,
-            callee.caller_address,
-            callee.address,
-            callee.value,
-        )?;
+        // Transfer value from caller to callee if caller's balance is sufficient.
+        if !insufficient_balance {
+            // Set callee's nonce
+            state.push_op_reversible(
+                &mut exec_step,
+                RW::WRITE,
+                AccountOp {
+                    address: callee_call.address,
+                    field: AccountField::Nonce,
+                    value: 1.into(),
+                    value_prev: 0.into(),
+                },
+            )?;
+            state.transfer(
+                &mut exec_step,
+                callee_call.caller_address,
+                callee_call.address,
+                callee_call.value,
+            )?;
+        }
 
         let memory_expansion_gas_cost =
             memory_expansion_gas_cost(curr_memory_word_size, next_memory_word_size);
@@ -157,76 +155,91 @@ impl<const IS_CREATE2: bool> Opcode for Create<IS_CREATE2> {
                 CallContextField::ReversibleWriteCounter,
                 (exec_step.reversible_write_counter + 2).into(),
             ),
+            (CallContextField::Depth, caller_call.depth.into()),
         ] {
-            state.call_context_write(&mut exec_step, caller.call_id, field, value);
+            state.call_context_write(&mut exec_step, caller_call.call_id, field, value);
         }
 
-        state.call_context_read(
-            &mut exec_step,
-            caller.call_id,
-            CallContextField::Depth,
-            caller.depth.to_word(),
-        );
-
-        let code_hash = keccak256(&initialization_code);
-        for (field, value) in [
-            (CallContextField::CallerId, caller.call_id.into()),
-            (CallContextField::IsSuccess, callee.is_success.to_word()),
-            (
-                CallContextField::IsPersistent,
-                callee.is_persistent.to_word(),
-            ),
-            (CallContextField::TxId, state.tx_ctx.id().into()),
-            (
-                CallContextField::CallerAddress,
-                callee.caller_address.to_word(),
-            ),
-            (CallContextField::CalleeAddress, callee.address.to_word()),
-            (
-                CallContextField::RwCounterEndOfReversion,
-                callee.rw_counter_end_of_reversion.to_word(),
-            ),
-            (CallContextField::Depth, callee.depth.to_word()),
-            (CallContextField::IsRoot, false.to_word()),
-            (CallContextField::IsStatic, false.to_word()),
-            (CallContextField::IsCreate, true.to_word()),
-            (CallContextField::CodeHash, Word::from(code_hash)),
-        ] {
-            state.call_context_write(&mut exec_step, callee.call_id, field, value);
-        }
-
-        let keccak_input = if IS_CREATE2 {
-            let salt = geth_step.stack.nth_last(3)?;
-            assert_eq!(
-                address,
-                get_create2_address(
-                    caller.address,
-                    salt.to_be_bytes().to_vec(),
-                    initialization_code.clone()
-                )
-            );
-            std::iter::once(0xffu8)
-                .chain(caller.address.to_fixed_bytes())
-                .chain(salt.to_be_bytes())
-                .chain(keccak256(&initialization_code))
-                .collect::<Vec<_>>()
-        } else {
-            let mut stream = rlp::RlpStream::new();
-            stream.begin_list(2);
-            stream.append(&caller.address);
-            stream.append(&Word::from(caller_nonce));
-            stream.out().to_vec()
-        };
-
-        assert_eq!(
-            address,
-            H160(keccak256(&keccak_input)[12..].try_into().unwrap())
-        );
-
-        state.block.sha3_inputs.push(keccak_input);
-
-        if length == 0 {
+        if insufficient_balance {
+            for (field, value) in [
+                (CallContextField::LastCalleeId, 0.into()),
+                (CallContextField::LastCalleeReturnDataOffset, 0.into()),
+                (CallContextField::LastCalleeReturnDataLength, 0.into()),
+            ] {
+                state.call_context_write(&mut exec_step, caller_call.call_id, field, value);
+            }
             state.handle_return(geth_step)?;
+        } else {
+            let init_code = if length > 0 {
+                handle_copy(state, &mut exec_step, caller_call.call_id, offset, length)?
+            } else {
+                vec![]
+            };
+            let keccak_code_hash = keccak256(&init_code);
+            for (field, value) in [
+                (CallContextField::CallerId, caller_call.call_id.into()),
+                (
+                    CallContextField::IsSuccess,
+                    callee_call.is_success.to_word(),
+                ),
+                (
+                    CallContextField::IsPersistent,
+                    callee_call.is_persistent.to_word(),
+                ),
+                (CallContextField::TxId, state.tx_ctx.id().into()),
+                (
+                    CallContextField::CallerAddress,
+                    callee_call.caller_address.to_word(),
+                ),
+                (
+                    CallContextField::CalleeAddress,
+                    callee_call.address.to_word(),
+                ),
+                (CallContextField::Value, callee_call.value),
+                (
+                    CallContextField::RwCounterEndOfReversion,
+                    callee_call.rw_counter_end_of_reversion.to_word(),
+                ),
+                (CallContextField::Depth, callee_call.depth.to_word()),
+                (CallContextField::IsRoot, false.to_word()), /* CREATE/CREATE2 opcodes
+                                                              * cannot
+                                                              * appear in a root call. */
+                (CallContextField::IsStatic, false.to_word()), /* CREATE/CREATE2 cannot
+                                                                * appear
+                                                                * in a static call. */
+                (CallContextField::IsCreate, true.to_word()), /* Both CREATE and CREATE2
+                                                               * opcodes
+                                                               * are accounted for. */
+                (CallContextField::CodeHash, Word::from(keccak_code_hash)),
+            ] {
+                state.call_context_write(&mut exec_step, callee_call.call_id, field, value);
+            }
+
+            let keccak_input = if IS_CREATE2 {
+                let salt = geth_step.stack.nth_last(3)?;
+                std::iter::once(0xffu8)
+                    .chain(caller_call.address.to_fixed_bytes())
+                    .chain(salt.to_be_bytes())
+                    .chain(keccak_code_hash)
+                    .collect::<Vec<_>>()
+            } else {
+                let mut stream = rlp::RlpStream::new();
+                stream.begin_list(2);
+                stream.append(&caller_call.address);
+                stream.append(&Word::from(caller_nonce));
+                stream.out().to_vec()
+            };
+
+            assert_eq!(
+                contract_address,
+                H160(keccak256(&keccak_input)[12..].try_into().unwrap())
+            );
+
+            state.block.sha3_inputs.push(keccak_input);
+
+            if length == 0 {
+                state.handle_return(geth_step)?;
+            }
         }
 
         Ok(vec![exec_step])
