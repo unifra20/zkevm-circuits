@@ -607,7 +607,7 @@ impl<F: Field, const IS_CREATE2: bool, const S: ExecutionState> ExecutionGadget<
             stream.append(&U256::from(caller_nonce));
             stream.out().to_vec()
         };
-        let mut keccak_output = keccak256(&keccak_input);
+        let mut keccak_output = keccak256(keccak_input);
         keccak_output.reverse();
 
         self.keccak_output
