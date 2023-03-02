@@ -27,7 +27,7 @@ impl<const IS_CREATE2: bool> Opcode for Create<IS_CREATE2> {
         let length = geth_step.stack.nth_last(2)?.as_usize();
 
         let curr_memory_word_size = state.call_ctx()?.memory_word_size();
-        if length != 0 {
+        if length > 0 {
             state
                 .call_ctx_mut()?
                 .memory
@@ -39,6 +39,12 @@ impl<const IS_CREATE2: bool> Opcode for Create<IS_CREATE2> {
         debug_assert!(state.sdb.get_nonce(&callee_call.address) == 0);
         let caller_call = state.call()?.clone();
         let tx_id = state.tx_ctx.id();
+
+        let init_code = if length > 0 {
+            handle_copy(state, &mut exec_step, caller_call.call_id, offset, length)?
+        } else {
+            vec![]
+        };
 
         let n_pop = if IS_CREATE2 { 4 } else { 3 };
         for i in 0..n_pop {
@@ -170,11 +176,6 @@ impl<const IS_CREATE2: bool> Opcode for Create<IS_CREATE2> {
             }
             state.handle_return(geth_step)?;
         } else {
-            let init_code = if length > 0 {
-                handle_copy(state, &mut exec_step, caller_call.call_id, offset, length)?
-            } else {
-                vec![]
-            };
             let keccak_code_hash = keccak256(&init_code);
             for (field, value) in [
                 (CallContextField::CallerId, caller_call.call_id.into()),
