@@ -57,6 +57,7 @@ mod stackonlyop;
 mod stop;
 mod swap;
 
+mod error_invalid_creation_code;
 mod error_invalid_jump;
 mod error_invalid_opcode;
 mod error_oog_call;
@@ -86,6 +87,7 @@ use codecopy::Codecopy;
 use codesize::Codesize;
 use create::Create;
 use dup::Dup;
+use error_invalid_creation_code::ErrorCreationCode;
 use error_invalid_jump::InvalidJump;
 use error_invalid_opcode::InvalidOpcode;
 use error_oog_call::OOGCall;
@@ -97,6 +99,7 @@ use error_precompile_failed::PrecompileFailed;
 use error_return_data_outofbound::ErrorReturnDataOutOfBound;
 use error_stack_oog_constant::ErrorStackOogConstant;
 use error_write_protection::ErrorWriteProtection;
+
 use exp::Exponentiation;
 use extcodecopy::Extcodecopy;
 use extcodehash::Extcodehash;
@@ -291,6 +294,7 @@ fn fn_gen_error_state_associated_ops(error: &ExecError) -> Option<FnGenAssociate
         ExecError::PrecompileFailed => Some(PrecompileFailed::gen_associated_ops),
         ExecError::WriteProtection => Some(ErrorWriteProtection::gen_associated_ops),
         ExecError::ReturnDataOutOfBounds => Some(ErrorReturnDataOutOfBound::gen_associated_ops),
+        ExecError::InvalidCreationCode => Some(ErrorCreationCode::gen_associated_ops),
 
         // more future errors place here
         _ => {
