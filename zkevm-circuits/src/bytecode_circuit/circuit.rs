@@ -1073,6 +1073,7 @@ mod tests {
         {
             let mut invalid = unrolled.clone();
             for row in invalid.rows.iter_mut() {
+                row.tag = Fr::from(BytecodeFieldTag::Header as u64);
                 row.index += Fr::one();
             }
             test_bytecode_circuit_unrolled::<Fr>(k, vec![invalid], false);
@@ -1080,6 +1081,9 @@ mod tests {
         // Don't increment an index once
         {
             let mut invalid = unrolled;
+            for row in invalid.rows.iter_mut() {
+                row.tag = Fr::from(BytecodeFieldTag::Header as u64);
+            }
             invalid.rows.last_mut().unwrap().index -= Fr::one();
             test_bytecode_circuit_unrolled::<Fr>(k, vec![invalid], false);
         }
