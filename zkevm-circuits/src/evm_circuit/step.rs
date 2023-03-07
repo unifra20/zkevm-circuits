@@ -15,6 +15,7 @@ use halo2_proofs::{
     circuit::Value,
     plonk::{Advice, Column, ConstraintSystem, Error, Expression},
 };
+use std::fmt::Display;
 use std::iter;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
@@ -93,7 +94,6 @@ pub enum ExecutionState {
     ErrorInsufficientBalance,
     ErrorContractAddressCollision,
     ErrorInvalidCreationCode,
-    ErrorMaxCodeSizeExceeded,
     ErrorInvalidJump,
     ErrorReturnDataOutOfBound,
     ErrorPrecompileFailed,
@@ -102,7 +102,8 @@ pub enum ExecutionState {
     ErrorOutOfGasDynamicMemoryExpansion,
     ErrorOutOfGasMemoryCopy,
     ErrorOutOfGasAccountAccess,
-    ErrorOutOfGasCodeStore,
+    // error for CodeStoreOOG and MaxCodeSizeExceeded
+    ErrorCodeStore,
     ErrorOutOfGasLOG,
     ErrorOutOfGasEXP,
     ErrorOutOfGasSHA3,
@@ -116,6 +117,12 @@ pub enum ExecutionState {
 impl Default for ExecutionState {
     fn default() -> Self {
         Self::STOP
+    }
+}
+
+impl Display for ExecutionState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 
@@ -138,7 +145,6 @@ impl ExecutionState {
                 | Self::ErrorInsufficientBalance
                 | Self::ErrorContractAddressCollision
                 | Self::ErrorInvalidCreationCode
-                | Self::ErrorMaxCodeSizeExceeded
                 | Self::ErrorInvalidJump
                 | Self::ErrorReturnDataOutOfBound
                 | Self::ErrorOutOfGasConstant
@@ -146,7 +152,7 @@ impl ExecutionState {
                 | Self::ErrorOutOfGasDynamicMemoryExpansion
                 | Self::ErrorOutOfGasMemoryCopy
                 | Self::ErrorOutOfGasAccountAccess
-                | Self::ErrorOutOfGasCodeStore
+                | Self::ErrorCodeStore
                 | Self::ErrorOutOfGasLOG
                 | Self::ErrorOutOfGasEXP
                 | Self::ErrorOutOfGasSHA3
