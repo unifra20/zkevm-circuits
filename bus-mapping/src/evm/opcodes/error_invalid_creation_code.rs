@@ -19,35 +19,28 @@ impl Opcode for ErrorCreationCode {
         let mut exec_step = state.new_step(geth_step)?;
         let next_step = geth_steps.get(1);
 
-        exec_step.error = state.get_step_err(geth_step, next_step)?;
-
-        assert!(exec_step.error == Some(ExecError::InvalidCreationCode));
+        exec_step.error = Some(ExecError::InvalidCreationCode);
 
         let offset = geth_step.stack.nth_last(0)?;
         let length = geth_step.stack.nth_last(1)?;
         state.stack_read(&mut exec_step, geth_step.stack.nth_last_filled(0), offset)?;
         state.stack_read(&mut exec_step, geth_step.stack.nth_last_filled(1), length)?;
 
-        // in internal call context
+        // in create context
         let call = state.call()?;
         let call_id = call.call_id;
         let is_success = call.is_success;
 
         // create context check
-        assert!(call.is_create() && !call.is_root);
+        assert!(call.is_create());
 
         assert!(length > U256::zero());
 
         // read first byte and assert it is 0xef
-        let end = offset as u64 + length as u64;
-        let values = state.call_ctx()?.memory.0[(offset as u64)..end].to_vec();
-        assert!(values[0] == 0xef);
+        let byte = state.call_ctx()?.memory.0[offset.as_usize()].into();
+        assert!(byte == 0xef);
 
-        state.push_op(
-            step,
-            RW::READ,
-            MemoryOp::new(call_id, offset.into(), values[0]),
-        );
+        state.memory_read(&mut exec_step, offset.try_into()?, byte)?;
 
         // common error handling
         state.call_context_read(
