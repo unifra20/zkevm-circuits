@@ -332,7 +332,8 @@ impl Memory {
         // Reference go-ethereum `opCallDataCopy` function for defails.
         // https://github.com/ethereum/go-ethereum/blob/bb4ac2d396de254898a5f44b1ea2086bfe5bd193/core/vm/instructions.go#L299
 
-        // `length` should be checked for overflow during gas cost calculation. Otherwise should return an out of gas error previously.
+        // `length` should be checked for overflow during gas cost calculation.
+        // Otherwise should return an out of gas error previously.
         let length = length.as_usize();
         if length != 0 {
             // `dst_offset` should be within range if length is non-zero.
