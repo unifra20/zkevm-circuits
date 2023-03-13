@@ -14,6 +14,7 @@ use crate::evm_circuit::util::{and, not, or, select, CachedRegion, Cell, Word};
 use crate::evm_circuit::witness::{Block, Call, ExecStep, Transaction};
 use crate::table::{AccountFieldTag, CallContextFieldTag};
 use crate::util::Expr;
+use bus_mapping::circuit_input_builder::CopyDataType;
 use bus_mapping::evm::OpcodeId;
 use bus_mapping::precompile::is_precompiled;
 use eth_types::evm_types::GAS_STIPEND_CALL_WITH_VALUE;
@@ -282,17 +283,34 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
                     cb.call_context_lookup(true.expr(), None, field_tag, value);
                 }
 
-                // TODO: copy table lookup
-                // - Source ID  : call_gadget.callee_address_expr()
-                // - Source Type: CopyDataType::PrecompileCall
-                // - Dest ID    : callee_call_id
-                // - Dest Type  : CopyDataType::Memory
+                // copy result from precompile output to callee memory.
+                cb.copy_table_lookup(
+                    call_gadget.callee_address_expr(),
+                    CopyDataType::PrecompileCall.expr(),
+                    callee_call_id.expr(),
+                    CopyDataType::Memory.expr(),
+                    0.expr(),
+                    0.expr(),
+                    0.expr(),
+                    call_gadget.rd_address.length(),
+                    0.expr(),
+                    call_gadget.rd_address.length(),
+                );
 
-                // TODO: copy table lookup
-                // - Source ID  : callee_call_id
-                // - Source Type: CopyDataType::Memory
-                // - Dest ID    : caller_call_id
-                // - Dest Type  : CopyDataType::Memory
+                // copy return data from callee memory to caller memory, including `length`
+                // reads and `return_data_copy_size` writes.
+                cb.copy_table_lookup(
+                    callee_call_id.expr(),
+                    CopyDataType::Memory.expr(),
+                    cb.curr.state.call_id.expr(),
+                    CopyDataType::Memory.expr(),
+                    0.expr(),
+                    return_data_len.expr(),
+                    call_gadget.rd_address.offset(),
+                    return_data_copy_size.min(),
+                    0.expr(),
+                    call_gadget.rd_address.length() + return_data_copy_size.min(),
+                );
 
                 PrecompileGadget::construct(cb, call_gadget.callee_address_expr())
             },
