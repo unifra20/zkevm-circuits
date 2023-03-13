@@ -43,6 +43,10 @@ hex = "0.4.3"
 rayon = "1.5"
 once_cell = "1.17.0"
 
+sha2-256-circuit = { version = "^0.1.0", path = "../../zkp-mooc-halo2/sha2-256-circuit" }
+ripemd160-circuit = { version = "^0.1.0", path = "../../zkp-mooc-halo2/ripemd160-circuit" }
+blake2f-circuit = { version = "^0.1.0", path = "../../zkp-mooc-halo2/blake2f-circuit" }
+
 [dev-dependencies]
 bus-mapping = { path = "../bus-mapping", features = ["test"] }
 criterion = "0.3"

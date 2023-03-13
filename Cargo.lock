@@ -333,6 +333,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "blake2f-circuit"
+version = "0.1.0"
+dependencies = [
+ "halo2_proofs",
+]
+
+[[package]]
 name = "block-buffer"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4525,6 +4532,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ripemd160-circuit"
+version = "0.1.0"
+dependencies = [
+ "halo2_proofs",
+]
+
+[[package]]
 name = "rkyv"
 version = "0.7.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4993,6 +5007,13 @@ dependencies = [
  "cfg-if 1.0.0",
  "cpufeatures",
  "digest 0.10.6",
+]
+
+[[package]]
+name = "sha2-256-circuit"
+version = "0.1.0"
+dependencies = [
+ "halo2_proofs",
 ]
 
 [[package]]
@@ -6780,6 +6801,7 @@ name = "zkevm-circuits"
 version = "0.1.0"
 dependencies = [
  "array-init",
+ "blake2f-circuit",
  "bus-mapping",
  "cli-table",
  "criterion",
@@ -6809,8 +6831,10 @@ dependencies = [
  "rand_chacha 0.3.1",
  "rand_xorshift",
  "rayon",
+ "ripemd160-circuit",
  "serde",
  "serde_json",
+ "sha2-256-circuit",
  "sha3 0.10.6",
  "snark-verifier",
  "strum",

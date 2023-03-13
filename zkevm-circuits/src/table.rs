@@ -1814,9 +1814,7 @@ impl RlpTable {
         }
         assignments
     }
-}
 
-impl RlpTable {
     /// Load witness into RLP table. Meant to be used for dev purposes.
     pub fn dev_load<F: Field>(
         &self,
@@ -1855,5 +1853,47 @@ impl RlpTable {
                 Ok(())
             },
         )
+    }
+}
+
+/// Lookup table embedded in the SHA2-256 circuit.
+#[derive(Clone, Debug)]
+pub struct Sha2Table(pub(crate) sha2_256_circuit::Sha2Table);
+
+impl<F: Field> LookupTable<F> for Sha2Table {
+    fn columns(&self) -> Vec<Column<Any>> {
+        self.0.columns()
+    }
+
+    fn annotations(&self) -> Vec<String> {
+        self.0.annotations()
+    }
+}
+
+/// Lookup table embedded in the Ripemd160 circuit.
+#[derive(Clone, Debug)]
+pub struct Ripemd160Table(pub(crate) ripemd160_circuit::Ripemd160Table);
+
+impl<F: Field> LookupTable<F> for Ripemd160Table {
+    fn columns(&self) -> Vec<Column<Any>> {
+        self.0.columns()
+    }
+
+    fn annotations(&self) -> Vec<String> {
+        self.0.annotations()
+    }
+}
+
+/// Lookup table embedded in the Blake2F circuit.
+#[derive(Clone, Debug)]
+pub struct Blake2fTable(pub(crate) blake2f_circuit::Blake2fTable);
+
+impl<F: Field> LookupTable<F> for Blake2fTable {
+    fn columns(&self) -> Vec<Column<Any>> {
+        self.0.columns()
+    }
+
+    fn annotations(&self) -> Vec<String> {
+        self.0.annotations()
     }
 }

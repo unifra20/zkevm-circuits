@@ -9,6 +9,7 @@ use crate::evm_circuit::util::constraint_builder::{
 use crate::evm_circuit::util::math_gadget::{
     ConstantDivisionGadget, IsZeroGadget, LtGadget, LtWordGadget, MinMaxGadget,
 };
+use crate::evm_circuit::util::precompile_gadget::PrecompileGadget;
 use crate::evm_circuit::util::{and, not, or, select, CachedRegion, Cell, Word};
 use crate::evm_circuit::witness::{Block, Call, ExecStep, Transaction};
 use crate::table::{AccountFieldTag, CallContextFieldTag};
@@ -56,6 +57,7 @@ pub(crate) struct CallOpGadget<F> {
     // used only in precompiled contracts
     return_data_len: Cell<F>,
     return_data_copy_size: MinMaxGadget<F, N_BYTES_GAS>,
+    precompile_gadget: PrecompileGadget<F>,
 }
 
 impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
@@ -261,7 +263,8 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
                 }
             },
         );
-        cb.condition(
+
+        let precompile_gadget = cb.condition(
             and::expr([
                 is_precompile.expr(),
                 not::expr(is_insufficient_balance.expr()),
@@ -278,6 +281,20 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
                 ] {
                     cb.call_context_lookup(true.expr(), None, field_tag, value);
                 }
+
+                // TODO: copy table lookup
+                // - Source ID  : call_gadget.callee_address_expr()
+                // - Source Type: CopyDataType::PrecompileCall
+                // - Dest ID    : callee_call_id
+                // - Dest Type  : CopyDataType::Memory
+
+                // TODO: copy table lookup
+                // - Source ID  : callee_call_id
+                // - Source Type: CopyDataType::Memory
+                // - Dest ID    : caller_call_id
+                // - Dest Type  : CopyDataType::Memory
+
+                PrecompileGadget::construct(cb, call_gadget.callee_address_expr())
             },
         );
 
@@ -484,6 +501,7 @@ impl<F: Field> ExecutionGadget<F> for CallOpGadget<F> {
             is_precompile_lt,
             return_data_len,
             return_data_copy_size,
+            precompile_gadget,
             step_gas_cost,
         }
     }

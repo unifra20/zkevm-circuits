@@ -5,10 +5,60 @@ use fp_evm::{
     Context, ExitError, ExitReason, ExitSucceed, Precompile, PrecompileFailure, PrecompileHandle,
     PrecompileOutput, Transfer,
 };
+use gadgets::impl_expr;
+use halo2_proofs::plonk::Expression;
 use pallet_evm_precompile_blake2::Blake2F;
 use pallet_evm_precompile_bn128::{Bn128Add, Bn128Mul, Bn128Pairing};
 use pallet_evm_precompile_modexp::Modexp;
 use pallet_evm_precompile_simple::{ECRecover, Identity, Ripemd160, Sha256};
+
+/// Addresses of the precompiled contracts.
+#[derive(Copy, Clone, Debug)]
+pub enum PrecompileAddress {
+    /// Elliptic Curve Recovery
+    ECRecover = 0x01,
+    /// SHA2-256 hash function
+    Sha256 = 0x02,
+    /// Ripemd-160 hash function
+    Ripemd160 = 0x03,
+    /// Identity function
+    Identity = 0x04,
+    /// Modular exponentiation
+    Modexp = 0x05,
+    /// Point addition
+    Bn128Add = 0x06,
+    /// Scalar multiplication
+    Bn128Mul = 0x07,
+    /// Bilinear function
+    Bn128Pairing = 0x08,
+    /// Compression function
+    Blake2F = 0x09,
+}
+
+impl From<u8> for PrecompileAddress {
+    fn from(value: u8) -> Self {
+        match value {
+            0x01 => Self::ECRecover,
+            0x02 => Self::Sha256,
+            0x03 => Self::Ripemd160,
+            0x04 => Self::Identity,
+            0x05 => Self::Modexp,
+            0x06 => Self::Bn128Add,
+            0x07 => Self::Bn128Mul,
+            0x08 => Self::Bn128Pairing,
+            0x09 => Self::Blake2F,
+            _ => panic!("calling non-exist precompiled contract address"),
+        }
+    }
+}
+
+impl From<PrecompileAddress> for usize {
+    fn from(a: PrecompileAddress) -> Self {
+        a as usize
+    }
+}
+
+impl_expr!(PrecompileAddress);
 
 /// Check if address is a precompiled or not.
 pub fn is_precompiled(address: &Address) -> bool {
@@ -16,17 +66,16 @@ pub fn is_precompiled(address: &Address) -> bool {
 }
 
 pub(crate) fn execute_precompiled(address: &Address, input: &[u8], gas: u64) -> (Vec<u8>, u64) {
-    match address.as_bytes()[19] {
-        0x01 => execute::<ECRecover>(input, gas),
-        0x02 => execute::<Sha256>(input, gas),
-        0x03 => execute::<Ripemd160>(input, gas),
-        0x04 => execute::<Identity>(input, gas),
-        0x05 => execute::<Modexp>(input, gas),
-        0x06 => execute::<Bn128Add>(input, gas),
-        0x07 => execute::<Bn128Mul>(input, gas),
-        0x08 => execute::<Bn128Pairing>(input, gas),
-        0x09 => execute::<Blake2F>(input, gas),
-        _ => panic!("calling non-exist precompiled contract address"),
+    match address.as_bytes()[19].into() {
+        PrecompileAddress::ECRecover => execute::<ECRecover>(input, gas),
+        PrecompileAddress::Sha256 => execute::<Sha256>(input, gas),
+        PrecompileAddress::Ripemd160 => execute::<Ripemd160>(input, gas),
+        PrecompileAddress::Identity => execute::<Identity>(input, gas),
+        PrecompileAddress::Modexp => execute::<Modexp>(input, gas),
+        PrecompileAddress::Bn128Add => execute::<Bn128Add>(input, gas),
+        PrecompileAddress::Bn128Mul => execute::<Bn128Mul>(input, gas),
+        PrecompileAddress::Bn128Pairing => execute::<Bn128Pairing>(input, gas),
+        PrecompileAddress::Blake2F => execute::<Blake2F>(input, gas),
     }
 }
 
