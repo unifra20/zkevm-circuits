@@ -14,7 +14,7 @@ use self::access::gen_state_access_trace;
 pub use self::block::BlockHead;
 use crate::error::Error;
 use crate::evm::opcodes::{gen_associated_ops, gen_begin_tx_ops, gen_end_tx_ops};
-use crate::operation::{CallContextField, Operation, RWCounter, StartOp, RW};
+use crate::operation::{self, CallContextField, Operation, RWCounter, StartOp, RW};
 use crate::rpc::GethClient;
 use crate::state_db::{self, CodeDB, StateDB};
 pub use access::{Access, AccessSet, AccessValue, CodeSource};
@@ -233,21 +233,22 @@ impl<'a> CircuitInputBuilder {
         // accumulates gas across all txs in the block
         log::info!("handling block {:?}", eth_block.number);
         for (tx_index, tx) in eth_block.transactions.iter().enumerate() {
+            let batch_tx_idx = self.block.txs.len();
             if self.block.txs.len() >= self.block.circuits_params.max_txs {
                 log::warn!(
-                    "skip tx outside MAX_TX limit {}, {}th(inner idx: {}) tx {:?}",
+                    "skip tx outside MAX_TX limit {}, {}th tx(inner idx: {}) {:?}",
                     self.block.circuits_params.max_txs,
+                    batch_tx_idx,
                     tx.transaction_index.unwrap_or_default(),
-                    self.block.txs.len(),
                     tx.hash
                 );
                 continue;
             }
             let geth_trace = &geth_traces[tx_index];
             log::info!(
-                "handling {}th(inner idx: {}) tx: {:?} rwc {:?}, to: {:?}, input_len {:?}",
+                "handling {}th tx(inner idx: {}): {:?} rwc {:?}, to: {:?}, input_len {:?}",
+                batch_tx_idx,
                 tx.transaction_index.unwrap_or_default(),
-                self.block.txs.len(),
                 tx.hash,
                 self.block_ctx.rwc,
                 tx.to,
@@ -261,6 +262,12 @@ impl<'a> CircuitInputBuilder {
                 geth_trace,
                 check_last_tx && tx_index + 1 == eth_block.transactions.len(),
             )?;
+            log::debug!(
+                "after handle {}th tx: rwc {:?}, block total gas {:?}",
+                batch_tx_idx,
+                self.block_ctx.rwc,
+                self.block_ctx.cumulative_gas_used
+            );
         }
         if handle_rwc_reversion {
             self.set_value_ops_call_context_rwc_eor();
@@ -271,6 +278,66 @@ impl<'a> CircuitInputBuilder {
             self.block_ctx.cumulative_gas_used
         );
         Ok(())
+    }
+
+    fn print_rw_usage(&self) {
+        // opcode -> (count, mem_rw_len, stack_rw_len)
+        let mut opcode_info_map = BTreeMap::new();
+        for t in &self.block.txs {
+            for step in t.steps() {
+                if let ExecState::Op(op) = step.exec_state {
+                    opcode_info_map.entry(op).or_insert((0, 0, 0));
+                    let mut values = opcode_info_map[&op];
+                    values.0 += 1;
+                    values.1 += step
+                        .bus_mapping_instance
+                        .iter()
+                        .filter(|rw| rw.0 == operation::Target::Memory)
+                        .count();
+                    values.2 += step
+                        .bus_mapping_instance
+                        .iter()
+                        .filter(|rw| rw.0 == operation::Target::Stack)
+                        .count();
+                    opcode_info_map.insert(op, values);
+                }
+            }
+        }
+        for (op, (count, mem, stack)) in opcode_info_map
+            .iter()
+            .sorted_by_key(|(_, (_, m, _))| m)
+            .rev()
+        {
+            log::debug!(
+                "op {:?}, count {}, mem rw {}(avg {:.2}), stack rw {}(avg {:.2})",
+                op,
+                count,
+                mem,
+                *mem as f32 / *count as f32,
+                stack,
+                *stack as f32 / *count as f32
+            );
+        }
+        log::debug!("memory num: {}", self.block.container.memory.len());
+        log::debug!("stack num: {}", self.block.container.stack.len());
+        log::debug!("storage num: {}", self.block.container.storage.len());
+        log::debug!(
+            "tx_access_list_account num: {}",
+            self.block.container.tx_access_list_account.len()
+        );
+        log::debug!(
+            "tx_access_list_account_storage num: {}",
+            self.block.container.tx_access_list_account_storage.len()
+        );
+        log::debug!("tx_refund num: {}", self.block.container.tx_refund.len());
+        log::debug!("account num: {}", self.block.container.account.len());
+        log::debug!(
+            "call_context num: {}",
+            self.block.container.call_context.len()
+        );
+        log::debug!("tx_receipt num: {}", self.block.container.tx_receipt.len());
+        log::debug!("tx_log num: {}", self.block.container.tx_log.len());
+        log::debug!("start num: {}", self.block.container.start.len());
     }
 
     /// ..
@@ -365,15 +432,18 @@ impl<'a> CircuitInputBuilder {
         tx.steps_mut().push(begin_tx_step);
 
         for (index, geth_step) in geth_trace.struct_logs.iter().enumerate() {
+            let tx_gas = tx.gas;
             let mut state_ref = self.state_ref(&mut tx, &mut tx_ctx);
             log::trace!(
-                "handle {}th tx depth {} {}th opcode {:?} pc: {} gas_left: {} rwc: {} call_id: {} msize: {} args: {}",
+                "handle {}th tx depth {} {}th/{} opcode {:?} pc: {} gas_left: {} gas_used: {} rwc: {} call_id: {} msize: {} args: {}",
                 eth_tx.transaction_index.unwrap_or_default(),
                 geth_step.depth,
                 index,
+                geth_trace.struct_logs.len(),
                 geth_step.op,
                 geth_step.pc.0,
                 geth_step.gas.0,
+                tx_gas - geth_step.gas.0,
                 state_ref.block_ctx.rwc.0,
                 state_ref.call().map(|c| c.call_id).unwrap_or(0),
                 state_ref.call_ctx()?.memory.len(),
