@@ -1353,6 +1353,27 @@ impl<'a, F: Field> ConstraintBuilder<'a, F> {
         );
     }
 
+    // SHA2-256 Table
+
+    pub(crate) fn sha2_table_lookup<E: Expr<F>>(&mut self, id: E) {
+        self.add_lookup("SHA2 lookup", Lookup::Sha2Table { id: id.expr() });
+    }
+
+    // RIPEMD-160 Table
+
+    pub(crate) fn ripemd160_table_lookup<E: Expr<F>>(&mut self, id: E) {
+        self.add_lookup(
+            "RIPEMD-160 lookup",
+            Lookup::Ripemd160Table { id: id.expr() },
+        );
+    }
+
+    // BLAKE2F compression function Table
+
+    pub(crate) fn blake2f_table_lookup<E: Expr<F>>(&mut self, id: E) {
+        self.add_lookup("BLAKE2F lookup", Lookup::Blake2fTable { id: id.expr() });
+    }
+
     // Validation
 
     pub(crate) fn validate_degree(&self, degree: usize, name: &'static str) {

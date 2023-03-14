@@ -1870,6 +1870,13 @@ impl<F: Field> LookupTable<F> for Sha2Table {
     }
 }
 
+impl Sha2Table {
+    /// Construct the SHA2-256 table.
+    pub fn construct<F: Field>(meta: &mut ConstraintSystem<F>) -> Self {
+        Self(sha2_256_circuit::Sha2Table::construct(meta))
+    }
+}
+
 /// Lookup table embedded in the Ripemd160 circuit.
 #[derive(Clone, Debug)]
 pub struct Ripemd160Table(pub(crate) ripemd160_circuit::Ripemd160Table);
@@ -1884,6 +1891,13 @@ impl<F: Field> LookupTable<F> for Ripemd160Table {
     }
 }
 
+impl Ripemd160Table {
+    /// Construct the RIPEMD-160 table.
+    pub fn construct<F: Field>(meta: &mut ConstraintSystem<F>) -> Self {
+        Self(ripemd160_circuit::Ripemd160Table::construct(meta))
+    }
+}
+
 /// Lookup table embedded in the Blake2F circuit.
 #[derive(Clone, Debug)]
 pub struct Blake2fTable(pub(crate) blake2f_circuit::Blake2fTable);
@@ -1895,5 +1909,12 @@ impl<F: Field> LookupTable<F> for Blake2fTable {
 
     fn annotations(&self) -> Vec<String> {
         self.0.annotations()
+    }
+}
+
+impl Blake2fTable {
+    /// Construct the BLAKE2F table.
+    pub fn construct<F: Field>(meta: &mut ConstraintSystem<F>) -> Self {
+        Self(blake2f_circuit::Blake2fTable::construct(meta))
     }
 }

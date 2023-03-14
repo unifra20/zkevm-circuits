@@ -1624,4 +1624,39 @@ impl<'a> CircuitInputStateRef<'a> {
 
         Ok(copy_steps)
     }
+
+    pub(crate) fn gen_copy_steps_for_precompile_call(
+        &mut self,
+        exec_step: &mut ExecStep,
+        result: Vec<u8>,
+        callee_id: usize,
+        caller_id: usize,
+        length: usize,
+        rd_offset: usize,
+    ) -> Result<(Vec<(u8, bool)>, Vec<(u8, bool)>), Error> {
+        let mut write_steps = Vec::with_capacity(result.len());
+        let mut rw_steps = Vec::with_capacity(length);
+        for (i, &value) in result.iter().enumerate() {
+            write_steps.push((value, false));
+            self.push_op(
+                exec_step,
+                RW::WRITE,
+                MemoryOp::new(callee_id, (i).into(), value),
+            );
+        }
+        for (i, &value) in result[..length].iter().enumerate() {
+            rw_steps.push((value, false));
+            self.push_op(
+                exec_step,
+                RW::READ,
+                MemoryOp::new(callee_id, (i).into(), value),
+            );
+            self.push_op(
+                exec_step,
+                RW::WRITE,
+                MemoryOp::new(caller_id, (rd_offset + i).into(), value),
+            );
+        }
+        Ok((write_steps, rw_steps))
+    }
 }

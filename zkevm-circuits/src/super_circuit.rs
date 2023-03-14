@@ -74,8 +74,8 @@ use crate::util::MockChallenges as Challenges;
 
 use crate::state_circuit::{StateCircuit, StateCircuitConfig, StateCircuitConfigArgs};
 use crate::table::{
-    BlockTable, BytecodeTable, CopyTable, ExpTable, KeccakTable, MptTable, PoseidonTable, RlpTable,
-    RwTable, TxTable,
+    Blake2fTable, BlockTable, BytecodeTable, CopyTable, ExpTable, KeccakTable, MptTable,
+    PoseidonTable, Ripemd160Table, RlpTable, RwTable, Sha2Table, TxTable,
 };
 
 use crate::util::{circuit_stats, log2_ceil, SubCircuit, SubCircuitConfig};
@@ -161,6 +161,13 @@ impl<F: Field> SubCircuitConfig<F> for SuperCircuitConfig<F> {
         log_circuit_info(meta, "mpt table");
         let poseidon_table = PoseidonTable::construct(meta);
         log_circuit_info(meta, "poseidon table");
+
+        let sha2_table = Sha2Table::construct(meta);
+        log_circuit_info(meta, "sha2 table");
+        let ripemd160_table = Ripemd160Table::construct(meta);
+        log_circuit_info(meta, "ripemd160 table");
+        let blake2f_table = Blake2fTable::construct(meta);
+        log_circuit_info(meta, "blake2f table");
 
         let bytecode_table = BytecodeTable::construct(meta);
         log_circuit_info(meta, "bytecode table");
@@ -291,6 +298,9 @@ impl<F: Field> SubCircuitConfig<F> for SuperCircuitConfig<F> {
                 copy_table,
                 keccak_table,
                 exp_table,
+                sha2_table,
+                ripemd160_table,
+                blake2f_table,
             },
         );
         log_circuit_info(meta, "evm circuit");

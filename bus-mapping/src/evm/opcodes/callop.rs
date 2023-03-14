@@ -1,7 +1,8 @@
 use super::Opcode;
-use crate::circuit_input_builder::{CallKind, CircuitInputStateRef, CodeSource, ExecStep};
+use crate::circuit_input_builder::{
+    CallKind, CircuitInputStateRef, CodeSource, CopyDataType, CopyEvent, ExecStep, NumberOrHash,
+};
 use crate::operation::{AccountField, CallContextField, TxAccessListAccountOp};
-use crate::operation::{MemoryOp, RW};
 use crate::precompile::{execute_precompiled, is_precompiled};
 use crate::Error;
 use eth_types::evm_types::gas_utils::{eip150_gas, memory_expansion_gas_cost};
@@ -284,20 +285,48 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
                 ] {
                     state.call_context_write(&mut exec_step, current_call.call_id, field, value);
                 }
-                for (i, value) in result.iter().enumerate() {
-                    state.push_op(
-                        &mut exec_step,
-                        RW::WRITE,
-                        MemoryOp::new(call.call_id, (i).into(), *value),
-                    );
-                }
-                for (i, value) in result[..length].iter().enumerate() {
-                    state.push_op(
-                        &mut exec_step,
-                        RW::WRITE,
-                        MemoryOp::new(call.caller_id, (ret_offset + i).into(), *value),
-                    );
-                }
+
+                // push memory copy steps for populating copy circuit.
+                let rw_counter_start = state.block_ctx.rwc;
+                let result_len = result.len();
+                let (write_steps, rw_steps) = state.gen_copy_steps_for_precompile_call(
+                    &mut exec_step,
+                    result,
+                    call.call_id,
+                    call.caller_id,
+                    length,
+                    ret_offset,
+                )?;
+                state.push_copy(
+                    &mut exec_step,
+                    CopyEvent {
+                        src_id: NumberOrHash::Number(/* precompile addr */ 0),
+                        src_type: CopyDataType::PrecompileCall,
+                        src_addr: 0,
+                        src_addr_end: 0,
+                        dst_id: NumberOrHash::Number(call.call_id),
+                        dst_type: CopyDataType::Memory,
+                        dst_addr: 0,
+                        log_id: None,
+                        rw_counter_start,
+                        bytes: write_steps,
+                    },
+                );
+                state.push_copy(
+                    &mut exec_step,
+                    CopyEvent {
+                        src_id: NumberOrHash::Number(call.call_id),
+                        src_type: CopyDataType::Memory,
+                        src_addr: 0,
+                        src_addr_end: length as u64,
+                        dst_id: NumberOrHash::Number(call.caller_id),
+                        dst_type: CopyDataType::Memory,
+                        dst_addr: ret_offset as u64,
+                        log_id: None,
+                        rw_counter_start: rw_counter_start + result_len.into(),
+                        bytes: rw_steps,
+                    },
+                );
 
                 state.handle_return(geth_step)?;
 
@@ -412,7 +441,6 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
 
                 Ok(vec![exec_step])
             }
-
             // 4. insufficient balance or error depth cases.
             (true, _, _) => {
                 for (field, value) in [

@@ -99,6 +99,15 @@ impl Instrument {
                     CellType::Lookup(Table::Exp) => {
                         report.exp_table = data_entry;
                     }
+                    CellType::Lookup(Table::Sha2) => {
+                        report.sha2_table = data_entry;
+                    }
+                    CellType::Lookup(Table::Ripemd160) => {
+                        report.ripemd160_table = data_entry;
+                    }
+                    CellType::Lookup(Table::Blake2f) => {
+                        report.blake2f_table = data_entry;
+                    }
                 }
             }
             report_collection.push(report);
@@ -124,6 +133,9 @@ pub(crate) struct ExecStateReport {
     pub(crate) copy_table: StateReportRow,
     pub(crate) keccak_table: StateReportRow,
     pub(crate) exp_table: StateReportRow,
+    pub(crate) sha2_table: StateReportRow,
+    pub(crate) ripemd160_table: StateReportRow,
+    pub(crate) blake2f_table: StateReportRow,
 }
 
 impl From<ExecutionState> for ExecStateReport {

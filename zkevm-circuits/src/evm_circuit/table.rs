@@ -129,6 +129,9 @@ pub(crate) enum Table {
     Copy,
     Keccak,
     Exp,
+    Sha2,
+    Ripemd160,
+    Blake2f,
 }
 
 #[derive(Clone, Debug)]
@@ -278,6 +281,12 @@ pub(crate) enum Lookup<F> {
         exponent_lo_hi: [Expression<F>; 2],
         exponentiation_lo_hi: [Expression<F>; 2],
     },
+    /// Lookup to the SHA2-256 table.
+    Sha2Table { id: Expression<F> },
+    /// Lookup to the RIPEMD-160 table.
+    Ripemd160Table { id: Expression<F> },
+    /// Lookup to the BLAKE2F compression function table.
+    Blake2fTable { id: Expression<F> },
     /// Conditional lookup enabled by the first element.
     Conditional(Expression<F>, Box<Lookup<F>>),
 }
@@ -297,6 +306,9 @@ impl<F: Field> Lookup<F> {
             Self::CopyTable { .. } => Table::Copy,
             Self::KeccakTable { .. } => Table::Keccak,
             Self::ExpTable { .. } => Table::Exp,
+            Self::Sha2Table { .. } => Table::Sha2,
+            Self::Ripemd160Table { .. } => Table::Ripemd160,
+            Self::Blake2fTable { .. } => Table::Blake2f,
             Self::Conditional(_, lookup) => lookup.table(),
         }
     }
@@ -408,6 +420,9 @@ impl<F: Field> Lookup<F> {
                 exponentiation_lo_hi[0].clone(),
                 exponentiation_lo_hi[1].clone(),
             ],
+            Self::Sha2Table { id } => vec![id.clone()],
+            Self::Ripemd160Table { id } => vec![id.clone()],
+            Self::Blake2fTable { id } => vec![id.clone()],
             Self::Conditional(condition, lookup) => lookup
                 .input_exprs()
                 .into_iter()

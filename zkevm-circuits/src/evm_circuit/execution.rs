@@ -349,6 +349,9 @@ impl<F: Field> ExecutionConfig<F> {
         copy_table: &dyn LookupTable<F>,
         keccak_table: &dyn LookupTable<F>,
         exp_table: &dyn LookupTable<F>,
+        sha2_table: &dyn LookupTable<F>,
+        ripemd160_table: &dyn LookupTable<F>,
+        blake2f_table: &dyn LookupTable<F>,
     ) -> Self {
         let mut instrument = Instrument::default();
         let q_usable = meta.complex_selector();
@@ -608,6 +611,9 @@ impl<F: Field> ExecutionConfig<F> {
             copy_table,
             keccak_table,
             exp_table,
+            sha2_table,
+            ripemd160_table,
+            blake2f_table,
             &challenges,
             &cell_manager,
         );
@@ -863,6 +869,9 @@ impl<F: Field> ExecutionConfig<F> {
         copy_table: &dyn LookupTable<F>,
         keccak_table: &dyn LookupTable<F>,
         exp_table: &dyn LookupTable<F>,
+        sha2_table: &dyn LookupTable<F>,
+        ripemd160_table: &dyn LookupTable<F>,
+        blake2f_table: &dyn LookupTable<F>,
         challenges: &Challenges<Expression<F>>,
         cell_manager: &CellManager<F>,
     ) {
@@ -879,6 +888,9 @@ impl<F: Field> ExecutionConfig<F> {
                         Table::Copy => copy_table,
                         Table::Keccak => keccak_table,
                         Table::Exp => exp_table,
+                        Table::Sha2 => sha2_table,
+                        Table::Ripemd160 => ripemd160_table,
+                        Table::Blake2f => blake2f_table,
                     }
                     .table_exprs(meta);
                     vec![(

@@ -14,7 +14,8 @@ pub(crate) mod util;
 pub mod table;
 
 use crate::table::{
-    BlockTable, BytecodeTable, CopyTable, ExpTable, KeccakTable, LookupTable, RwTable, TxTable,
+    Blake2fTable, BlockTable, BytecodeTable, CopyTable, ExpTable, KeccakTable, LookupTable,
+    Ripemd160Table, RwTable, Sha2Table, TxTable,
 };
 use crate::util::{SubCircuit, SubCircuitConfig};
 pub use crate::witness;
@@ -60,6 +61,12 @@ pub struct EvmCircuitConfigArgs<F: Field> {
     pub keccak_table: KeccakTable,
     /// ExpTable
     pub exp_table: ExpTable,
+    /// SHA2-256 table
+    pub sha2_table: Sha2Table,
+    /// RIPEMD-160 table
+    pub ripemd160_table: Ripemd160Table,
+    /// BLAKE2F table
+    pub blake2f_table: Blake2fTable,
 }
 
 impl<F: Field> SubCircuitConfig<F> for EvmCircuitConfig<F> {
@@ -78,6 +85,9 @@ impl<F: Field> SubCircuitConfig<F> for EvmCircuitConfig<F> {
             copy_table,
             keccak_table,
             exp_table,
+            sha2_table,
+            ripemd160_table,
+            blake2f_table,
         }: Self::ConfigArgs,
     ) -> Self {
         let fixed_table = [(); 4].map(|_| meta.fixed_column());
@@ -94,6 +104,9 @@ impl<F: Field> SubCircuitConfig<F> for EvmCircuitConfig<F> {
             &copy_table,
             &keccak_table,
             &exp_table,
+            &sha2_table,
+            &ripemd160_table,
+            &blake2f_table,
         ));
 
         meta.annotate_lookup_any_column(byte_table[0], || "byte_range");
@@ -384,6 +397,9 @@ impl<F: Field> Circuit<F> for EvmCircuit<F> {
         let copy_table = CopyTable::construct(meta, q_copy_table);
         let keccak_table = KeccakTable::construct(meta);
         let exp_table = ExpTable::construct(meta);
+        let sha2_table = Sha2Table::construct(meta);
+        let ripemd160_table = Ripemd160Table::construct(meta);
+        let blake2f_table = Blake2fTable::construct(meta);
         (
             EvmCircuitConfig::new(
                 meta,
@@ -396,6 +412,9 @@ impl<F: Field> Circuit<F> for EvmCircuit<F> {
                     copy_table,
                     keccak_table,
                     exp_table,
+                    sha2_table,
+                    ripemd160_table,
+                    blake2f_table,
                 },
             ),
             challenges,
