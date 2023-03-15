@@ -940,7 +940,6 @@ impl Display for OpEnum {
             OpEnum::TxAccessListAccountStorage(_op) => write!(f, "TxAccessListAccountStorage"),
             OpEnum::TxRefund(_op) => write!(f, "TxRefund"),
             OpEnum::Account(_op) => write!(f, "Account"),
-            OpEnum::AccountDestructed(_op) => write!(f, "AccountDestructed"),
             OpEnum::CallContext(_op) => write!(f, "CallContext"),
             OpEnum::TxReceipt(_op) => write!(f, "TxReceipt"),
             OpEnum::TxLog(_op) => write!(f, "TxLog"),
