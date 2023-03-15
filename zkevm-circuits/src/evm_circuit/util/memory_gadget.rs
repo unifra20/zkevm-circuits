@@ -43,17 +43,17 @@ pub(crate) mod address_low {
 pub(crate) mod address_high {
     use crate::evm_circuit::{
         param::N_BYTES_MEMORY_ADDRESS,
-        util::{sum, Word},
+        util::{from_bytes, Word},
     };
     use eth_types::Field;
     use halo2_proofs::plonk::Expression;
 
     pub(crate) fn expr<F: Field>(address: &Word<F>) -> Expression<F> {
-        sum::expr(&address.cells[N_BYTES_MEMORY_ADDRESS..])
+        from_bytes::expr(&address.cells[N_BYTES_MEMORY_ADDRESS..])
     }
 
     pub(crate) fn value<F: Field>(address: [u8; 32]) -> F {
-        sum::value::<F>(&address[N_BYTES_MEMORY_ADDRESS..])
+        from_bytes::value::<F>(&address[N_BYTES_MEMORY_ADDRESS..])
     }
 }
 
@@ -414,7 +414,7 @@ pub(crate) struct BufferReaderGadget<F, const MAX_BYTES: usize, const N_BYTES_ME
 {
     /// The bytes read from buffer
     bytes: [Cell<F>; MAX_BYTES],
-    /// The selectors that indicate if the corrsponding byte contains real data
+    /// The selectors that indicate if the corresponding byte contains real data
     /// or is padded
     selectors: [Cell<F>; MAX_BYTES],
     /// `bound_dist` is defined as `max(addr_end - addr_start - i, 0)` for `i`

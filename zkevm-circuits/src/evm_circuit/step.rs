@@ -1,4 +1,5 @@
 use super::util::{CachedRegion, CellManager, CellType};
+use crate::evm_circuit::param::EXECUTION_STATE_HEIGHT_MAP;
 use crate::{
     evm_circuit::{
         param::{MAX_STEP_HEIGHT, STEP_STATE_HEIGHT, STEP_WIDTH},
@@ -14,6 +15,7 @@ use halo2_proofs::{
     circuit::Value,
     plonk::{Advice, Column, ConstraintSystem, Error, Expression},
 };
+use std::fmt::Display;
 use std::iter;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
@@ -90,34 +92,39 @@ pub enum ExecutionState {
     ErrorWriteProtection,
     ErrorDepth,
     ErrorInsufficientBalance,
+    ErrorNonceUintOverflow,
     ErrorContractAddressCollision,
     ErrorInvalidCreationCode,
-    ErrorMaxCodeSizeExceeded,
     ErrorInvalidJump,
     ErrorReturnDataOutOfBound,
+    ErrorPrecompileFailed,
     ErrorOutOfGasConstant,
     ErrorOutOfGasStaticMemoryExpansion,
     ErrorOutOfGasDynamicMemoryExpansion,
     ErrorOutOfGasMemoryCopy,
     ErrorOutOfGasAccountAccess,
-    ErrorOutOfGasCodeStore,
+    // error for CodeStoreOOG and MaxCodeSizeExceeded
+    ErrorCodeStore,
     ErrorOutOfGasLOG,
     ErrorOutOfGasEXP,
     ErrorOutOfGasSHA3,
     ErrorOutOfGasEXTCODECOPY,
-    ErrorOutOfGasSLOAD,
-    ErrorOutOfGasSSTORE,
-    ErrorOutOfGasCALL,
-    ErrorOutOfGasCALLCODE,
-    ErrorOutOfGasDELEGATECALL,
+    ErrorOutOfGasCall,
+    ErrorOutOfGasSloadSstore,
     ErrorOutOfGasCREATE2,
-    ErrorOutOfGasSTATICCALL,
     ErrorOutOfGasSELFDESTRUCT,
+    ErrorGasUintOverflow,
 }
 
 impl Default for ExecutionState {
     fn default() -> Self {
         Self::STOP
+    }
+}
+
+impl Display for ExecutionState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 
@@ -140,26 +147,22 @@ impl ExecutionState {
                 | Self::ErrorInsufficientBalance
                 | Self::ErrorContractAddressCollision
                 | Self::ErrorInvalidCreationCode
-                | Self::ErrorMaxCodeSizeExceeded
                 | Self::ErrorInvalidJump
                 | Self::ErrorReturnDataOutOfBound
+                | Self::ErrorGasUintOverflow
                 | Self::ErrorOutOfGasConstant
                 | Self::ErrorOutOfGasStaticMemoryExpansion
                 | Self::ErrorOutOfGasDynamicMemoryExpansion
                 | Self::ErrorOutOfGasMemoryCopy
                 | Self::ErrorOutOfGasAccountAccess
-                | Self::ErrorOutOfGasCodeStore
+                | Self::ErrorCodeStore
                 | Self::ErrorOutOfGasLOG
                 | Self::ErrorOutOfGasEXP
                 | Self::ErrorOutOfGasSHA3
                 | Self::ErrorOutOfGasEXTCODECOPY
-                | Self::ErrorOutOfGasSLOAD
-                | Self::ErrorOutOfGasSSTORE
-                | Self::ErrorOutOfGasCALL
-                | Self::ErrorOutOfGasCALLCODE
-                | Self::ErrorOutOfGasDELEGATECALL
+                | Self::ErrorOutOfGasCall
+                | Self::ErrorOutOfGasSloadSstore
                 | Self::ErrorOutOfGasCREATE2
-                | Self::ErrorOutOfGasSTATICCALL
                 | Self::ErrorOutOfGasSELFDESTRUCT
         )
     }
@@ -169,7 +172,18 @@ impl ExecutionState {
             || self.halts_in_exception()
     }
 
-    pub(crate) fn responsible_opcodes(&self) -> Vec<OpcodeId> {
+    pub(crate) fn responsible_opcodes(&self) -> Vec<ResponsibleOp> {
+        if matches!(self, Self::ErrorStack) {
+            return OpcodeId::valid_opcodes()
+                .into_iter()
+                .flat_map(|op| {
+                    op.invalid_stack_ptrs()
+                        .into_iter()
+                        .map(move |stack_ptr| ResponsibleOp::InvalidStackPtr(op, stack_ptr))
+                })
+                .collect();
+        }
+
         match self {
             Self::STOP => vec![OpcodeId::STOP],
             Self::ADD_SUB => vec![OpcodeId::ADD, OpcodeId::SUB],
@@ -308,7 +322,45 @@ impl ExecutionState {
             ],
             Self::RETURN_REVERT => vec![OpcodeId::RETURN, OpcodeId::REVERT],
             Self::SELFDESTRUCT => vec![OpcodeId::SELFDESTRUCT],
+            Self::ErrorInvalidOpcode => OpcodeId::invalid_opcodes(),
             _ => vec![],
+        }
+        .into_iter()
+        .map(Into::into)
+        .collect()
+    }
+
+    pub fn get_step_height_option(&self) -> Option<usize> {
+        EXECUTION_STATE_HEIGHT_MAP.get(self).copied()
+    }
+
+    pub fn get_step_height(&self) -> usize {
+        self.get_step_height_option()
+            .unwrap_or_else(|| panic!("Execution state unknown: {:?}", self))
+    }
+}
+
+/// Enum of Responsible opcode mapping to execution state.
+#[derive(Debug)]
+pub(crate) enum ResponsibleOp {
+    /// Raw opcode
+    Op(OpcodeId),
+    /// Corresponding to ExecutionState::ErrorStack
+    InvalidStackPtr(OpcodeId, u32),
+}
+
+/// Helper for easy transform from a raw OpcodeId to ResponsibleOp.
+impl From<OpcodeId> for ResponsibleOp {
+    fn from(opcode: OpcodeId) -> Self {
+        Self::Op(opcode)
+    }
+}
+
+impl ResponsibleOp {
+    pub(crate) fn opcode(&self) -> OpcodeId {
+        *match self {
+            ResponsibleOp::Op(opcode) => opcode,
+            ResponsibleOp::InvalidStackPtr(opcode, _) => opcode,
         }
     }
 }

@@ -21,7 +21,7 @@ pub trait CodeHash: std::fmt::Debug {
 
 /// Helper trait for clone object in a object-safe way
 pub trait CodeHashCopy: CodeHash {
-    /// clone to a boxed obect
+    /// clone to a boxed object
     fn clone_box(&self) -> Box<dyn CodeHashCopy>;
 }
 
@@ -114,10 +114,7 @@ impl Account {
 
     /// Return if account is empty or not.
     pub fn is_empty(&self) -> bool {
-        self.nonce.is_zero()
-            && self.balance.is_zero()
-            && self.storage.is_empty()
-            && self.code_hash.eq(&CODE_HASH_ZERO)
+        self.nonce.is_zero() && self.balance.is_zero() && self.code_hash.eq(&CODE_HASH_ZERO)
     }
 }
 
@@ -230,7 +227,7 @@ impl StateDB {
     }
 
     /// Get nonce of account with `addr`.
-    pub fn get_nonce(&mut self, addr: &Address) -> u64 {
+    pub fn get_nonce(&self, addr: &Address) -> u64 {
         let (_, account) = self.get_account(addr);
         account.nonce.as_u64()
     }
@@ -282,6 +279,7 @@ impl StateDB {
 
     /// Set account as self destructed.
     pub fn destruct_account(&mut self, addr: Address) {
+        self.state.insert(addr, Account::zero());
         self.destructed_account.insert(addr);
     }
 

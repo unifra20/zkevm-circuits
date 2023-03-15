@@ -95,8 +95,11 @@ impl<F: Field> ExecutionGadget<F> for EndTxGadget<F> {
         let effective_tip = cb.query_word_rlc();
         let sub_gas_price_by_base_fee =
             AddWordsGadget::construct(cb, [effective_tip.clone(), base_fee], tx_gas_price);
-        let mul_effective_tip_by_gas_used =
-            MulWordByU64Gadget::construct(cb, effective_tip, gas_used.clone());
+        let mul_effective_tip_by_gas_used = MulWordByU64Gadget::construct(
+            cb,
+            effective_tip,
+            gas_used.clone() - effective_refund.min(),
+        );
         let coinbase_reward = UpdateBalanceGadget::construct(
             cb,
             coinbase.expr(),
@@ -253,12 +256,13 @@ impl<F: Field> ExecutionGadget<F> for EndTxGadget<F> {
             [effective_tip, context.base_fee],
             tx.gas_price,
         )?;
+        let coinbase_reward = effective_tip * (gas_used - effective_refund);
         self.mul_effective_tip_by_gas_used.assign(
             region,
             offset,
             effective_tip,
-            gas_used,
-            effective_tip * gas_used,
+            gas_used - effective_refund,
+            coinbase_reward,
         )?;
         self.coinbase.assign(
             region,
@@ -274,7 +278,7 @@ impl<F: Field> ExecutionGadget<F> for EndTxGadget<F> {
             region,
             offset,
             coinbase_balance_prev,
-            vec![effective_tip * gas_used],
+            vec![coinbase_reward],
             coinbase_balance,
         )?;
 
@@ -309,23 +313,19 @@ impl<F: Field> ExecutionGadget<F> for EndTxGadget<F> {
 
 #[cfg(test)]
 mod test {
-    use crate::evm_circuit::test::run_test_circuit_geth_data;
+    use crate::test_util::CircuitTestBuilder;
     use bus_mapping::circuit_input_builder::CircuitsParams;
-    use eth_types::{self, bytecode, geth_types::GethData};
-    use halo2_proofs::halo2curves::bn256::Fr;
+    use eth_types::{self, bytecode};
+
     use mock::{eth, test_ctx::helpers::account_0_code_account_1_no_code, TestContext};
 
-    fn test_ok(block: GethData) {
-        assert_eq!(
-            run_test_circuit_geth_data::<Fr>(
-                block,
-                CircuitsParams {
-                    max_txs: 4,
-                    ..Default::default()
-                }
-            ),
-            Ok(())
-        );
+    fn test_ok<const NACC: usize, const NTX: usize>(ctx: TestContext<NACC, NTX>) {
+        CircuitTestBuilder::new_from_test_ctx(ctx)
+            .params(CircuitsParams {
+                max_txs: 5,
+                ..Default::default()
+            })
+            .run();
     }
 
     #[test]
@@ -366,8 +366,7 @@ mod test {
                 },
                 |block, _tx| block.number(0xcafeu64),
             )
-            .unwrap()
-            .into(),
+            .unwrap(),
         );
     }
 }

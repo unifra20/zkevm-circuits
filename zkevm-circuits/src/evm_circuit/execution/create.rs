@@ -173,9 +173,19 @@ impl<F: Field> ExecutionGadget<F> for CreateGadget<F> {
             cb.require_equal(
                 "callee_rw_counter_end_of_reversion == rw_counter_end_of_reversion - (reversible_write_counter + 1)",
                 callee_reversion_info.rw_counter_end_of_reversion(),
-                reversion_info.rw_counter_of_reversion(),
+                reversion_info.rw_counter_of_reversion(1.expr()),
             );
         });
+
+        let transfer = TransferGadget::construct(
+            cb,
+            from_bytes::expr(&caller_address.cells),
+            new_address.clone(),
+            0.expr(),
+            1.expr(),
+            value.clone(),
+            &mut callee_reversion_info,
+        );
 
         cb.account_write(
             new_address.clone(),
@@ -183,14 +193,6 @@ impl<F: Field> ExecutionGadget<F> for CreateGadget<F> {
             1.expr(),
             0.expr(),
             Some(&mut callee_reversion_info),
-        );
-
-        let transfer = TransferGadget::construct(
-            cb,
-            from_bytes::expr(&caller_address.cells),
-            new_address.clone(),
-            value.clone(),
-            &mut callee_reversion_info,
         );
 
         let memory_expansion =
@@ -252,6 +254,7 @@ impl<F: Field> ExecutionGadget<F> for CreateGadget<F> {
             (CallContextFieldTag::IsStatic, false.expr()),
             (CallContextFieldTag::IsCreate, true.expr()),
             (CallContextFieldTag::CodeHash, code_hash.expr()),
+            (CallContextFieldTag::Value, value.expr()),
         ] {
             cb.call_context_lookup(true.expr(), Some(callee_call_id.expr()), field_tag, value);
         }
@@ -264,18 +267,25 @@ impl<F: Field> ExecutionGadget<F> for CreateGadget<F> {
                 is_create: To(true.expr()),
                 code_hash: To(code_hash.expr()),
                 gas_left: To(callee_gas_left),
-                reversible_write_counter: To(3.expr()),
+                reversible_write_counter: To(1.expr() + transfer.reversible_w_delta()),
                 ..StepStateTransition::new_context()
             })
         });
 
         cb.condition(not::expr(initialization_code.has_length()), |cb| {
+            for field_tag in [
+                CallContextFieldTag::LastCalleeId,
+                CallContextFieldTag::LastCalleeReturnDataOffset,
+                CallContextFieldTag::LastCalleeReturnDataLength,
+            ] {
+                cb.call_context_lookup(true.expr(), None, field_tag, 0.expr());
+            }
             cb.require_step_state_transition(StepStateTransition {
                 rw_counter: Delta(cb.rw_counter_offset()),
                 program_counter: Delta(1.expr()),
                 stack_pointer: Delta(2.expr() + is_create2.expr()),
                 gas_left: Delta(-gas_cost),
-                reversible_write_counter: Delta(5.expr()),
+                reversible_write_counter: Delta(3.expr() + transfer.reversible_w_delta()),
                 ..Default::default()
             })
         });
@@ -452,8 +462,8 @@ impl<F: Field> ExecutionGadget<F> for CreateGadget<F> {
         self.nonce.assign(region, offset, caller_nonce)?;
 
         let [callee_rw_counter_end_of_reversion, callee_is_persistent] = [10, 11].map(|i| {
-            block.rws[step.rw_indices[i + usize::from(is_create2) + copy_rw_increase]]
-                .call_context_value()
+            let rw = block.rws[step.rw_indices[i + usize::from(is_create2) + copy_rw_increase]];
+            rw.call_context_value()
         });
 
         self.callee_reversion_info.assign(
@@ -466,10 +476,23 @@ impl<F: Field> ExecutionGadget<F> for CreateGadget<F> {
             callee_is_persistent.low_u64() != 0,
         )?;
 
-        let [caller_balance_pair, callee_balance_pair] = [13, 14].map(|i| {
-            block.rws[step.rw_indices[i + usize::from(is_create2) + copy_rw_increase]]
-                .account_value_pair()
-        });
+        let mut rw_offset = 0;
+
+        let [caller_balance_pair, callee_balance_pair] = if !value.is_zero() {
+            rw_offset += 2;
+            [13, 14].map(|i| {
+                let rw = block.rws[step.rw_indices[i + usize::from(is_create2) + copy_rw_increase]];
+                debug_assert_eq!(
+                    rw.field_tag(),
+                    Some(AccountFieldTag::Balance as u64),
+                    "invalid rw {:?}",
+                    rw
+                );
+                rw.account_value_pair()
+            })
+        } else {
+            [(0.into(), 0.into()), (0.into(), 0.into())]
+        };
         self.transfer.assign(
             region,
             offset,
@@ -492,26 +515,22 @@ impl<F: Field> ExecutionGadget<F> for CreateGadget<F> {
                 (31u64 + initialization_code_length.as_u64()).into(),
             )?;
 
-        self.gas_left.assign(
-            region,
-            offset,
-            (step.gas_left
-                - GasCost::CREATE.as_u64()
-                - memory_expansion_gas_cost
-                - if is_create2 {
-                    u64::try_from(initialization_code_word_size).unwrap()
-                        * GasCost::COPY_SHA3.as_u64()
-                } else {
-                    0
-                })
-            .into(),
-        )?;
+        let gas_left = step.gas_left
+            - GasCost::CREATE.as_u64()
+            - memory_expansion_gas_cost
+            - if is_create2 {
+                u64::try_from(initialization_code_word_size).unwrap() * GasCost::COPY_SHA3.as_u64()
+            } else {
+                0
+            };
+        self.gas_left.assign(region, offset, gas_left.into())?;
 
         self.callee_is_success.assign(
             region,
             offset,
             Value::known(
-                block.rws[step.rw_indices[22 + usize::from(is_create2) + copy_rw_increase]]
+                block.rws
+                    [step.rw_indices[21 + rw_offset + usize::from(is_create2) + copy_rw_increase]]
                     .call_context_value()
                     .to_scalar()
                     .unwrap(),
@@ -705,7 +724,7 @@ impl<F: Field> RlpU64Gadget<F> {
 
 #[cfg(test)]
 mod test {
-    use crate::test_util::run_test_circuits;
+    use bus_mapping::circuit_input_builder::CircuitsParams;
     use eth_types::{
         address, bytecode, evm_types::OpcodeId, geth_types::Account, Address, Bytecode, Word,
     };
@@ -714,9 +733,20 @@ mod test {
     use lazy_static::lazy_static;
     use mock::{eth, TestContext};
 
+    use crate::test_util::CircuitTestBuilder;
+
     const CALLEE_ADDRESS: Address = Address::repeat_byte(0xff);
     lazy_static! {
         static ref CALLER_ADDRESS: Address = address!("0x00bbccddee000000000000000000000000002400");
+    }
+
+    fn run_test_circuits(ctx: TestContext<2, 1>) {
+        CircuitTestBuilder::new_from_test_ctx(ctx)
+            .params(CircuitsParams {
+                max_rws: 4500,
+                ..Default::default()
+            })
+            .run();
     }
 
     // RETURN or REVERT with data of [0x60; 5]
@@ -809,12 +839,7 @@ mod test {
                 balance: eth(10),
                 ..Default::default()
             };
-            assert_eq!(
-                run_test_circuits(test_context(caller), None),
-                Ok(()),
-                "(is_success, is_create2, is_persistent) = {:?}",
-                (*is_success, *is_create2, *is_persistent),
-            );
+            run_test_circuits(test_context(caller));
         }
     }
 
@@ -828,12 +853,7 @@ mod test {
                 balance: eth(10),
                 ..Default::default()
             };
-            assert_eq!(
-                run_test_circuits(test_context(caller), None),
-                Ok(()),
-                "nonce = {:?}",
-                nonce,
-            );
+            run_test_circuits(test_context(caller))
         }
     }
 
@@ -847,12 +867,31 @@ mod test {
                 balance: eth(10),
                 ..Default::default()
             };
-            assert_eq!(
-                run_test_circuits(test_context(caller), None),
-                Ok(()),
-                "is_create2 = {:?}",
-                is_create2
-            );
+            run_test_circuits(test_context(caller));
+        }
+    }
+
+    #[test]
+    fn test_create_overflow_offset_and_zero_size() {
+        for is_create2 in [true, false] {
+            let mut bytecode = bytecode! {
+                PUSH1(0) // size
+                PUSH32(Word::MAX) // offset
+                PUSH2(23414) // value
+            };
+            bytecode.write_op(if is_create2 {
+                OpcodeId::CREATE2
+            } else {
+                OpcodeId::CREATE
+            });
+            let caller = Account {
+                address: *CALLER_ADDRESS,
+                code: bytecode.into(),
+                nonce: 10.into(),
+                balance: eth(10),
+                ..Default::default()
+            };
+            run_test_circuits(test_context(caller));
         }
     }
 }

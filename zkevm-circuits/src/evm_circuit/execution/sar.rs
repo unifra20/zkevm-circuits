@@ -41,6 +41,8 @@ pub(crate) struct SarGadget<F> {
     p_top: Cell<F>,
     // Identify if `a` is a negative word.
     is_neg: LtGadget<F, 1>,
+    // Verify `shf_div64 < 4`.
+    shf_div64_lt_4: LtGadget<F, 1>,
     // Verify `shf_mod64 < 64`.
     shf_mod64_lt_64: LtGadget<F, 1>,
     // Identify if `shift` is less than 256 or not.
@@ -162,6 +164,8 @@ impl<F: Field> ExecutionGadget<F> for SarGadget<F> {
         );
 
         // Shift constraint
+        let shf_div64_lt_4 = LtGadget::construct(cb, shf_div64.expr(), 4.expr());
+        cb.require_equal("shf_div64 < 4", shf_div64_lt_4.expr(), 1.expr());
         let shf_mod64_lt_64 = LtGadget::construct(cb, shf_mod64.expr(), 64.expr());
         cb.require_equal("shf_mod64 < 64", shf_mod64_lt_64.expr(), 1.expr());
         cb.require_equal(
@@ -232,6 +236,7 @@ impl<F: Field> ExecutionGadget<F> for SarGadget<F> {
             p_hi,
             p_top,
             is_neg,
+            shf_div64_lt_4,
             shf_mod64_lt_64,
             shf_lt256,
             shf_lo_div64_eq0,
@@ -322,6 +327,8 @@ impl<F: Field> ExecutionGadget<F> for SarGadget<F> {
             127.into(),
             u64::from(a.to_le_bytes()[31]).into(),
         )?;
+        self.shf_div64_lt_4
+            .assign(region, offset, F::from_u128(shf_div64), 4.into())?;
         self.shf_mod64_lt_64
             .assign(region, offset, F::from_u128(shf_mod64), 64.into())?;
         self.shf_lt256
@@ -352,7 +359,7 @@ impl<F: Field> ExecutionGadget<F> for SarGadget<F> {
 #[cfg(test)]
 mod test {
     use crate::evm_circuit::test::rand_word;
-    use crate::test_util::run_test_circuits;
+    use crate::test_util::CircuitTestBuilder;
     use eth_types::{bytecode, U256};
     use ethers_core::types::I256;
     use lazy_static::lazy_static;
@@ -450,12 +457,9 @@ mod test {
             SAR
             STOP
         };
-        assert_eq!(
-            run_test_circuits(
-                TestContext::<2, 1>::simple_ctx_with_bytecode(bytecode).unwrap(),
-                None
-            ),
-            Ok(())
-        );
+        CircuitTestBuilder::new_from_test_ctx(
+            TestContext::<2, 1>::simple_ctx_with_bytecode(bytecode).unwrap(),
+        )
+        .run();
     }
 }

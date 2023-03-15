@@ -2,10 +2,14 @@
 
 use crate::{
     circuit_input_builder::BlockHead,
-    circuit_input_builder::{Block, CircuitInputBuilder, CircuitsParams},
+    circuit_input_builder::{
+        get_state_accesses, AccessSet, Block, CircuitInputBuilder, CircuitsParams,
+    },
     state_db::{self, CodeDB, StateDB},
 };
 use eth_types::{geth_types::GethData, Word};
+
+const MOCK_OLD_STATE_ROOT: u64 = 0xcafeu64;
 
 /// BlockData is a type that contains all the information from a block required
 /// to build the circuit inputs.
@@ -39,7 +43,9 @@ impl BlockData {
             ],
             Default::default(),
         );
-        block.circuits_params = self.circuits_params.clone();
+        // FIXME: better fetch a real state root instead of a mock one
+        block.prev_state_root = MOCK_OLD_STATE_ROOT.into();
+        block.circuits_params = self.circuits_params;
         CircuitInputBuilder::new(self.sdb.clone(), self.code_db.clone(), &block)
     }
     /// Create a new block from the given Geth data.
@@ -50,19 +56,22 @@ impl BlockData {
         let mut sdb = StateDB::new();
         let mut code_db = CodeDB::new();
 
-        sdb.set_account(
-            &geth_data.eth_block.author.expect("Block.author"),
-            state_db::Account::zero(),
-        );
-        for tx in geth_data.eth_block.transactions.iter() {
-            sdb.set_account(&tx.from, state_db::Account::zero());
-            if let Some(to) = tx.to.as_ref() {
-                sdb.set_account(to, state_db::Account::zero());
-            }
+        let access_set: AccessSet =
+            get_state_accesses(&geth_data.eth_block, &geth_data.geth_traces)
+                .expect("state accesses")
+                .into();
+        // Initialize all accesses accounts to zero
+        for addr in access_set.state.keys() {
+            sdb.set_account(addr, state_db::Account::zero());
         }
 
         for account in geth_data.accounts {
             let code_hash = code_db.insert(account.code.to_vec());
+            log::trace!(
+                "trace code {:?} {:?}",
+                code_hash,
+                hex::encode(account.code.to_vec())
+            );
             sdb.set_account(
                 &account.address,
                 state_db::Account {

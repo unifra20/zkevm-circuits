@@ -20,8 +20,8 @@ use gadgets::{
     binary_number::{BinaryNumberChip, BinaryNumberConfig},
 };
 use halo2_proofs::{
-    circuit::{Layouter, Region, SimpleFloorPlanner, Value},
-    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Expression, Fixed, VirtualCells},
+    circuit::{AssignedCell, Cell, Layouter, Region, Value},
+    plonk::{Advice, Assigned, Column, ConstraintSystem, Error, Expression, Fixed, VirtualCells},
     poly::Rotation,
 };
 use lexicographic_ordering::Config as LexicographicOrderingConfig;
@@ -30,7 +30,7 @@ use multiple_precision_integer::{Chip as MpiChip, Config as MpiConfig, Queries a
 use random_linear_combination::{Chip as RlcChip, Config as RlcConfig, Queries as RlcQueries};
 #[cfg(test)]
 use std::collections::HashMap;
-use std::{iter::once, marker::PhantomData};
+use std::marker::PhantomData;
 
 #[cfg(feature = "onephase")]
 use halo2_proofs::plonk::FirstPhase as SecondPhase;
@@ -41,6 +41,9 @@ use self::{
     constraint_builder::{MptUpdateTableQueries, RwTableQueries},
     lexicographic_ordering::LimbIndex,
 };
+
+#[cfg(any(feature = "test", test, feature = "test-circuits"))]
+use halo2_proofs::{circuit::SimpleFloorPlanner, plonk::Circuit};
 
 const N_LIMBS_RW_COUNTER: usize = 2;
 const N_LIMBS_ACCOUNT_ADDRESS: usize = 10;
@@ -83,6 +86,15 @@ pub struct StateCircuitConfigArgs<F: Field> {
     pub challenges: Challenges<Expression<F>>,
 }
 
+/// Circuit exported cells after synthesis, used for subcircuit
+#[derive(Clone, Debug)]
+pub struct StateCircuitExports<V> {
+    /// start state root
+    pub start_state_root: (Cell, Value<V>),
+    /// final state root
+    pub end_state_root: (Cell, Value<V>),
+}
+
 impl<F: Field> SubCircuitConfig<F> for StateCircuitConfig<F> {
     type ConfigArgs = StateCircuitConfigArgs<F>;
 
@@ -110,7 +122,7 @@ impl<F: Field> SubCircuitConfig<F> for StateCircuitConfig<F> {
             selector,
             rw_table.storage_key,
             lookups,
-            power_of_randomness.clone(),
+            challenges.evm_word(),
         );
 
         let initial_value = meta.advice_column_in(SecondPhase);
@@ -127,6 +139,7 @@ impl<F: Field> SubCircuitConfig<F> for StateCircuitConfig<F> {
         );
         let mpt_proof_type = meta.advice_column_in(SecondPhase);
         let state_root = meta.advice_column_in(SecondPhase);
+        meta.enable_equality(state_root);
 
         let sort_keys = SortKeysConfig {
             tag,
@@ -143,6 +156,10 @@ impl<F: Field> SubCircuitConfig<F> for StateCircuitConfig<F> {
             lookups,
             power_of_randomness.clone(),
         );
+
+        // annotate columns
+        rw_table.annotate_columns(meta);
+        mpt_table.annotate_columns(meta);
 
         let config = Self {
             selector,
@@ -184,16 +201,17 @@ impl<F: Field> StateCircuitConfig<F> {
         &self,
         layouter: &mut impl Layouter<F>,
         rows: &[Rw],
+        updates: &MptUpdates,
         n_rows: usize, // 0 means dynamically calculated from `rows`.
         challenges: &Challenges<Value<F>>,
     ) -> Result<(), Error> {
-        let updates = MptUpdates::mock_from(rows);
         layouter.assign_region(
             || "state circuit",
             |mut region| {
-                self.assign_with_region(&mut region, rows, &updates, n_rows, challenges.evm_word())
+                self.assign_with_region(&mut region, rows, updates, n_rows, challenges.evm_word())
             },
-        )
+        )?;
+        Ok(())
     }
 
     fn assign_with_region(
@@ -203,7 +221,7 @@ impl<F: Field> StateCircuitConfig<F> {
         updates: &MptUpdates,
         n_rows: usize, // 0 means dynamically calculated from `rows`.
         randomness: Value<F>,
-    ) -> Result<(), Error> {
+    ) -> Result<StateCircuitExports<Assigned<F>>, Error> {
         let tag_chip = BinaryNumberChip::construct(self.sort_keys.tag);
 
         let (rows, padding_length) = RwMap::table_assignments_prepad(rows, n_rows);
@@ -214,18 +232,18 @@ impl<F: Field> StateCircuitConfig<F> {
             padding_length
         );
         let rows_len = rows.len();
-        let rows = rows.iter();
-        let prev_rows = once(None).chain(rows.clone().map(Some));
 
         let mut state_root =
             randomness.map(|randomness| rlc::value(&updates.old_root().to_le_bytes(), randomness));
 
-        for (offset, (row, prev_row)) in rows.zip(prev_rows).enumerate() {
-            if offset >= padding_length {
+        let mut start_state_root: Option<AssignedCell<_, F>> = None;
+        let mut end_state_root: Option<AssignedCell<_, F>> = None;
+        // annotate columns
+        self.annotate_circuit_in_region(region);
+
+        for (offset, row) in rows.iter().enumerate() {
+            if offset == 0 || offset + 1 >= padding_length {
                 log::trace!("state circuit assign offset:{} row:{:?}", offset, row);
-            }
-            if offset + 1 >= n_rows || offset == padding_length {
-                log::debug!("state circuit assign offset:{} row:{:?}", offset, row);
             }
 
             region.assign_fixed(
@@ -255,7 +273,8 @@ impl<F: Field> StateCircuitConfig<F> {
                     .assign(region, offset, randomness, storage_key)?;
             }
 
-            if let Some(prev_row) = prev_row {
+            if offset > 0 {
+                let prev_row = &rows[offset - 1];
                 let index = self
                     .lexicographic_ordering
                     .assign(region, offset, row, prev_row)?;
@@ -351,12 +370,15 @@ impl<F: Field> StateCircuitConfig<F> {
             // State root assignment is at previous row (offset - 1) because the state root
             // changes on the last access row.
             if offset != 0 {
-                region.assign_advice(
+                let assigned = region.assign_advice(
                     || "state_root",
                     self.state_root,
                     offset - 1,
                     || state_root,
                 )?;
+                if start_state_root.is_none() {
+                    start_state_root.replace(assigned);
+                }
             }
 
             if offset + 1 == rows_len {
@@ -371,16 +393,37 @@ impl<F: Field> StateCircuitConfig<F> {
                         new_root
                     });
                 }
-                region.assign_advice(
+                let assigned = region.assign_advice(
                     || "last row state_root",
                     self.state_root,
                     offset,
                     || state_root,
                 )?;
+                end_state_root.replace(assigned);
             }
         }
 
-        Ok(())
+        let start_state_root = start_state_root.expect("should be assigned");
+        let end_state_root = end_state_root.expect("should be assigned");
+        Ok(StateCircuitExports {
+            start_state_root: (start_state_root.cell(), start_state_root.value_field()),
+            end_state_root: (end_state_root.cell(), end_state_root.value_field()),
+        })
+    }
+
+    fn annotate_circuit_in_region(&self, region: &mut Region<F>) {
+        self.rw_table.annotate_columns_in_region(region);
+        self.mpt_table.annotate_columns_in_region(region);
+        self.is_non_exist
+            .annotate_columns_in_region(region, "STATE");
+        self.lexicographic_ordering
+            .annotate_columns_in_region(region, "STATE");
+        self.sort_keys.annotate_columns_in_region(region, "STATE");
+        region.name_column(|| "STATE_selector", self.selector);
+        region.name_column(|| "STATE_not_first_access", self.not_first_access);
+        region.name_column(|| "STATE_phase2_initial_value", self.initial_value);
+        region.name_column(|| "STATE_phase2_mpt_proof_type", self.mpt_proof_type);
+        region.name_column(|| "STATE_phase2_state_root", self.state_root);
     }
 }
 
@@ -395,6 +438,18 @@ pub struct SortKeysConfig {
     rw_counter: MpiConfig<u32, N_LIMBS_RW_COUNTER>,
 }
 
+impl SortKeysConfig {
+    /// Annotates this config within a circuit region.
+    pub fn annotate_columns_in_region<F: Field>(&self, region: &mut Region<F>, prefix: &str) {
+        self.tag.annotate_columns_in_region(region, prefix);
+        self.address.annotate_columns_in_region(region, prefix);
+        self.id.annotate_columns_in_region(region, prefix);
+        self.storage_key.annotate_columns_in_region(region, prefix);
+        self.rw_counter.annotate_columns_in_region(region, prefix);
+        region.name_column(|| format!("{}_field_tag", prefix), self.field_tag);
+    }
+}
+
 type Lookup<F> = (&'static str, Expression<F>, Expression<F>);
 
 /// State Circuit for proving RwTable is valid
@@ -404,6 +459,7 @@ pub struct StateCircuit<F> {
     pub rows: Vec<Rw>,
     pub(crate) updates: MptUpdates,
     pub(crate) n_rows: usize,
+    pub(crate) exports: std::cell::RefCell<Option<StateCircuitExports<Assigned<F>>>>,
     #[cfg(test)]
     overrides: HashMap<(test::AdviceColumn, isize), F>,
     _marker: PhantomData<F>,
@@ -413,10 +469,16 @@ impl<F: Field> StateCircuit<F> {
     /// make a new state circuit from an RwMap
     pub fn new(rw_map: RwMap, n_rows: usize) -> Self {
         let rows = rw_map.table_assignments();
-        let updates = MptUpdates::mock_from(&rows);
+        log::warn!("build StateCircuit from mock MptUpdates");
+        let updates = MptUpdates::from_rws_with_mock_state_roots(
+            &rows,
+            0xcafeu64.into(),
+            0xdeadbeefu64.into(),
+        );
         Self {
             rows,
             updates,
+            exports: std::cell::RefCell::new(None),
             n_rows,
             #[cfg(test)]
             overrides: HashMap::new(),
@@ -425,22 +487,16 @@ impl<F: Field> StateCircuit<F> {
     }
 }
 
-#[cfg(any(feature = "test", test))]
 impl<F: Field> SubCircuit<F> for StateCircuit<F> {
     type Config = StateCircuitConfig<F>;
 
     fn new_from_block(block: &witness::Block<F>) -> Self {
         let rows = block.rws.table_assignments();
-        let updates = match &block.mpt_state {
-            None => MptUpdates::mock_from(&rows),
-            Some(mpt_state) => {
-                let (updates, _, _) = MptUpdates::construct(rows.as_slice(), mpt_state);
-                updates
-            }
-        };
+        let updates = block.mpt_updates.clone();
         Self {
             rows,
             updates,
+            exports: std::cell::RefCell::new(None),
             n_rows: block.circuits_params.max_rws,
             #[cfg(test)]
             overrides: HashMap::new(),
@@ -492,13 +548,17 @@ impl<F: Field> SubCircuit<F> for StateCircuit<F> {
                     randomness,
                 )?;
 
-                config.assign_with_region(
+                let exports = config.assign_with_region(
                     &mut region,
                     &self.rows,
                     &self.updates,
                     self.n_rows,
                     randomness,
                 )?;
+                if self.exports.borrow().is_none() {
+                    self.exports.borrow_mut().replace(exports);
+                }
+
                 #[cfg(test)]
                 {
                     let padding_length = RwMap::padding_len(self.rows.len(), self.n_rows);
@@ -527,7 +587,7 @@ impl<F: Field> SubCircuit<F> for StateCircuit<F> {
     }
 }
 
-#[cfg(any(feature = "test", test))]
+#[cfg(any(feature = "test", test, feature = "test-circuits"))]
 impl<F: Field> Circuit<F> for StateCircuit<F>
 where
     F: Field,
@@ -564,7 +624,7 @@ where
         (config, challenges): Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
-        let challenges = challenges.values(&mut layouter);
+        let challenges = challenges.values(&layouter);
         config
             .mpt_table
             .load(&mut layouter, &self.updates, challenges.evm_word())?;
@@ -593,9 +653,8 @@ fn queries<F: Field>(meta: &mut VirtualCells<'_, F>, c: &StateCircuitConfig<F>) 
             field_tag: meta.query_advice(c.rw_table.field_tag, Rotation::cur()),
             storage_key: meta.query_advice(c.rw_table.storage_key, Rotation::cur()),
             value: meta.query_advice(c.rw_table.value, Rotation::cur()),
-            // TODO: we should constain value.prev() <-> value_prev.cur() later
-            // see https://github.com/privacy-scaling-explorations/zkevm-specs/issues/202 for more details
             value_prev: meta.query_advice(c.rw_table.value, Rotation::prev()),
+            value_prev_column: meta.query_advice(c.rw_table.value_prev, Rotation::cur()),
         },
         // TODO: clean this up
         mpt_update_table: MptUpdateTableQueries {
@@ -646,130 +705,31 @@ fn queries<F: Field>(meta: &mut VirtualCells<'_, F>, c: &StateCircuitConfig<F>) 
 #[cfg(test)]
 mod state_circuit_stats {
     use crate::evm_circuit::step::ExecutionState;
-    use crate::evm_circuit::EvmCircuit;
-    use bus_mapping::{circuit_input_builder::ExecState, mock::BlockData};
-    use eth_types::{bytecode, evm_types::OpcodeId, geth_types::GethData, Address};
-    use halo2_proofs::halo2curves::bn256::Fr;
-    use halo2_proofs::plonk::{Circuit, ConstraintSystem};
-    use mock::{eth, test_ctx::TestContext, MOCK_ACCOUNTS};
-    use strum::IntoEnumIterator;
+    use crate::stats::{bytecode_prefix_op_big_rws, print_circuit_stats_by_states};
 
-    /// This function prints to stdout a table with all the implemented states
-    /// and their responsible opcodes with the following stats:
-    /// - height: number of rows in the State circuit used by the execution
-    ///   state
-    /// - gas: gas value used for the opcode execution
-    /// - height/gas: ratio between circuit cost and gas cost
+    /// Prints the stats of State circuit per execution state.  See
+    /// `print_circuit_stats_by_states` for more details.
     ///
     /// Run with:
-    /// `cargo test -p zkevm-circuits --release get_state_states_stats --
-    /// --nocapture --ignored`
+    /// `cargo test -p zkevm-circuits --release --all-features
+    /// get_state_states_stats -- --nocapture --ignored`
     #[ignore]
     #[test]
     pub fn get_state_states_stats() {
-        // Get the list of implemented execution states by configuring the EVM Circuit
-        // and querying the step height for each possible execution state (only those
-        // implemented will return a Some value).
-        let mut meta = ConstraintSystem::<Fr>::default();
-        let circuit = EvmCircuit::configure(&mut meta);
-
-        let mut implemented_states = Vec::new();
-        for state in ExecutionState::iter() {
-            let height = circuit.0.execution.get_step_height_option(state);
-            if height.is_some() {
-                implemented_states.push(state);
-            }
-        }
-
-        let mut stats = Vec::new();
-        for state in implemented_states {
-            for opcode in state.responsible_opcodes() {
-                let mut code = bytecode! {
-                    PUSH2(0x100)
-                    MLOAD // Expand memory a bit
-                    PUSH2(0x00)
-                    EXTCODESIZE // Warm up 0x0 address
-                    PUSH2(0x8000)
-                    PUSH2(0x00)
-                    PUSH2(0x10)
-                    PUSH2(0x20)
-                    PUSH2(0x30)
-                };
-                // Make sure that opcodes that take an address as argument use addres 0x0, which
-                // will exist in the test.
-                match opcode {
-                    OpcodeId::BALANCE
-                    | OpcodeId::EXTCODESIZE
-                    | OpcodeId::EXTCODECOPY
-                    | OpcodeId::SELFDESTRUCT
-                    | OpcodeId::EXTCODEHASH => code.append(&bytecode! {
-                        PUSH2(0x40)
-                        PUSH2(0x00)
-                    }),
-                    OpcodeId::CALL
-                    | OpcodeId::CALLCODE
-                    | OpcodeId::DELEGATECALL
-                    | OpcodeId::STATICCALL => code.append(&bytecode! {
-                        PUSH2(0x00)
-                        PUSH2(0x50)
-                    }),
-                    _ => code.append(&bytecode! {
-                        PUSH2(0x40)
-                        PUSH2(0x50)
-                    }),
-                };
-                code.write_op(opcode);
-                code.write_op(OpcodeId::STOP);
-                let block: GethData = TestContext::<3, 1>::new(
-                    None,
-                    |accs| {
-                        accs[0]
-                            .address(MOCK_ACCOUNTS[0])
-                            .balance(eth(10))
-                            .code(code.clone());
-                        accs[1].address(MOCK_ACCOUNTS[1]).balance(eth(10));
-                        accs[2].address(Address::zero()).balance(eth(10)).code(code);
-                    },
-                    |mut txs, accs| {
-                        txs[0]
-                            .from(accs[1].address)
-                            .to(accs[0].address)
-                            .input(vec![1, 2, 3, 4, 5, 6, 7].into());
-                    },
-                    |block, _tx| block.number(0xcafeu64),
+        print_circuit_stats_by_states(
+            |state| {
+                // TODO: Enable CREATE/CREATE2 once they are supported
+                !matches!(
+                    state,
+                    ExecutionState::ErrorInvalidOpcode | ExecutionState::SELFDESTRUCT
                 )
-                .unwrap()
-                .into();
-                let mut builder =
-                    BlockData::new_from_geth_data(block.clone()).new_circuit_input_builder();
-                builder
-                    .handle_block(&block.eth_block, &block.geth_traces)
-                    .unwrap();
-                let step_index = 1 + 11; // 1 is for the BeginTx, 11 for the bytecode opcodes.
-                let step = &builder.block.txs[0].steps()[step_index];
-                let step_next = &builder.block.txs[0].steps()[step_index + 1];
-                assert_eq!(ExecState::Op(opcode), step.exec_state);
-                let h = step_next.rwc.0 - step.rwc.0;
-
-                let gas_cost = block.geth_traces[0].struct_logs[11].gas_cost.0;
-                stats.push((state, opcode, h, gas_cost));
-            }
-        }
-
-        println!(
-            "| {: <14} | {: <14} | {: <2} | {: >6} | {: <5} |",
-            "state", "opcode", "h", "g", "h/g"
+            },
+            bytecode_prefix_op_big_rws,
+            |block, _, step_index| {
+                let step = &block.txs[0].steps()[step_index];
+                let step_next = &block.txs[0].steps()[step_index + 1];
+                step_next.rwc.0 - step.rwc.0
+            },
         );
-        println!("| ---            | ---            | ---|    --- | ---   |");
-        for (state, opcode, height, gas_cost) in stats {
-            println!(
-                "| {: <14?} | {: <14?} | {: >2} | {: >6} | {: >1.3} |",
-                state,
-                opcode,
-                height,
-                gas_cost,
-                height as f64 / gas_cost as f64
-            );
-        }
     }
 }

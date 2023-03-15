@@ -31,8 +31,7 @@ impl Opcode for Selfbalance {
             callee_address,
             AccountField::Balance,
             self_balance,
-            self_balance,
-        )?;
+        );
 
         // Stack write of self_balance
         state.stack_write(

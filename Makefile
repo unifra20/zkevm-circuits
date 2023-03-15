@@ -5,7 +5,7 @@ help: ## Display this help screen
 
 clippy: ## Run clippy checks over all workspace members
 	@cargo check --all-features
-	@cargo clippy --all-features --all-targets -- -D warnings
+	@cargo clippy --all-features --all-targets -- -D warnings -Aclippy::format_in_format_args -Aclippy::uninlined_format_args -Aclippy::unnecessary_cast
 
 doc: ## Generate and tests docs including private items
 	@cargo doc --no-deps --all --document-private-items
@@ -16,9 +16,9 @@ fmt: ## Check whether the code is formated correctly
 
 test: ## Run tests for all the workspace members
 	# Run light tests
-	@cargo test --release --all --all-features --exclude integration-tests --exclude circuit-benchmarks
+	@cargo test --release --all --exclude integration-tests --exclude circuit-benchmarks
 	# Run heavy tests serially to avoid OOM
-	@cargo test --release --all --all-features --exclude integration-tests --exclude circuit-benchmarks serial_ -- --ignored --test-threads 1
+	@cargo test --release --all --exclude integration-tests --exclude circuit-benchmarks serial_ -- --ignored --test-threads 1
 
 test_doc: ## Test the docs
 	@cargo test --release --all --all-features --doc
@@ -63,5 +63,16 @@ exp_bench: ## Run Exp Circuit benchmarks
 
 circuit_benches: evm_bench state_bench ## Run All Circuit benchmarks
 
+stats_state_circuit: # Print a table with State Circuit stats by ExecState/opcode
+	@cargo test -p zkevm-circuits --features=test,warn-unimplemented get_state_states_stats -- --nocapture --ignored
 
-.PHONY: clippy doc fmt test test_benches test-all evm_bench state_bench circuit_benches help
+stats_evm_circuit: # Print a table with EVM Circuit stats by ExecState/opcode
+	@cargo test -p zkevm-circuits --features=test,warn-unimplemented get_evm_states_stats -- --nocapture --ignored
+
+stats_copy_circuit: # Print a table with Copy Circuit stats by ExecState/opcode
+	@cargo test -p zkevm-circuits --features=test,warn-unimplemented get_copy_states_stats -- --nocapture --ignored
+
+evm_exec_steps_occupancy: # Print a table for each EVM-CellManager CellType with the top 10 occupancy ExecutionSteps associated
+	@cargo test -p zkevm-circuits --release get_exec_steps_occupancy --features=test,warn-unimplemented -- --nocapture --ignored
+
+.PHONY: clippy doc fmt test test_benches test-all evm_bench state_bench circuit_benches evm_exec_steps_occupancy stats_state_circuit stats_evm_circuit stats_copy_circuit help

@@ -159,26 +159,24 @@ impl<F: Field> ExecutionGadget<F> for Sha3Gadget<F> {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_util::run_test_circuits_with_params;
+    use crate::test_util::CircuitTestBuilder;
     use bus_mapping::{
         circuit_input_builder::CircuitsParams,
         evm::{gen_sha3_code, MemoryKind},
     };
+    use eth_types::{bytecode, Word};
     use mock::TestContext;
 
     fn test_ok(offset: usize, size: usize, mem_kind: MemoryKind) {
         let (code, _) = gen_sha3_code(offset, size, mem_kind);
-        assert_eq!(
-            run_test_circuits_with_params(
-                TestContext::<2, 1>::simple_ctx_with_bytecode(code).unwrap(),
-                None,
-                CircuitsParams {
-                    max_rws: 5500,
-                    ..Default::default()
-                }
-            ),
-            Ok(())
-        );
+        CircuitTestBuilder::new_from_test_ctx(
+            TestContext::<2, 1>::simple_ctx_with_bytecode(code).unwrap(),
+        )
+        .params(CircuitsParams {
+            max_rws: 5500,
+            ..Default::default()
+        })
+        .run();
     }
 
     #[test]
@@ -200,5 +198,19 @@ mod tests {
         test_ok(0x202, 0x303, MemoryKind::LessThanSize);
         test_ok(0x303, 0x404, MemoryKind::EqualToSize);
         test_ok(0x404, 0x505, MemoryKind::MoreThanSize);
+    }
+
+    #[test]
+    fn sha3_gadget_overflow_offset_and_zero_size() {
+        let bytecode = bytecode! {
+            PUSH1(0)
+            PUSH32(Word::MAX)
+            SHA3
+        };
+
+        CircuitTestBuilder::new_from_test_ctx(
+            TestContext::<2, 1>::simple_ctx_with_bytecode(bytecode).unwrap(),
+        )
+        .run();
     }
 }

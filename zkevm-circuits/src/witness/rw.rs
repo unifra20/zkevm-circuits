@@ -4,13 +4,16 @@ use std::collections::HashMap;
 use bus_mapping::operation::{self, AccountField, CallContextField, TxLogField, TxReceiptField};
 use eth_types::{Address, Field, ToAddress, ToLittleEndian, ToScalar, Word, U256};
 use halo2_proofs::circuit::Value;
+use halo2_proofs::halo2curves::bn256::Fr;
 use itertools::Itertools;
 
-use crate::util::build_tx_log_address;
-use crate::{
-    evm_circuit::util::RandomLinearCombination,
-    table::{AccountFieldTag, CallContextFieldTag, RwTableTag, TxLogFieldTag, TxReceiptFieldTag},
+use crate::evm_circuit::util::rlc;
+use crate::table::{
+    AccountFieldTag, CallContextFieldTag, RwTableTag, TxLogFieldTag, TxReceiptFieldTag,
 };
+use crate::util::build_tx_log_address;
+
+use super::MptUpdates;
 
 /// Rw constainer for a witness block
 #[derive(Debug, Default, Clone)]
@@ -36,6 +39,59 @@ impl RwMap {
             .enumerate()
         {
             debug_assert_eq!(idx, rw_counter - 1);
+        }
+    }
+    /// Check value in the same way like StateCircuit
+    pub fn check_value(&self) {
+        let mock_rand = Fr::from(0x1000u64);
+        let err_msg_first = "first access reads don't change value";
+        let err_msg_non_first = "non-first access reads don't change value";
+        let rows = self.table_assignments();
+        let updates = MptUpdates::from_rws_with_mock_state_roots(
+            &rows,
+            0xcafeu64.into(),
+            0xdeadbeefu64.into(),
+        );
+        let mut errs = Vec::new();
+        for idx in 1..rows.len() {
+            let row = &rows[idx];
+            let prev_row = &rows[idx - 1];
+            let is_first = {
+                let key = |row: &Rw| {
+                    (
+                        row.tag() as u64,
+                        row.id().unwrap_or_default(),
+                        row.address().unwrap_or_default(),
+                        row.field_tag().unwrap_or_default(),
+                        row.storage_key().unwrap_or_default(),
+                    )
+                };
+                key(prev_row) != key(row)
+            };
+            if !row.is_write() {
+                let value = row.value_assignment::<Fr>(mock_rand);
+                if is_first {
+                    // value == init_value
+                    let init_value = updates
+                        .get(row)
+                        .map(|u| u.value_assignments(mock_rand).1)
+                        .unwrap_or_default();
+                    if value != init_value {
+                        errs.push((idx, err_msg_first, *row, *prev_row));
+                    }
+                } else {
+                    // value == prev_value
+                    let prev_value = prev_row.value_assignment::<Fr>(mock_rand);
+
+                    if value != prev_value {
+                        errs.push((idx, err_msg_non_first, *row, *prev_row));
+                    }
+                }
+            }
+        }
+        log::debug!("rw value check err num: {}", errs.len());
+        for e in errs {
+            log::debug!("err is {:?}", e);
         }
     }
     /// Calculates the number of Rw::Start rows needed.
@@ -136,15 +192,6 @@ pub enum Rw {
         value_prev: Word,
         tx_id: usize,
         committed_value: Word,
-    },
-    /// AccountDestructed
-    AccountDestructed {
-        rw_counter: usize,
-        is_write: bool,
-        tx_id: usize,
-        account_address: Address,
-        is_destructed: bool,
-        is_destructed_prev: bool,
     },
     /// CallContext
     CallContext {
@@ -274,6 +321,34 @@ impl Rw {
         }
     }
 
+    pub fn account_balance_pair(&self) -> (Word, Word) {
+        self.account_value_pair_field_tag(AccountFieldTag::Balance)
+    }
+    pub fn account_codehash_pair(&self) -> (Word, Word) {
+        self.account_value_pair_field_tag(AccountFieldTag::CodeHash)
+    }
+    pub fn account_nonce_pair(&self) -> (Word, Word) {
+        self.account_value_pair_field_tag(AccountFieldTag::Nonce)
+    }
+
+    pub fn account_value_pair_field_tag(
+        &self,
+        required_field_tag: AccountFieldTag,
+    ) -> (Word, Word) {
+        match self {
+            Self::Account {
+                value,
+                value_prev,
+                field_tag,
+                ..
+            } => {
+                debug_assert_eq!(*field_tag, required_field_tag, "invalid rw {:?}", &self);
+                (*value, *value_prev)
+            }
+            _ => unreachable!(),
+        }
+    }
+
     pub fn aux_pair(&self) -> (usize, Word) {
         match self {
             Self::AccountStorage {
@@ -343,8 +418,8 @@ impl Rw {
             id: F::from(self.id().unwrap_or_default() as u64),
             address: self.address().unwrap_or_default().to_scalar().unwrap(),
             field_tag: F::from(self.field_tag().unwrap_or_default() as u64),
-            storage_key: RandomLinearCombination::random_linear_combine(
-                self.storage_key().unwrap_or_default().to_le_bytes(),
+            storage_key: rlc::value(
+                &self.storage_key().unwrap_or_default().to_le_bytes(),
                 randomness,
             ),
             value: self.value_assignment(randomness),
@@ -365,8 +440,8 @@ impl Rw {
             address: Value::known(self.address().unwrap_or_default().to_scalar().unwrap()),
             field_tag: Value::known(F::from(self.field_tag().unwrap_or_default() as u64)),
             storage_key: randomness.map(|randomness| {
-                RandomLinearCombination::random_linear_combine(
-                    self.storage_key().unwrap_or_default().to_le_bytes(),
+                rlc::value(
+                    &self.storage_key().unwrap_or_default().to_le_bytes(),
                     randomness,
                 )
             }),
@@ -392,7 +467,6 @@ impl Rw {
             | Self::TxAccessListAccountStorage { rw_counter, .. }
             | Self::TxRefund { rw_counter, .. }
             | Self::Account { rw_counter, .. }
-            | Self::AccountDestructed { rw_counter, .. }
             | Self::CallContext { rw_counter, .. }
             | Self::TxLog { rw_counter, .. }
             | Self::TxReceipt { rw_counter, .. } => *rw_counter,
@@ -409,7 +483,6 @@ impl Rw {
             | Self::TxAccessListAccountStorage { is_write, .. }
             | Self::TxRefund { is_write, .. }
             | Self::Account { is_write, .. }
-            | Self::AccountDestructed { is_write, .. }
             | Self::CallContext { is_write, .. }
             | Self::TxLog { is_write, .. }
             | Self::TxReceipt { is_write, .. } => *is_write,
@@ -426,7 +499,6 @@ impl Rw {
             Self::TxAccessListAccountStorage { .. } => RwTableTag::TxAccessListAccountStorage,
             Self::TxRefund { .. } => RwTableTag::TxRefund,
             Self::Account { .. } => RwTableTag::Account,
-            Self::AccountDestructed { .. } => RwTableTag::AccountDestructed,
             Self::CallContext { .. } => RwTableTag::CallContext,
             Self::TxLog { .. } => RwTableTag::TxLog,
             Self::TxReceipt { .. } => RwTableTag::TxReceipt,
@@ -444,7 +516,7 @@ impl Rw {
             Self::CallContext { call_id, .. }
             | Self::Stack { call_id, .. }
             | Self::Memory { call_id, .. } => Some(*call_id),
-            Self::Start { .. } | Self::Account { .. } | Self::AccountDestructed { .. } => None,
+            Self::Start { .. } | Self::Account { .. } => None,
         }
     }
 
@@ -460,9 +532,6 @@ impl Rw {
                 account_address, ..
             }
             | Self::AccountStorage {
-                account_address, ..
-            }
-            | Self::AccountDestructed {
                 account_address, ..
             } => Some(*account_address),
             Self::Memory { memory_address, .. } => Some(U256::from(*memory_address).to_address()),
@@ -497,8 +566,7 @@ impl Rw {
             | Self::TxAccessListAccount { .. }
             | Self::TxAccessListAccountStorage { .. }
             | Self::TxRefund { .. }
-            | Self::TxLog { .. }
-            | Self::AccountDestructed { .. } => None,
+            | Self::TxLog { .. } => None,
         }
     }
 
@@ -513,7 +581,6 @@ impl Rw {
             | Self::TxRefund { .. }
             | Self::Account { .. }
             | Self::TxAccessListAccount { .. }
-            | Self::AccountDestructed { .. }
             | Self::TxLog { .. }
             | Self::TxReceipt { .. } => None,
         }
@@ -529,10 +596,7 @@ impl Rw {
                     // Only these two tags have values that may not fit into a scalar, so we need to
                     // RLC.
                     CallContextFieldTag::CodeHash | CallContextFieldTag::Value => {
-                        RandomLinearCombination::random_linear_combine(
-                            value.to_le_bytes(),
-                            randomness,
-                        )
+                        rlc::value(&value.to_le_bytes(), randomness)
                     }
                     _ => value.to_scalar().unwrap(),
                 }
@@ -541,26 +605,23 @@ impl Rw {
                 value, field_tag, ..
             } => match field_tag {
                 AccountFieldTag::CodeHash | AccountFieldTag::Balance => {
-                    RandomLinearCombination::random_linear_combine(value.to_le_bytes(), randomness)
+                    rlc::value(&value.to_le_bytes(), randomness)
                 }
                 AccountFieldTag::Nonce | AccountFieldTag::NonExisting => value.to_scalar().unwrap(),
             },
             Self::AccountStorage { value, .. } | Self::Stack { value, .. } => {
-                RandomLinearCombination::random_linear_combine(value.to_le_bytes(), randomness)
+                rlc::value(&value.to_le_bytes(), randomness)
             }
 
             Self::TxLog {
                 field_tag, value, ..
             } => match field_tag {
-                TxLogFieldTag::Topic => {
-                    RandomLinearCombination::random_linear_combine(value.to_le_bytes(), randomness)
-                }
+                TxLogFieldTag::Topic => rlc::value(&value.to_le_bytes(), randomness),
                 _ => value.to_scalar().unwrap(),
             },
 
             Self::TxAccessListAccount { is_warm, .. }
             | Self::TxAccessListAccountStorage { is_warm, .. } => F::from(*is_warm as u64),
-            Self::AccountDestructed { is_destructed, .. } => F::from(*is_destructed as u64),
             Self::Memory { byte, .. } => F::from(u64::from(*byte)),
             Self::TxRefund { value, .. } | Self::TxReceipt { value, .. } => F::from(*value),
         }
@@ -574,28 +635,19 @@ impl Rw {
                 ..
             } => Some(match field_tag {
                 AccountFieldTag::CodeHash | AccountFieldTag::Balance => {
-                    RandomLinearCombination::random_linear_combine(
-                        value_prev.to_le_bytes(),
-                        randomness,
-                    )
+                    rlc::value(&value_prev.to_le_bytes(), randomness)
                 }
                 AccountFieldTag::Nonce | AccountFieldTag::NonExisting => {
                     value_prev.to_scalar().unwrap()
                 }
             }),
             Self::AccountStorage { value_prev, .. } => {
-                Some(RandomLinearCombination::random_linear_combine(
-                    value_prev.to_le_bytes(),
-                    randomness,
-                ))
+                Some(rlc::value(&value_prev.to_le_bytes(), randomness))
             }
             Self::TxAccessListAccount { is_warm_prev, .. }
             | Self::TxAccessListAccountStorage { is_warm_prev, .. } => {
                 Some(F::from(*is_warm_prev as u64))
             }
-            Self::AccountDestructed {
-                is_destructed_prev, ..
-            } => Some(F::from(*is_destructed_prev as u64)),
             Self::TxRefund { value_prev, .. } => Some(F::from(*value_prev)),
             Self::Start { .. }
             | Self::Stack { .. }
@@ -610,10 +662,7 @@ impl Rw {
         match self {
             Self::AccountStorage {
                 committed_value, ..
-            } => Some(RandomLinearCombination::random_linear_combine(
-                committed_value.to_le_bytes(),
-                randomness,
-            )),
+            } => Some(rlc::value(&committed_value.to_le_bytes(), randomness)),
             _ => None,
         }
     }
@@ -655,7 +704,7 @@ impl From<&operation::OperationContainer> for RwMap {
                 .iter()
                 .map(|op| Rw::TxAccessListAccountStorage {
                     rw_counter: op.rwc().into(),
-                    is_write: true,
+                    is_write: op.rw().is_write(),
                     tx_id: op.op().tx_id,
                     account_address: op.op().address,
                     storage_key: op.op().key,
@@ -691,7 +740,6 @@ impl From<&operation::OperationContainer> for RwMap {
                         AccountField::Nonce => AccountFieldTag::Nonce,
                         AccountField::Balance => AccountFieldTag::Balance,
                         AccountField::CodeHash => AccountFieldTag::CodeHash,
-                        AccountField::NonExisting => AccountFieldTag::NonExisting,
                     },
                     value: op.op().value,
                     value_prev: op.op().value_prev,
@@ -712,21 +760,6 @@ impl From<&operation::OperationContainer> for RwMap {
                     value_prev: op.op().value_prev,
                     tx_id: op.op().tx_id,
                     committed_value: op.op().committed_value,
-                })
-                .collect(),
-        );
-        rws.insert(
-            RwTableTag::AccountDestructed,
-            container
-                .account_destructed
-                .iter()
-                .map(|op| Rw::AccountDestructed {
-                    rw_counter: op.rwc().into(),
-                    is_write: true,
-                    tx_id: op.op().tx_id,
-                    account_address: op.op().address,
-                    is_destructed: op.op().is_destructed,
-                    is_destructed_prev: op.op().is_destructed_prev,
                 })
                 .collect(),
         );
