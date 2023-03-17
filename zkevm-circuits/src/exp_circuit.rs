@@ -375,7 +375,7 @@ impl<F: Field> ExpCircuitConfig<F> {
                     || format!("padding steps: {}", offset + i),
                     column,
                     offset + i,
-                    || Value::known(F::zero()),
+                    || Value::known(F::ZERO),
                 )?;
             }
         }

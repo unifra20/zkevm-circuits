@@ -322,7 +322,7 @@ impl<F: Field, const N: usize, const N_BYTES_MEMORY_WORD_SIZE: usize>
                 F::from(next_memory_word_size as u64),
                 F::from(*memory_word_size),
             )?;
-            next_memory_word_size = max.get_lower_128() as u64;
+            next_memory_word_size = u64::from_le_bytes(max.to_repr()[0..8].try_into().unwrap());
         }
 
         // Calculate the quad gas cost for the memory size
@@ -522,7 +522,7 @@ impl<F: Field, const MAX_BYTES: usize, const ADDR_SIZE_IN_BYTES: usize>
             // assign bound_dist and bound_dist_is_zero
             let oob = addr_start + idx as u64 >= addr_end;
             let bound_dist = if oob {
-                F::zero()
+                F::ZERO
             } else {
                 F::from(addr_end - addr_start - idx as u64)
             };

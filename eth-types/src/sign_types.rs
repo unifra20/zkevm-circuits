@@ -3,7 +3,7 @@
 use crate::{ToBigEndian, Word};
 use ethers_core::types::Bytes;
 use halo2_proofs::{
-    arithmetic::{CurveAffine, FieldExt},
+    arithmetic::{CurveAffine},
     halo2curves::{
         group::{
             ff::{Field as GroupField, PrimeField},
@@ -11,7 +11,7 @@ use halo2_proofs::{
         },
         secp256k1::{self, Secp256k1Affine},
         Coordinates,
-    },
+    }, ff::FromUniformBytes,
 };
 use lazy_static::lazy_static;
 use num_bigint::BigUint;
@@ -38,7 +38,7 @@ pub fn sign(
     let mut x_bytes = [0u8; 64];
     x_bytes[..32].copy_from_slice(&x_repr[..]);
 
-    let sig_r = secp256k1::Fq::from_bytes_wide(&x_bytes); // get x cordinate (E::Base) on E::Scalar
+    let sig_r = secp256k1::Fq::from_uniform_bytes(&x_bytes); // get x cordinate (E::Base) on E::Scalar
     let sig_s = randomness_inv * (msg_hash + sig_r * sk);
     (sig_r, sig_s)
 }

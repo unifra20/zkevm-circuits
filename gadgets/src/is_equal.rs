@@ -2,7 +2,7 @@
 
 use eth_types::Field;
 use halo2_proofs::{
-    arithmetic::FieldExt,
+    ff::PrimeField,
     circuit::{Chip, Region, Value},
     plonk::{ConstraintSystem, Error, Expression, VirtualCells},
 };
@@ -10,7 +10,7 @@ use halo2_proofs::{
 use super::is_zero::{IsZeroChip, IsZeroInstruction};
 
 /// Instruction that the IsEqual chip needs to implement.
-pub trait IsEqualInstruction<F: FieldExt> {
+pub trait IsEqualInstruction<F: PrimeField> {
     /// Assign lhs and rhs witnesses to the IsEqual chip's region.
     fn assign(
         &self,
@@ -96,7 +96,7 @@ mod tests {
 
     use eth_types::Field;
     use halo2_proofs::{
-        arithmetic::FieldExt,
+        ff::PrimeField,
         circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,
         halo2curves::bn256::Fr as Fp,
@@ -117,7 +117,7 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct TestCircuit<F: FieldExt, const RHS: u64> {
+    struct TestCircuit<F: PrimeField, const RHS: u64> {
         values: Vec<u64>,
         checks: Vec<bool>,
         _marker: PhantomData<F>,

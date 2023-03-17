@@ -257,7 +257,7 @@ impl Key {
     }
     fn storage_key<F: Field>(&self, randomness: F) -> F {
         match self {
-            Self::Account { .. } => F::zero(),
+            Self::Account { .. } => F::ZERO,
             Self::AccountStorage { storage_key, .. } => {
                 RandomLinearCombination::random_linear_combine(
                     storage_key.to_le_bytes(),

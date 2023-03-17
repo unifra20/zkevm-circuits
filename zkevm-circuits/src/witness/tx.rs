@@ -144,19 +144,19 @@ impl Transaction {
             [
                 Value::known(F::from(self.id as u64)),
                 Value::known(F::from(TxContextFieldTag::Nonce as u64)),
-                Value::known(F::zero()),
+                Value::known(F::ZERO),
                 Value::known(F::from(self.nonce)),
             ],
             [
                 Value::known(F::from(self.id as u64)),
                 Value::known(F::from(TxContextFieldTag::Gas as u64)),
-                Value::known(F::zero()),
+                Value::known(F::ZERO),
                 Value::known(F::from(self.gas)),
             ],
             [
                 Value::known(F::from(self.id as u64)),
                 Value::known(F::from(TxContextFieldTag::GasPrice as u64)),
-                Value::known(F::zero()),
+                Value::known(F::ZERO),
                 challenges.evm_word().map(|evm_word| {
                     RandomLinearCombination::random_linear_combine(
                         self.gas_price.to_le_bytes(),
@@ -167,25 +167,25 @@ impl Transaction {
             [
                 Value::known(F::from(self.id as u64)),
                 Value::known(F::from(TxContextFieldTag::CallerAddress as u64)),
-                Value::known(F::zero()),
+                Value::known(F::ZERO),
                 Value::known(self.caller_address.to_scalar().unwrap()),
             ],
             [
                 Value::known(F::from(self.id as u64)),
                 Value::known(F::from(TxContextFieldTag::CalleeAddress as u64)),
-                Value::known(F::zero()),
+                Value::known(F::ZERO),
                 Value::known(self.callee_address.to_scalar().unwrap()),
             ],
             [
                 Value::known(F::from(self.id as u64)),
                 Value::known(F::from(TxContextFieldTag::IsCreate as u64)),
-                Value::known(F::zero()),
+                Value::known(F::ZERO),
                 Value::known(F::from(self.is_create as u64)),
             ],
             [
                 Value::known(F::from(self.id as u64)),
                 Value::known(F::from(TxContextFieldTag::Value as u64)),
-                Value::known(F::zero()),
+                Value::known(F::ZERO),
                 challenges.evm_word().map(|evm_word| {
                     RandomLinearCombination::random_linear_combine(
                         self.value.to_le_bytes(),
@@ -196,73 +196,73 @@ impl Transaction {
             [
                 Value::known(F::from(self.id as u64)),
                 Value::known(F::from(TxContextFieldTag::CallDataLength as u64)),
-                Value::known(F::zero()),
+                Value::known(F::ZERO),
                 Value::known(F::from(self.call_data_length as u64)),
             ],
             [
                 Value::known(F::from(self.id as u64)),
                 Value::known(F::from(TxContextFieldTag::CallDataGasCost as u64)),
-                Value::known(F::zero()),
+                Value::known(F::ZERO),
                 Value::known(F::from(self.call_data_gas_cost)),
             ],
             [
                 Value::known(F::from(self.id as u64)),
                 Value::known(F::from(TxContextFieldTag::SigV as u64)),
-                Value::known(F::zero()),
+                Value::known(F::ZERO),
                 Value::known(F::from(self.v)),
             ],
             [
                 Value::known(F::from(self.id as u64)),
                 Value::known(F::from(TxContextFieldTag::SigR as u64)),
-                Value::known(F::zero()),
+                Value::known(F::ZERO),
                 rlc_be_bytes(&self.r.to_be_bytes(), challenges.evm_word()),
             ],
             [
                 Value::known(F::from(self.id as u64)),
                 Value::known(F::from(TxContextFieldTag::SigS as u64)),
-                Value::known(F::zero()),
+                Value::known(F::ZERO),
                 rlc_be_bytes(&self.s.to_be_bytes(), challenges.evm_word()),
             ],
             [
                 Value::known(F::from(self.id as u64)),
                 Value::known(F::from(TxContextFieldTag::TxSignLength as u64)),
-                Value::known(F::zero()),
+                Value::known(F::ZERO),
                 Value::known(F::from(self.rlp_unsigned.len() as u64)),
             ],
             [
                 Value::known(F::from(self.id as u64)),
                 Value::known(F::from(TxContextFieldTag::TxSignRLC as u64)),
-                Value::known(F::zero()),
+                Value::known(F::ZERO),
                 rlc_be_bytes(&self.rlp_unsigned, challenges.keccak_input()),
             ],
             [
                 Value::known(F::from(self.id as u64)),
                 Value::known(F::from(TxContextFieldTag::TxSignHash as u64)),
-                Value::known(F::zero()),
+                Value::known(F::ZERO),
                 rlc_be_bytes(&tx_sign_hash_be_bytes, challenges.evm_word()),
             ],
             [
                 Value::known(F::from(self.id as u64)),
                 Value::known(F::from(TxContextFieldTag::TxHashLength as u64)),
-                Value::known(F::zero()),
+                Value::known(F::ZERO),
                 Value::known(F::from(self.rlp_signed.len() as u64)),
             ],
             [
                 Value::known(F::from(self.id as u64)),
                 Value::known(F::from(TxContextFieldTag::TxHashRLC as u64)),
-                Value::known(F::zero()),
+                Value::known(F::ZERO),
                 rlc_be_bytes(&self.rlp_signed, challenges.keccak_input()),
             ],
             [
                 Value::known(F::from(self.id as u64)),
                 Value::known(F::from(TxContextFieldTag::TxHash as u64)),
-                Value::known(F::zero()),
+                Value::known(F::ZERO),
                 rlc_be_bytes(&tx_hash_be_bytes, challenges.evm_word()),
             ],
             [
                 Value::known(F::from(self.id as u64)),
                 Value::known(F::from(TxContextFieldTag::BlockNumber as u64)),
-                Value::known(F::zero()),
+                Value::known(F::ZERO),
                 Value::known(F::from(self.block_number)),
             ],
         ];

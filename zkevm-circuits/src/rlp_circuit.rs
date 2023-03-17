@@ -1318,7 +1318,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                         signed_tx.tx.hash
                     );
                     // tx hash (signed tx)
-                    let mut all_bytes_rlc_acc = Value::known(F::zero());
+                    let mut all_bytes_rlc_acc = Value::known(F::ZERO);
                     let tx_hash_rows = signed_tx.gen_witness(challenges);
                     let has_placeholder =
                         signed_tx.tx.call_data.len() == 1 && signed_tx.tx.call_data[0] < 0x80;
@@ -1347,7 +1347,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                             || format!("q_usable: {}", offset),
                             self.q_usable,
                             offset,
-                            || Value::known(F::one()),
+                            || Value::known(F::ONE),
                         )?;
                         // is_first
                         region.assign_advice(
@@ -1467,7 +1467,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                     }
 
                     // tx sign (unsigned tx)
-                    let mut all_bytes_rlc_acc = Value::known(F::zero());
+                    let mut all_bytes_rlc_acc = Value::known(F::ZERO);
                     let tx_sign_rows = signed_tx.tx.gen_witness(challenges);
                     let has_placeholder =
                         signed_tx.tx.call_data.len() == 1 && signed_tx.tx.call_data[0] < 0x80;
@@ -1496,7 +1496,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                             || format!("q_usable: {}", offset),
                             self.q_usable,
                             offset,
-                            || Value::known(F::one()),
+                            || Value::known(F::ONE),
                         )?;
                         // is_first
                         region.assign_advice(
@@ -1637,7 +1637,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                 || format!("padding row, offset: {}", offset),
                 column,
                 offset,
-                || Value::known(F::zero()),
+                || Value::known(F::ZERO),
             )?;
         }
         region.assign_advice(
@@ -1654,7 +1654,7 @@ impl<F: Field> RlpCircuitConfig<F> {
             || format!("padding row, offset: {}", offset),
             self.q_usable,
             offset,
-            || Value::known(F::one()),
+            || Value::known(F::ONE),
         )?;
 
         Ok(())

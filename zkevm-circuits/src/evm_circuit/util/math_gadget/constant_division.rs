@@ -90,9 +90,13 @@ impl<F: Field, const N_BYTES: usize> ConstantDivisionGadget<F, N_BYTES> {
         offset: usize,
         numerator: Value<F>,
     ) -> Result<Value<(u128, u128)>, Error> {
-        transpose_val_ret(
-            numerator.map(|numerator| self.assign(region, offset, numerator.get_lower_128())),
-        )
+        transpose_val_ret(numerator.map(|numerator| {
+            self.assign(
+                region,
+                offset,
+                u128::from_le_bytes(numerator.to_repr()[0..16].try_into().unwrap()),
+            )
+        }))
     }
 }
 

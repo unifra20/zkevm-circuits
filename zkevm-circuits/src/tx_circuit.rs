@@ -653,7 +653,7 @@ impl<F: Field> TxCircuitConfig<F> {
             || "q_enable",
             self.q_enable,
             *offset,
-            || Value::known(F::one()),
+            || Value::known(F::ONE),
         )?;
 
         let tag_chip = BinaryNumberChip::construct(self.tag);
@@ -664,7 +664,7 @@ impl<F: Field> TxCircuitConfig<F> {
             region,
             *offset,
             Value::known(F::from(tx_id as u64)),
-            Value::known(F::zero()),
+            Value::known(F::ZERO),
         )?;
 
         let is_zero_chip = IsZeroChip::construct(self.value_is_zero.clone());
@@ -734,7 +734,7 @@ impl<F: Field> TxCircuitConfig<F> {
             || "chain_id",
             self.chain_id,
             *offset,
-            || Value::known(F::zero()),
+            || Value::known(F::ZERO),
         )?;
 
         let mut conditions = HashMap::<LookupCondition, Value<F>>::new();
@@ -743,7 +743,7 @@ impl<F: Field> TxCircuitConfig<F> {
             if is_data_length {
                 value.map(|value| F::from(!value.is_zero_vartime() as u64))
             } else {
-                Value::known(F::zero())
+                Value::known(F::ZERO)
             }
         });
         conditions.insert(LookupCondition::Tag, {
@@ -844,7 +844,7 @@ impl<F: Field> TxCircuitConfig<F> {
                 || "q_enable",
                 self.q_enable,
                 offset,
-                || Value::known(F::one()),
+                || Value::known(F::ONE),
             )?;
             region.assign_fixed(|| "tag", self.tx_table.tag, offset, || Value::known(tag))?;
             tag_chip.assign(region, offset, &CallData)?;
@@ -852,28 +852,23 @@ impl<F: Field> TxCircuitConfig<F> {
             tx_id_is_zero_chip.assign(
                 region,
                 offset,
-                Value::known(F::zero()),
-                Value::known(F::zero()),
+                Value::known(F::ZERO),
+                Value::known(F::ZERO),
             )?;
             // no need to assign value_is_zero_chip for real prover as value = 0
-            value_is_zero_chip.assign(region, offset, Value::known(F::zero()))?;
-            tx_id_unchanged.assign(
-                region,
-                offset,
-                Value::known(F::zero()),
-                Value::known(F::zero()),
-            )?;
+            value_is_zero_chip.assign(region, offset, Value::known(F::ZERO))?;
+            tx_id_unchanged.assign(region, offset, Value::known(F::ZERO), Value::known(F::ZERO))?;
 
             for (col, value) in [
-                (self.tx_table.tx_id, F::zero()),
-                (self.tx_table.index, F::zero()),
-                (self.tx_table.value, F::zero()),
+                (self.tx_table.tx_id, F::ZERO),
+                (self.tx_table.index, F::ZERO),
+                (self.tx_table.value, F::ZERO),
                 (self.rlp_tag, rlp_data),
-                (self.is_final, F::one()),
-                (self.is_calldata, F::one()),
-                (self.calldata_length, F::zero()),
-                (self.calldata_gas_cost_acc, F::zero()),
-                (self.chain_id, F::zero()),
+                (self.is_final, F::ONE),
+                (self.is_calldata, F::ONE),
+                (self.calldata_length, F::ZERO),
+                (self.calldata_gas_cost_acc, F::ZERO),
+                (self.chain_id, F::ZERO),
             ] {
                 region.assign_advice(|| "", col, offset, || Value::known(value))?;
             }
@@ -882,7 +877,7 @@ impl<F: Field> TxCircuitConfig<F> {
                     || "lookup condition",
                     *col,
                     offset,
-                    || Value::known(F::zero()),
+                    || Value::known(F::ZERO),
                 )?;
             }
         }
@@ -901,7 +896,7 @@ impl<F: Field> TxCircuitConfig<F> {
                 || "q_enable",
                 self.q_enable,
                 offset,
-                || Value::known(F::zero()),
+                || Value::known(F::ZERO),
             )?;
             region.assign_fixed(
                 || "tag",
@@ -1309,7 +1304,7 @@ impl<F: Field> TxCircuit<F> {
                     !sigs.is_empty() as usize, // tx_id_next
                     TxFieldTag::Null,
                     RlpTxTag::Padding,
-                    Value::known(F::zero()),
+                    Value::known(F::ZERO),
                     false,
                     None,
                     None,
@@ -1334,7 +1329,7 @@ impl<F: Field> TxCircuit<F> {
                                 .msg
                                 .to_vec()
                                 .into_iter()
-                                .fold(F::zero(), |acc, byte| acc * rand + F::from(byte as u64))
+                                .fold(F::ZERO, |acc, byte| acc * rand + F::from(byte as u64))
                         })
                     };
                     for (tag, rlp_tag, value) in [
@@ -1406,7 +1401,7 @@ impl<F: Field> TxCircuit<F> {
                             challenges.keccak_input().map(|rand| {
                                 rlp_unsigned_tx_be_bytes
                                     .iter()
-                                    .fold(F::zero(), |acc, byte| acc * rand + F::from(*byte as u64))
+                                    .fold(F::ZERO, |acc, byte| acc * rand + F::from(*byte as u64))
                             }),
                         ),
                         (
@@ -1425,7 +1420,7 @@ impl<F: Field> TxCircuit<F> {
                             challenges.keccak_input().map(|rand| {
                                 rlp_signed_tx_be_bytes
                                     .iter()
-                                    .fold(F::zero(), |acc, byte| acc * rand + F::from(*byte as u64))
+                                    .fold(F::ZERO, |acc, byte| acc * rand + F::from(*byte as u64))
                             }),
                         ),
                         (
@@ -1435,15 +1430,15 @@ impl<F: Field> TxCircuit<F> {
                                 tx.hash
                                     .to_fixed_bytes()
                                     .into_iter()
-                                    .fold(F::zero(), |acc, byte| {
+                                    .fold(F::ZERO, |acc, byte| {
                                         acc * challenge + F::from(byte as u64)
                                     })
                             }),
                         ),
                         (
                             TxFieldTag::BlockNumber,
-                            RlpTxTag::Padding,       // FIXME
-                            Value::known(F::zero()), // FIXME
+                            RlpTxTag::Padding,     // FIXME
+                            Value::known(F::ZERO), // FIXME
                         ),
                     ] {
                         let tx_id_next = match tag {
@@ -1480,11 +1475,10 @@ impl<F: Field> TxCircuit<F> {
                                 #[cfg(feature = "enable-sign-verify")]
                                 {
                                     assigned_sig_verif.address.copy_advice(
-                                        || "sv_address == SignVerify.address",
                                         &mut region,
                                         config.sv_address,
                                         offset - 1,
-                                    )?;
+                                    );
                                 }
                                 #[cfg(not(feature = "enable-sign-verify"))]
                                 {

@@ -1,5 +1,5 @@
 use halo2_proofs::circuit::Value;
-use halo2_proofs::{arithmetic::FieldExt, plonk::Expression};
+use halo2_proofs::{ff::PrimeField, plonk::Expression};
 use strum_macros::EnumIter;
 
 use crate::util::Challenges;
@@ -64,7 +64,7 @@ impl From<RlpTxTag> for usize {
 /// Denotes the number of tag values in a transaction's RLP trace.
 pub const N_TX_TAGS: usize = 16;
 
-impl<F: FieldExt> RlpWitnessGen<F> for Transaction {
+impl<F: PrimeField> RlpWitnessGen<F> for Transaction {
     fn gen_witness(&self, challenges: &Challenges<Value<F>>) -> Vec<RlpWitnessRow<Value<F>>> {
         let rlp_data = rlp::encode(self);
         let mut rows = Vec::with_capacity(rlp_data.len());
@@ -177,7 +177,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for Transaction {
             rlp_out
                 .as_ref()
                 .iter()
-                .fold(F::zero(), |acc, value| acc * rand + F::from(*value as u64))
+                .fold(F::ZERO, |acc, value| acc * rand + F::from(*value as u64))
         });
 
         [
@@ -187,7 +187,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for Transaction {
                 data_type: RlpDataType::TxSign,
                 value: 0,
                 value_acc: Value::known(F::from(rlp_out.len() as u64)),
-                value_rlc_acc: Value::known(F::zero()),
+                value_rlc_acc: Value::known(F::ZERO),
                 tag: RlpTxTag::RlpLength,
                 tag_length: 1,
                 tag_rindex: 1,
@@ -199,7 +199,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for Transaction {
                 data_type: RlpDataType::TxSign,
                 value: 0,
                 value_acc: rlc_rlp_out,
-                value_rlc_acc: Value::known(F::zero()),
+                value_rlc_acc: Value::known(F::ZERO),
                 tag: RlpTxTag::Rlp,
                 tag_length: 1,
                 tag_rindex: 1,
@@ -209,7 +209,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for Transaction {
     }
 }
 
-impl<F: FieldExt> RlpWitnessGen<F> for SignedTransaction {
+impl<F: PrimeField> RlpWitnessGen<F> for SignedTransaction {
     fn gen_witness(&self, challenges: &Challenges<Value<F>>) -> Vec<RlpWitnessRow<Value<F>>> {
         let rlp_data = rlp::encode(self);
         let mut rows = Vec::with_capacity(rlp_data.len());
@@ -324,7 +324,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for SignedTransaction {
             rlp_out
                 .as_ref()
                 .iter()
-                .fold(F::zero(), |acc, value| acc * rand + F::from(*value as u64))
+                .fold(F::ZERO, |acc, value| acc * rand + F::from(*value as u64))
         });
 
         [
@@ -334,7 +334,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for SignedTransaction {
                 data_type: RlpDataType::TxHash,
                 value: 0,
                 value_acc: Value::known(F::from(rlp_out.len() as u64)),
-                value_rlc_acc: Value::known(F::zero()),
+                value_rlc_acc: Value::known(F::ZERO),
                 tag: RlpTxTag::RlpLength,
                 tag_length: 1,
                 tag_rindex: 1,
@@ -346,7 +346,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for SignedTransaction {
                 data_type: RlpDataType::TxHash,
                 value: 0,
                 value_acc: rlc_rlp_out,
-                value_rlc_acc: Value::known(F::zero()),
+                value_rlc_acc: Value::known(F::ZERO),
                 tag: RlpTxTag::Rlp,
                 tag_length: 1,
                 tag_rindex: 1,

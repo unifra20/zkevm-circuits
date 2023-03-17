@@ -6,9 +6,8 @@ use std::{
     io::{Error, ErrorKind, Read},
 };
 
-use halo2_proofs::arithmetic::FieldExt;
+use halo2_proofs::ff::PrimeField;
 use halo2_proofs::halo2curves::bn256::Fr;
-use halo2_proofs::halo2curves::group::ff::PrimeField;
 use mpt_circuits::hash::Hashable;
 
 use lazy_static::lazy_static;

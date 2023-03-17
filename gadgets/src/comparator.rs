@@ -3,7 +3,7 @@
 
 use eth_types::Field;
 use halo2_proofs::{
-    arithmetic::FieldExt,
+    ff::PrimeField,
     circuit::{Chip, Region, Value},
     plonk::{ConstraintSystem, Error, Expression, VirtualCells},
     poly::Rotation,
@@ -14,7 +14,7 @@ use crate::{is_equal::IsEqualInstruction, less_than::LtInstruction};
 use super::{is_equal::IsEqualChip, less_than::LtChip};
 
 /// Instruction that the Comparator chip needs to implement.
-pub trait ComparatorInstruction<F: FieldExt> {
+pub trait ComparatorInstruction<F: PrimeField> {
     /// Assign the lhs and rhs witnesses to the Comparator chip's region.
     fn assign(
         &self,

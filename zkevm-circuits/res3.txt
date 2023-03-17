@@ -1,0 +1,213 @@
+     Running unittests src/lib.rs (/home/z/Desktop/0220/zkevm-circuits/target/release/deps/zkevm_circuits-a3a3640dd66b5a6b)
+[2023-03-20T01:41:22Z TRACE zkevm_circuits::tx_circuit::sign_verify] r: 0x2deabccf5569e8b11a676fc2f48c11ab9b25ff6c0e2d45fb3cf80046abbcddb7
+[2023-03-20T01:41:22Z TRACE zkevm_circuits::tx_circuit::sign_verify] s: 0xba7de7e33ccea4d5df518fcb54d6af2ef4b56d45cc1285233181b56032baa64a
+[2023-03-20T01:41:22Z TRACE zkevm_circuits::tx_circuit::sign_verify] msg: 0x8eba70d385d7924ce46c7344e677a8c8af5655e0f2f9d40c86b108a244e46343
+[2023-03-20T01:41:22Z TRACE zkevm_circuits::tx_circuit::sign_verify] ECDSA res AssignedValue { cell: Cell { region_index: RegionIndex(0), row_offset: 146273, column: Column { index: 5, column_type: Advice } }, value: Value { inner: Some(0x0000000000000000000000000000000000000000000000000000000000000001) }, row_offset: 146273, _marker: PhantomData<halo2curves::bn256::fr::Fr>, context_id: 0 }
+[2023-03-20T01:41:22Z TRACE zkevm_circuits::tx_circuit::sign_verify] r: 0x671648852fcc22d65d6caed6d0aa501e68e7e34124ab41420ec9cdc05bb82d8e
+[2023-03-20T01:41:22Z TRACE zkevm_circuits::tx_circuit::sign_verify] s: 0xaae9dfb70f155095e1ad55675459f6608741b297b188c155263f6ebe752d9174
+[2023-03-20T01:41:22Z TRACE zkevm_circuits::tx_circuit::sign_verify] msg: 0x7f63ebb3c379207cd8e4cfe0fac8ba91243e7fa60edd20da454a6e59edf86892
+[2023-03-20T01:41:22Z TRACE zkevm_circuits::tx_circuit::sign_verify] ECDSA res AssignedValue { cell: Cell { region_index: RegionIndex(0), row_offset: 30410, column: Column { index: 7, column_type: Advice } }, value: Value { inner: Some(0x0000000000000000000000000000000000000000000000000000000000000001) }, row_offset: 30410, _marker: PhantomData<halo2curves::bn256::fr::Fr>, context_id: 0 }
+[2023-03-20T01:41:22Z TRACE zkevm_circuits::tx_circuit::sign_verify] r: 0x8670b8744dd6e956b3b4892a5cf62df0e287f295bde18c6bfee615a05fe55f8f
+[2023-03-20T01:41:22Z TRACE zkevm_circuits::tx_circuit::sign_verify] s: 0xd0afcb79f4f57d742300ef4b3245c154b6b0f31533562cbcc0495de7ae7b5dc9
+[2023-03-20T01:41:22Z TRACE zkevm_circuits::tx_circuit::sign_verify] msg: 0xdfcb0325d9fc2ac726cfcdea72f054234c9a4a54fa3aaa95f69c1627554d77e0
+[2023-03-20T01:41:22Z TRACE zkevm_circuits::tx_circuit::sign_verify] ECDSA res AssignedValue { cell: Cell { region_index: RegionIndex(0), row_offset: 176679, column: Column { index: 8, column_type: Advice } }, value: Value { inner: Some(0x0000000000000000000000000000000000000000000000000000000000000001) }, row_offset: 176679, _marker: PhantomData<halo2curves::bn256::fr::Fr>, context_id: 0 }
+[2023-03-20T01:41:22Z DEBUG halo2_proofs::circuit::floor_planner::single_pass] region row_count "ecdsa chip verification": 262132
+[2023-03-20T01:41:22Z DEBUG halo2_proofs::circuit::floor_planner::single_pass] region "ecdsa chip verification", idx 0 start 0
+[2023-03-20T01:41:22Z TRACE zkevm_circuits::tx_circuit::sign_verify] r: 0x2deabccf5569e8b11a676fc2f48c11ab9b25ff6c0e2d45fb3cf80046abbcddb7
+[2023-03-20T01:41:22Z TRACE zkevm_circuits::tx_circuit::sign_verify] s: 0xba7de7e33ccea4d5df518fcb54d6af2ef4b56d45cc1285233181b56032baa64a
+[2023-03-20T01:41:22Z TRACE zkevm_circuits::tx_circuit::sign_verify] msg: 0x8eba70d385d7924ce46c7344e677a8c8af5655e0f2f9d40c86b108a244e46343
+[2023-03-20T01:41:22Z TRACE zkevm_circuits::tx_circuit::sign_verify] ECDSA res AssignedValue { cell: Cell { region_index: RegionIndex(0), row_offset: 146273, column: Column { index: 5, column_type: Advice } }, value: Value { inner: Some(0x0000000000000000000000000000000000000000000000000000000000000001) }, row_offset: 146273, _marker: PhantomData<halo2curves::bn256::fr::Fr>, context_id: 0 }
+[2023-03-20T01:41:22Z TRACE zkevm_circuits::tx_circuit::sign_verify] r: 0x671648852fcc22d65d6caed6d0aa501e68e7e34124ab41420ec9cdc05bb82d8e
+[2023-03-20T01:41:22Z TRACE zkevm_circuits::tx_circuit::sign_verify] s: 0xaae9dfb70f155095e1ad55675459f6608741b297b188c155263f6ebe752d9174
+[2023-03-20T01:41:22Z TRACE zkevm_circuits::tx_circuit::sign_verify] msg: 0x7f63ebb3c379207cd8e4cfe0fac8ba91243e7fa60edd20da454a6e59edf86892
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] ECDSA res AssignedValue { cell: Cell { region_index: RegionIndex(0), row_offset: 30410, column: Column { index: 7, column_type: Advice } }, value: Value { inner: Some(0x0000000000000000000000000000000000000000000000000000000000000001) }, row_offset: 30410, _marker: PhantomData<halo2curves::bn256::fr::Fr>, context_id: 0 }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] r: 0x8670b8744dd6e956b3b4892a5cf62df0e287f295bde18c6bfee615a05fe55f8f
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] s: 0xd0afcb79f4f57d742300ef4b3245c154b6b0f31533562cbcc0495de7ae7b5dc9
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] msg: 0xdfcb0325d9fc2ac726cfcdea72f054234c9a4a54fa3aaa95f69c1627554d77e0
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] ECDSA res AssignedValue { cell: Cell { region_index: RegionIndex(0), row_offset: 176679, column: Column { index: 8, column_type: Advice } }, value: Value { inner: Some(0x0000000000000000000000000000000000000000000000000000000000000001) }, row_offset: 176679, _marker: PhantomData<halo2curves::bn256::fr::Fr>, context_id: 0 }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 1 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000f9d40c86b108a244e46343) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000f9d40c86b108a244e46343) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 2 
+    input Value { inner: Some(0x0000000000000000000000000000000000000000007344e677a8c8af5655e0f2) }
+    reconstructed Value { inner: Some(0x0000000000000000000000000000000000000000007344e677a8c8af5655e0f2) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 3 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000008eba70d385d7924ce46c) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000008eba70d385d7924ce46c) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] halo2ecc assigned msg hash rlc: Value { inner: Some(0x141dfdedbaa7cff0072f5f2b3e45d6767a61a91f9a1b45afedb2133485cd2392) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 1 
+    input Value { inner: Some(0x00000000000000000000000000000000000000000068a691ae607757d6256ede) }
+    reconstructed Value { inner: Some(0x00000000000000000000000000000000000000000068a691ae607757d6256ede) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 2 
+    input Value { inner: Some(0x0000000000000000000000000000000000000000000131223ecfefa4eb76215f) }
+    reconstructed Value { inner: Some(0x0000000000000000000000000000000000000000000131223ecfefa4eb76215f) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 3 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000008e31a3586d4c8de89d4e) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000008e31a3586d4c8de89d4e) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 1 
+    input Value { inner: Some(0x0000000000000000000000000000000000000000005801dbe446ed8e0b05400b) }
+    reconstructed Value { inner: Some(0x0000000000000000000000000000000000000000005801dbe446ed8e0b05400b) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 2 
+    input Value { inner: Some(0x0000000000000000000000000000000000000000003f0f698eb470f32085ba97) }
+    reconstructed Value { inner: Some(0x0000000000000000000000000000000000000000003f0f698eb470f32085ba97) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 3 
+    input Value { inner: Some(0x00000000000000000000000000000000000000000000c76fdd462294a7eeb8ff) }
+    reconstructed Value { inner: Some(0x00000000000000000000000000000000000000000000c76fdd462294a7eeb8ff) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] pk rlc halo2ecc: Value { inner: Some(0x0435f0d70560353dc9e859bf4870647983648fed010e97650f91c4a52a469345) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] pk hash rlc halo2ecc: Value { inner: Some(0x0093392d4a9b04f16d50dea79f2d5c2b7291b26c124df73b50a2073d0d39147a) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 1 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000dd20da454a6e59edf86892) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000dd20da454a6e59edf86892) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 2 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000cfe0fac8ba91243e7fa60e) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000cfe0fac8ba91243e7fa60e) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 3 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000007f63ebb3c379207cd8e4) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000007f63ebb3c379207cd8e4) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] halo2ecc assigned msg hash rlc: Value { inner: Some(0x14d8fdff59ff4d6fa5b3fbddd879514a7cc452b54edc8d4fd8d5387c3a32406d) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 1 
+    input Value { inner: Some(0x0000000000000000000000000000000000000000003e0d5075d59c31ae532269) }
+    reconstructed Value { inner: Some(0x0000000000000000000000000000000000000000003e0d5075d59c31ae532269) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 2 
+    input Value { inner: Some(0x00000000000000000000000000000000000000000089a8bf5f3130fb5e0f427b) }
+    reconstructed Value { inner: Some(0x00000000000000000000000000000000000000000089a8bf5f3130fb5e0f427b) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 3 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000006a3652c1146aede1d4bd) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000006a3652c1146aede1d4bd) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 1 
+    input Value { inner: Some(0x0000000000000000000000000000000000000000007f337831eaf7e2d6671b2f) }
+    reconstructed Value { inner: Some(0x0000000000000000000000000000000000000000007f337831eaf7e2d6671b2f) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 2 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000a9dfe5cba1bc20abfc6940) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000a9dfe5cba1bc20abfc6940) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 3 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000009a4a430a87ed0ab4a953) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000009a4a430a87ed0ab4a953) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] pk rlc halo2ecc: Value { inner: Some(0x23a4befefe5415cc15481c01168e77c452a5ec155d377d86f220cf2da0ae39cc) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] pk hash rlc halo2ecc: Value { inner: Some(0x2916706e7347558c29b34c15265bc6e5a4ff0f2f067670362d6bd7879f6bc236) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 1 
+    input Value { inner: Some(0x0000000000000000000000000000000000000000003aaa95f69c1627554d77e0) }
+    reconstructed Value { inner: Some(0x0000000000000000000000000000000000000000003aaa95f69c1627554d77e0) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 2 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000cdea72f054234c9a4a54fa) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000cdea72f054234c9a4a54fa) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 3 
+    input Value { inner: Some(0x00000000000000000000000000000000000000000000dfcb0325d9fc2ac726cf) }
+    reconstructed Value { inner: Some(0x00000000000000000000000000000000000000000000dfcb0325d9fc2ac726cf) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] halo2ecc assigned msg hash rlc: Value { inner: Some(0x2fd8a2f6886723f8714ac0fe190add958754dce86ec614a0911b89eacdfe12f5) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 1 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000aa4ab96f90c129c878537d) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000aa4ab96f90c129c878537d) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 2 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000dee504cfcdef5d20885cb3) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000dee504cfcdef5d20885cb3) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 3 
+    input Value { inner: Some(0x00000000000000000000000000000000000000000000fb1818fe5ad83b4e1f90) }
+    reconstructed Value { inner: Some(0x00000000000000000000000000000000000000000000fb1818fe5ad83b4e1f90) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 1 
+    input Value { inner: Some(0x0000000000000000000000000000000000000000003206a58f395f6a2b51be96) }
+    reconstructed Value { inner: Some(0x0000000000000000000000000000000000000000003206a58f395f6a2b51be96) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 2 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000b4c6d49114eccbf05156b6) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000b4c6d49114eccbf05156b6) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 3 
+    input Value { inner: Some(0x0000000000000000000000000000000000000000000078aa52395b9a6a7d328a) }
+    reconstructed Value { inner: Some(0x0000000000000000000000000000000000000000000078aa52395b9a6a7d328a) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] pk rlc halo2ecc: Value { inner: Some(0x273ab53ec55836f2b6753fe092a68a4140b0d52368888a40632aeec19c60283b) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] pk hash rlc halo2ecc: Value { inner: Some(0x0690c6804dbb096344c190ffcec046fb38a1ef5de7778ed91e24e870138dcf3a) }
+[2023-03-20T01:41:23Z DEBUG halo2_proofs::circuit::floor_planner::single_pass] region row_count "signature address verify": 4015
+[2023-03-20T01:41:23Z TRACE halo2_proofs::circuit::floor_planner::single_pass] columns Column(Column { index: 2, column_type: Fixed }) reused between multi regions. Start: 262132. Region: "signature address verify"
+[2023-03-20T01:41:23Z TRACE halo2_proofs::circuit::floor_planner::single_pass] columns Column(Column { index: 4, column_type: Advice }) reused between multi regions. Start: 262132. Region: "signature address verify"
+[2023-03-20T01:41:23Z TRACE halo2_proofs::circuit::floor_planner::single_pass] columns Column(Column { index: 1, column_type: Fixed }) reused between multi regions. Start: 262132. Region: "signature address verify"
+[2023-03-20T01:41:23Z TRACE halo2_proofs::circuit::floor_planner::single_pass] columns Selector(Selector(0, true)) reused between multi regions. Start: 262132. Region: "signature address verify"
+[2023-03-20T01:41:23Z DEBUG halo2_proofs::circuit::floor_planner::single_pass] region "signature address verify", idx 1 start 262132
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 1 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000f9d40c86b108a244e46343) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000f9d40c86b108a244e46343) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 2 
+    input Value { inner: Some(0x0000000000000000000000000000000000000000007344e677a8c8af5655e0f2) }
+    reconstructed Value { inner: Some(0x0000000000000000000000000000000000000000007344e677a8c8af5655e0f2) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 3 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000008eba70d385d7924ce46c) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000008eba70d385d7924ce46c) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] halo2ecc assigned msg hash rlc: Value { inner: Some(0x141dfdedbaa7cff0072f5f2b3e45d6767a61a91f9a1b45afedb2133485cd2392) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 1 
+    input Value { inner: Some(0x00000000000000000000000000000000000000000068a691ae607757d6256ede) }
+    reconstructed Value { inner: Some(0x00000000000000000000000000000000000000000068a691ae607757d6256ede) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 2 
+    input Value { inner: Some(0x0000000000000000000000000000000000000000000131223ecfefa4eb76215f) }
+    reconstructed Value { inner: Some(0x0000000000000000000000000000000000000000000131223ecfefa4eb76215f) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 3 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000008e31a3586d4c8de89d4e) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000008e31a3586d4c8de89d4e) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 1 
+    input Value { inner: Some(0x0000000000000000000000000000000000000000005801dbe446ed8e0b05400b) }
+    reconstructed Value { inner: Some(0x0000000000000000000000000000000000000000005801dbe446ed8e0b05400b) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 2 
+    input Value { inner: Some(0x0000000000000000000000000000000000000000003f0f698eb470f32085ba97) }
+    reconstructed Value { inner: Some(0x0000000000000000000000000000000000000000003f0f698eb470f32085ba97) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 3 
+    input Value { inner: Some(0x00000000000000000000000000000000000000000000c76fdd462294a7eeb8ff) }
+    reconstructed Value { inner: Some(0x00000000000000000000000000000000000000000000c76fdd462294a7eeb8ff) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] pk rlc halo2ecc: Value { inner: Some(0x0435f0d70560353dc9e859bf4870647983648fed010e97650f91c4a52a469345) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] pk hash rlc halo2ecc: Value { inner: Some(0x0093392d4a9b04f16d50dea79f2d5c2b7291b26c124df73b50a2073d0d39147a) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 1 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000dd20da454a6e59edf86892) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000dd20da454a6e59edf86892) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 2 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000cfe0fac8ba91243e7fa60e) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000cfe0fac8ba91243e7fa60e) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 3 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000007f63ebb3c379207cd8e4) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000007f63ebb3c379207cd8e4) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] halo2ecc assigned msg hash rlc: Value { inner: Some(0x14d8fdff59ff4d6fa5b3fbddd879514a7cc452b54edc8d4fd8d5387c3a32406d) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 1 
+    input Value { inner: Some(0x0000000000000000000000000000000000000000003e0d5075d59c31ae532269) }
+    reconstructed Value { inner: Some(0x0000000000000000000000000000000000000000003e0d5075d59c31ae532269) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 2 
+    input Value { inner: Some(0x00000000000000000000000000000000000000000089a8bf5f3130fb5e0f427b) }
+    reconstructed Value { inner: Some(0x00000000000000000000000000000000000000000089a8bf5f3130fb5e0f427b) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 3 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000006a3652c1146aede1d4bd) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000006a3652c1146aede1d4bd) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 1 
+    input Value { inner: Some(0x0000000000000000000000000000000000000000007f337831eaf7e2d6671b2f) }
+    reconstructed Value { inner: Some(0x0000000000000000000000000000000000000000007f337831eaf7e2d6671b2f) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 2 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000a9dfe5cba1bc20abfc6940) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000a9dfe5cba1bc20abfc6940) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 3 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000009a4a430a87ed0ab4a953) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000009a4a430a87ed0ab4a953) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] pk rlc halo2ecc: Value { inner: Some(0x23a4befefe5415cc15481c01168e77c452a5ec155d377d86f220cf2da0ae39cc) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] pk hash rlc halo2ecc: Value { inner: Some(0x2916706e7347558c29b34c15265bc6e5a4ff0f2f067670362d6bd7879f6bc236) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 1 
+    input Value { inner: Some(0x0000000000000000000000000000000000000000003aaa95f69c1627554d77e0) }
+    reconstructed Value { inner: Some(0x0000000000000000000000000000000000000000003aaa95f69c1627554d77e0) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 2 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000cdea72f054234c9a4a54fa) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000cdea72f054234c9a4a54fa) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 3 
+    input Value { inner: Some(0x00000000000000000000000000000000000000000000dfcb0325d9fc2ac726cf) }
+    reconstructed Value { inner: Some(0x00000000000000000000000000000000000000000000dfcb0325d9fc2ac726cf) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] halo2ecc assigned msg hash rlc: Value { inner: Some(0x2fd8a2f6886723f8714ac0fe190add958754dce86ec614a0911b89eacdfe12f5) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 1 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000aa4ab96f90c129c878537d) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000aa4ab96f90c129c878537d) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 2 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000dee504cfcdef5d20885cb3) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000dee504cfcdef5d20885cb3) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 3 
+    input Value { inner: Some(0x00000000000000000000000000000000000000000000fb1818fe5ad83b4e1f90) }
+    reconstructed Value { inner: Some(0x00000000000000000000000000000000000000000000fb1818fe5ad83b4e1f90) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 1 
+    input Value { inner: Some(0x0000000000000000000000000000000000000000003206a58f395f6a2b51be96) }
+    reconstructed Value { inner: Some(0x0000000000000000000000000000000000000000003206a58f395f6a2b51be96) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 2 
+    input Value { inner: Some(0x000000000000000000000000000000000000000000b4c6d49114eccbf05156b6) }
+    reconstructed Value { inner: Some(0x000000000000000000000000000000000000000000b4c6d49114eccbf05156b6) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] limb 3 
+    input Value { inner: Some(0x0000000000000000000000000000000000000000000078aa52395b9a6a7d328a) }
+    reconstructed Value { inner: Some(0x0000000000000000000000000000000000000000000078aa52395b9a6a7d328a) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] pk rlc halo2ecc: Value { inner: Some(0x273ab53ec55836f2b6753fe092a68a4140b0d52368888a40632aeec19c60283b) }
+[2023-03-20T01:41:23Z TRACE zkevm_circuits::tx_circuit::sign_verify] pk hash rlc halo2ecc: Value { inner: Some(0x0690c6804dbb096344c190ffcec046fb38a1ef5de7778ed91e24e870138dcf3a) }

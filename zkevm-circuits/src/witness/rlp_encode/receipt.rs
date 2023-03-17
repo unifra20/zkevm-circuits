@@ -1,4 +1,4 @@
-use halo2_proofs::{arithmetic::FieldExt, plonk::Expression};
+use halo2_proofs::{ff::PrimeField, plonk::Expression};
 
 use crate::{evm_circuit::witness::Receipt, impl_expr};
 
@@ -46,7 +46,7 @@ impl_expr!(RlpReceiptTag);
 /// Denotes the number of possible tag values for a tx receipt row.
 pub const N_RECEIPT_TAGS: usize = 14;
 
-impl<F: FieldExt> RlpWitnessGen<F> for Receipt {
+impl<F: PrimeField> RlpWitnessGen<F> for Receipt {
     fn gen_witness(&self, randomness: F) -> Vec<RlpWitnessRow<F>> {
         let rlp_data = rlp::encode(self);
 
@@ -102,7 +102,7 @@ impl<F: FieldExt> RlpWitnessGen<F> for Receipt {
 }
 
 impl Receipt {
-    fn handle_logs<F: FieldExt>(
+    fn handle_logs<F: PrimeField>(
         &self,
         randomness: F,
         rlp_data: &[u8],

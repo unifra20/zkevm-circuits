@@ -1,12 +1,12 @@
 use crate::witness::RlpTxTag;
 use eth_types::{Address, U256, U64};
-use halo2_proofs::arithmetic::FieldExt;
 use halo2_proofs::circuit::Value;
+use halo2_proofs::ff::PrimeField;
 use num::Zero;
 
 use super::witness_gen::{RlpDataType, RlpWitnessRow};
 
-pub fn handle_prefix<F: FieldExt>(
+pub fn handle_prefix<F: PrimeField>(
     id: usize,
     rlp_data: &[u8],
     rows: &mut Vec<RlpWitnessRow<Value<F>>>,
@@ -23,8 +23,8 @@ pub fn handle_prefix<F: FieldExt>(
             index: idx + 1,
             data_type,
             value: rlp_data[idx],
-            value_acc: Value::known(F::zero()),
-            value_rlc_acc: Value::known(F::zero()),
+            value_acc: Value::known(F::ZERO),
+            value_rlc_acc: Value::known(F::ZERO),
             tag,
             tag_length,
             tag_rindex: tag_length,
@@ -40,7 +40,7 @@ pub fn handle_prefix<F: FieldExt>(
                 data_type,
                 value: *rlp_byte,
                 value_acc: Value::known(F::from(length_acc as u64)),
-                value_rlc_acc: Value::known(F::zero()),
+                value_rlc_acc: Value::known(F::ZERO),
                 tag,
                 tag_length,
                 tag_rindex: tag_length - (1 + k),
@@ -63,7 +63,7 @@ pub fn handle_prefix<F: FieldExt>(
             data_type,
             value: rlp_data[idx],
             value_acc: Value::known(F::from(rlp_data[idx] as u64)),
-            value_rlc_acc: Value::known(F::zero()),
+            value_rlc_acc: Value::known(F::ZERO),
             tag,
             tag_length: 1,
             tag_rindex: 1,
@@ -74,7 +74,7 @@ pub fn handle_prefix<F: FieldExt>(
     idx
 }
 
-pub fn handle_u8<F: FieldExt>(
+pub fn handle_u8<F: PrimeField>(
     tx_id: usize,
     rlp_data: &[u8],
     rows: &mut Vec<RlpWitnessRow<Value<F>>>,
@@ -90,8 +90,8 @@ pub fn handle_u8<F: FieldExt>(
             index: idx + 1,
             data_type,
             value: rlp_data[idx],
-            value_acc: Value::known(F::zero()),
-            value_rlc_acc: Value::known(F::zero()),
+            value_acc: Value::known(F::ZERO),
+            value_rlc_acc: Value::known(F::ZERO),
             tag,
             tag_length: 1,
             tag_rindex: 1,
@@ -107,7 +107,7 @@ pub fn handle_u8<F: FieldExt>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn handle_u64<F: FieldExt>(
+pub fn handle_u64<F: PrimeField>(
     tx_id: usize,
     rlp_data: &[u8],
     rows: &mut Vec<RlpWitnessRow<Value<F>>>,
@@ -136,7 +136,7 @@ pub fn handle_u64<F: FieldExt>(
             data_type,
             value: value_bytes[0],
             value_acc: Value::known(F::from(value_bytes[0] as u64)),
-            value_rlc_acc: Value::known(F::zero()),
+            value_rlc_acc: Value::known(F::ZERO),
             tag,
             tag_length: 1,
             tag_rindex: 1,
@@ -156,8 +156,8 @@ pub fn handle_u64<F: FieldExt>(
             index: idx + 1,
             data_type,
             value: rlp_data[idx],
-            value_acc: Value::known(F::zero()),
-            value_rlc_acc: Value::known(F::zero()),
+            value_acc: Value::known(F::ZERO),
+            value_rlc_acc: Value::known(F::ZERO),
             tag,
             tag_length,
             tag_rindex: tag_length,
@@ -165,7 +165,7 @@ pub fn handle_u64<F: FieldExt>(
         });
         idx += 1;
 
-        let mut value_acc = F::zero();
+        let mut value_acc = F::ZERO;
         for (i, value_byte) in value_bytes.iter().enumerate() {
             assert_eq!(
                 rlp_data[idx], *value_byte,
@@ -179,7 +179,7 @@ pub fn handle_u64<F: FieldExt>(
                 data_type,
                 value: *value_byte,
                 value_acc: Value::known(value_acc),
-                value_rlc_acc: Value::known(F::zero()),
+                value_rlc_acc: Value::known(F::ZERO),
                 tag,
                 tag_length,
                 tag_rindex: tag_length - (1 + i),
@@ -193,7 +193,7 @@ pub fn handle_u64<F: FieldExt>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn handle_u256<F: FieldExt>(
+pub fn handle_u256<F: PrimeField>(
     randomness: Value<F>,
     id: usize,
     rlp_data: &[u8],
@@ -223,7 +223,7 @@ pub fn handle_u256<F: FieldExt>(
             data_type,
             value: value_bytes[0],
             value_acc: Value::known(F::from(value_bytes[0] as u64)),
-            value_rlc_acc: Value::known(F::zero()),
+            value_rlc_acc: Value::known(F::ZERO),
             tag,
             tag_length: 1,
             tag_rindex: 1,
@@ -243,8 +243,8 @@ pub fn handle_u256<F: FieldExt>(
             index: idx + 1,
             data_type,
             value: rlp_data[idx],
-            value_acc: Value::known(F::zero()),
-            value_rlc_acc: Value::known(F::zero()),
+            value_acc: Value::known(F::ZERO),
+            value_rlc_acc: Value::known(F::ZERO),
             tag,
             tag_length,
             tag_rindex: tag_length,
@@ -252,7 +252,7 @@ pub fn handle_u256<F: FieldExt>(
         });
         idx += 1;
 
-        let mut value_acc = Value::known(F::zero());
+        let mut value_acc = Value::known(F::ZERO);
         for (i, value_byte) in value_bytes.iter().enumerate() {
             assert_eq!(
                 rlp_data[idx], *value_byte,
@@ -268,7 +268,7 @@ pub fn handle_u256<F: FieldExt>(
                 data_type,
                 value: *value_byte,
                 value_acc,
-                value_rlc_acc: Value::known(F::zero()),
+                value_rlc_acc: Value::known(F::ZERO),
                 tag,
                 tag_length,
                 tag_rindex: tag_length - (1 + i),
@@ -282,7 +282,7 @@ pub fn handle_u256<F: FieldExt>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn handle_address<F: FieldExt>(
+pub fn handle_address<F: PrimeField>(
     tx_id: usize,
     rlp_data: &[u8],
     rows: &mut Vec<RlpWitnessRow<Value<F>>>,
@@ -304,8 +304,8 @@ pub fn handle_address<F: FieldExt>(
             index: idx + 1,
             data_type,
             value: rlp_data[idx],
-            value_acc: Value::known(F::zero()),
-            value_rlc_acc: Value::known(F::zero()),
+            value_acc: Value::known(F::ZERO),
+            value_rlc_acc: Value::known(F::ZERO),
             tag,
             tag_length: 1,
             tag_rindex: 1,
@@ -323,15 +323,15 @@ pub fn handle_address<F: FieldExt>(
             index: idx + 1,
             data_type,
             value: rlp_data[idx],
-            value_acc: Value::known(F::zero()),
-            value_rlc_acc: Value::known(F::zero()),
+            value_acc: Value::known(F::ZERO),
+            value_rlc_acc: Value::known(F::ZERO),
             tag,
             tag_length: 21,
             tag_rindex: 21,
             length_acc: 20,
         });
         idx += 1;
-        let mut value_acc = F::zero();
+        let mut value_acc = F::ZERO;
         assert_eq!(value_bytes.len(), 20);
         for (i, value_byte) in value_bytes.iter().enumerate() {
             assert_eq!(
@@ -346,7 +346,7 @@ pub fn handle_address<F: FieldExt>(
                 data_type,
                 value: *value_byte,
                 value_acc: Value::known(value_acc),
-                value_rlc_acc: Value::known(F::zero()),
+                value_rlc_acc: Value::known(F::ZERO),
                 tag,
                 tag_length: 21,
                 tag_rindex: 21 - (i + 1),
@@ -360,7 +360,7 @@ pub fn handle_address<F: FieldExt>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn handle_bytes<F: FieldExt>(
+pub fn handle_bytes<F: PrimeField>(
     randomness: Value<F>,
     tx_id: usize,
     rlp_data: &[u8],
@@ -382,7 +382,7 @@ pub fn handle_bytes<F: FieldExt>(
             data_type,
             value: call_data[0],
             value_acc: Value::known(F::from(1)),
-            value_rlc_acc: Value::known(F::zero()),
+            value_rlc_acc: Value::known(F::ZERO),
             tag: prefix_tag,
             tag_length: 1,
             tag_rindex: 1,
@@ -414,7 +414,7 @@ pub fn handle_bytes<F: FieldExt>(
             data_type,
             value: (0x80 + length) as u8,
             value_acc: Value::known(F::from(length as u64)),
-            value_rlc_acc: Value::known(F::zero()),
+            value_rlc_acc: Value::known(F::ZERO),
             tag: prefix_tag,
             tag_length: 1,
             tag_rindex: 1,
@@ -422,7 +422,7 @@ pub fn handle_bytes<F: FieldExt>(
         });
         idx += 1;
 
-        let mut value_acc_rlc = Value::known(F::zero());
+        let mut value_acc_rlc = Value::known(F::ZERO);
         for (i, data_byte) in call_data.iter().enumerate() {
             assert_eq!(
                 rlp_data[idx], *data_byte,
@@ -461,8 +461,8 @@ pub fn handle_bytes<F: FieldExt>(
             index: idx + 1,
             data_type,
             value: rlp_data[idx],
-            value_acc: Value::known(F::zero()),
-            value_rlc_acc: Value::known(F::zero()),
+            value_acc: Value::known(F::ZERO),
+            value_rlc_acc: Value::known(F::ZERO),
             tag: prefix_tag,
             tag_length,
             tag_rindex: tag_length,
@@ -492,7 +492,7 @@ pub fn handle_bytes<F: FieldExt>(
                 data_type,
                 value: *length_byte,
                 value_acc: Value::known(F::from(length_acc as u64)),
-                value_rlc_acc: Value::known(F::zero()),
+                value_rlc_acc: Value::known(F::ZERO),
                 tag: prefix_tag,
                 tag_length,
                 tag_rindex: tag_length - (1 + i),
@@ -503,7 +503,7 @@ pub fn handle_bytes<F: FieldExt>(
         assert_eq!(length_acc as usize, length);
 
         let tag_length = call_data.len();
-        let mut value_rlc_acc = Value::known(F::zero());
+        let mut value_rlc_acc = Value::known(F::ZERO);
         for (i, data_byte) in call_data.iter().enumerate() {
             assert_eq!(
                 rlp_data[idx], *data_byte,

@@ -1,5 +1,5 @@
 use halo2_proofs::circuit::Value;
-use halo2_proofs::{arithmetic::FieldExt, plonk::Expression};
+use halo2_proofs::{ff::PrimeField, plonk::Expression};
 use rlp::Encodable;
 
 use crate::impl_expr;
@@ -57,7 +57,7 @@ pub struct RlpWitnessRow<F> {
 
 /// The RlpWitnessGen trait is implemented by data types who's RLP encoding can
 /// be verified by the RLP-encoding circuit.
-pub trait RlpWitnessGen<F: FieldExt>: Encodable + Sized {
+pub trait RlpWitnessGen<F: PrimeField>: Encodable + Sized {
     /// Generate witness to the RLP-encoding verifier circuit, as a vector of
     /// RlpWitnessRow.
     fn gen_witness(&self, challenges: &Challenges<Value<F>>) -> Vec<RlpWitnessRow<Value<F>>>;

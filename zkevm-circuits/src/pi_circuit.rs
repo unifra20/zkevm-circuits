@@ -414,7 +414,7 @@ impl<F: Field> PiCircuitConfig<F> {
         let mut block_copy_offsets = vec![];
         let mut tx_copy_cells = vec![];
         let mut block_table_offset = 1; // first row of block is all-zeros.
-        let mut rpi_rlc_acc = Value::known(F::zero());
+        let mut rpi_rlc_acc = Value::known(F::ZERO);
         let dummy_tx_hash = get_dummy_tx_hash(public_data.chain_id.as_u64());
 
         self.q_start.enable(region, offset)?;
@@ -680,14 +680,13 @@ impl<F: Field> PiCircuitConfig<F> {
             keccak_row,
         )?;
         let keccak = public_data.get_pi(self.max_txs);
-        let keccak_rlc =
-            keccak
-                .to_fixed_bytes()
-                .iter()
-                .fold(Value::known(F::zero()), |acc, byte| {
-                    acc.zip(challenges.evm_word())
-                        .and_then(|(acc, rand)| Value::known(acc * rand + F::from(*byte as u64)))
-                });
+        let keccak_rlc = keccak
+            .to_fixed_bytes()
+            .iter()
+            .fold(Value::known(F::ZERO), |acc, byte| {
+                acc.zip(challenges.evm_word())
+                    .and_then(|(acc, rand)| Value::known(acc * rand + F::from(*byte as u64)))
+            });
         region.assign_advice(
             || "rpi_length_acc",
             self.rpi_length_acc,
@@ -703,7 +702,7 @@ impl<F: Field> PiCircuitConfig<F> {
         self.q_keccak.enable(region, keccak_row)?;
 
         // start over to accumulate big-endian bytes of keccak output
-        rpi_rlc_acc = Value::known(F::zero());
+        rpi_rlc_acc = Value::known(F::ZERO);
         offset += 1;
         // the high 16 bytes of keccak output
         let mut cells = self.assign_field_in_pi(
@@ -756,30 +755,28 @@ impl<F: Field> PiCircuitConfig<F> {
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
         let len = value_bytes.len();
 
-        let mut value_bytes_acc = Value::known(F::zero());
+        let mut value_bytes_acc = Value::known(F::ZERO);
         let (use_rlc, t) = if len * 8 > F::CAPACITY as usize {
-            (F::one(), challenges.evm_word())
+            (F::ONE, challenges.evm_word())
         } else {
-            (F::zero(), Value::known(F::from(BYTE_POW_BASE)))
+            (F::ZERO, Value::known(F::from(BYTE_POW_BASE)))
         };
         let r = if keccak_hi_lo {
             challenges.evm_word()
         } else {
             challenges.keccak_input()
         };
-        let value = value_bytes
-            .iter()
-            .fold(Value::known(F::zero()), |acc, byte| {
-                acc.zip(t)
-                    .and_then(|(acc, t)| Value::known(acc * t + F::from(*byte as u64)))
-            });
+        let value = value_bytes.iter().fold(Value::known(F::ZERO), |acc, byte| {
+            acc.zip(t)
+                .and_then(|(acc, t)| Value::known(acc * t + F::from(*byte as u64)))
+        });
 
         let mut cells = vec![None, None];
         for (i, byte) in value_bytes.iter().enumerate() {
             let row_offset = *offset + i;
 
             let real_value = if is_padding {
-                Value::known(F::zero())
+                Value::known(F::ZERO)
             } else {
                 value
             };
@@ -947,7 +944,7 @@ impl<F: Field> SubCircuit<F> for PiCircuit<F> {
             .to_fixed_bytes()
             .iter()
             .take(16)
-            .fold(F::zero(), |acc, byte| {
+            .fold(F::ZERO, |acc, byte| {
                 acc * F::from(BYTE_POW_BASE) + F::from(*byte as u64)
             });
 
@@ -955,7 +952,7 @@ impl<F: Field> SubCircuit<F> for PiCircuit<F> {
             .to_fixed_bytes()
             .iter()
             .skip(16)
-            .fold(F::zero(), |acc, byte| {
+            .fold(F::ZERO, |acc, byte| {
                 acc * F::from(BYTE_POW_BASE) + F::from(*byte as u64)
             });
 

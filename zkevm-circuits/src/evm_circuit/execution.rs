@@ -16,8 +16,8 @@ use crate::{
 use eth_types::{evm_unimplemented, Field};
 use gadgets::util::not;
 use halo2_proofs::{
-    arithmetic::FieldExt,
     circuit::{Layouter, Region, Value},
+    ff::PrimeField,
     plonk::{
         Advice, Column, ConstraintSystem, Error, Expression, FirstPhase, Fixed, Selector,
         VirtualCells,
@@ -169,7 +169,7 @@ use sstore::SstoreGadget;
 use stop::StopGadget;
 use swap::SwapGadget;
 
-pub(crate) trait ExecutionGadget<F: FieldExt> {
+pub(crate) trait ExecutionGadget<F: PrimeField> {
     const NAME: &'static str;
 
     const EXECUTION_STATE: ExecutionState;
@@ -861,10 +861,10 @@ impl<F: Field> ExecutionConfig<F> {
                 || "step selector",
                 self.q_step,
                 offset,
-                || Value::known(if idx == 0 { F::one() } else { F::zero() }),
+                || Value::known(if idx == 0 { F::ONE } else { F::ZERO }),
             )?;
             let value = if idx == 0 {
-                F::zero()
+                F::ZERO
             } else {
                 F::from((height - idx) as u64)
             };
@@ -878,7 +878,7 @@ impl<F: Field> ExecutionConfig<F> {
                 || "step height inv",
                 self.num_rows_inv,
                 offset,
-                || Value::known(value.invert().unwrap_or(F::zero())),
+                || Value::known(value.invert().unwrap_or(F::ZERO)),
             )?;
         }
         Ok(())
@@ -905,7 +905,7 @@ impl<F: Field> ExecutionConfig<F> {
                         || "step selector",
                         self.q_step,
                         self.get_num_rows_required(block) - 1,
-                        || Value::known(F::zero()),
+                        || Value::known(F::ZERO),
                     )?;
                     return Ok(());
                 }
@@ -1057,13 +1057,13 @@ impl<F: Field> ExecutionConfig<F> {
                     || "step height",
                     self.num_rows_until_next_step,
                     offset,
-                    || Value::known(F::zero()),
+                    || Value::known(F::ZERO),
                 )?;
                 region.assign_advice(
                     || "step height inv",
                     self.q_step,
                     offset,
-                    || Value::known(F::zero()),
+                    || Value::known(F::ZERO),
                 )?;
 
                 log::info!("finish execution step assignment");
@@ -1392,9 +1392,9 @@ impl<F: Field> ExecutionConfig<F> {
         block: &Block<F>,
         challenges: &Challenges<Value<F>>,
     ) {
-        let mut evm_randomness = F::zero();
+        let mut evm_randomness = F::ZERO;
         challenges.evm_word().map(|v| evm_randomness = v);
-        let mut lookup_randomness = F::zero();
+        let mut lookup_randomness = F::ZERO;
         challenges.lookup_input().map(|v| lookup_randomness = v);
         if evm_randomness.is_zero_vartime() || lookup_randomness.is_zero_vartime() {
             // challenges not ready

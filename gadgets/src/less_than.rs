@@ -2,7 +2,7 @@
 
 use eth_types::Field;
 use halo2_proofs::{
-    arithmetic::FieldExt,
+    ff::PrimeField,
     circuit::{Chip, Region, Value},
     plonk::{Advice, Column, ConstraintSystem, Error, Expression, VirtualCells},
     poly::Rotation,
@@ -16,7 +16,7 @@ use super::{
 };
 
 /// Instruction that the Lt chip needs to implement.
-pub trait LtInstruction<F: FieldExt> {
+pub trait LtInstruction<F: PrimeField> {
     /// Assign the lhs and rhs witnesses to the Lt chip's region.
     fn assign(
         &self,
@@ -116,7 +116,7 @@ impl<F: Field, const N_BYTES: usize> LtInstruction<F> for LtChip<F, N_BYTES> {
             || Value::known(F::from(lt as u64)),
         )?;
 
-        let diff = (lhs - rhs) + (if lt { config.range } else { F::zero() });
+        let diff = (lhs - rhs) + (if lt { config.range } else { F::ZERO });
         let diff_bytes = diff.to_repr();
         for (idx, diff_column) in config.diff.iter().enumerate() {
             region.assign_advice(
@@ -149,7 +149,7 @@ mod test {
     use super::{LtChip, LtConfig, LtInstruction};
     use eth_types::Field;
     use halo2_proofs::{
-        arithmetic::FieldExt,
+        ff::PrimeField,
         circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,
         halo2curves::bn256::Fr as Fp,
@@ -203,7 +203,7 @@ mod test {
         }
 
         #[derive(Default)]
-        struct TestCircuit<F: FieldExt> {
+        struct TestCircuit<F: PrimeField> {
             values: Option<Vec<u64>>,
             // checks[i] = lt(values[i + 1], values[i])
             checks: Option<Vec<bool>>,
@@ -321,7 +321,7 @@ mod test {
         }
 
         #[derive(Default)]
-        struct TestCircuit<F: FieldExt> {
+        struct TestCircuit<F: PrimeField> {
             values: Option<Vec<(u64, u64)>>,
             // checks[i] = lt(values[i].0 - values[i].1)
             checks: Option<Vec<bool>>,

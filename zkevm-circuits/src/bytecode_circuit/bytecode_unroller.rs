@@ -446,18 +446,18 @@ impl<F: Field> BytecodeCircuitConfig<F> {
                         last_row_offset,
                         false,
                         true,
-                        Value::known(F::zero()),
+                        Value::known(F::ZERO),
                         F::from(BytecodeFieldTag::Padding as u64),
-                        F::zero(),
-                        F::one(),
-                        F::zero(),
+                        F::ZERO,
+                        F::ONE,
+                        F::ZERO,
                         0,
-                        Value::known(F::zero()),
-                        F::zero(),
-                        F::zero(),
+                        Value::known(F::ZERO),
+                        F::ZERO,
+                        F::ZERO,
                         true,
                         true,
-                        F::zero(),
+                        F::ZERO,
                     )?;
                     return Ok(());
                 }
@@ -468,7 +468,7 @@ impl<F: Field> BytecodeCircuitConfig<F> {
                     // Run over all the bytes
                     let mut push_rindex = 0;
                     let mut byte_push_size = 0;
-                    let mut hash_input_rlc = challenges.keccak_input().map(|_| F::zero());
+                    let mut hash_input_rlc = challenges.keccak_input().map(|_| F::ZERO);
                     let code_length = F::from(bytecode.bytes.len() as u64);
                     for (idx, row) in bytecode.rows.iter().enumerate() {
                         if fail_fast && offset > last_row_offset {
@@ -500,7 +500,7 @@ impl<F: Field> BytecodeCircuitConfig<F> {
                         // data
                         let is_code = push_rindex == 0;
                         if idx > 0 {
-                            byte_push_size = get_push_size(row.value.get_lower_128() as u8);
+                            byte_push_size = get_push_size(row.value.to_repr()[0]);
                             push_rindex = if is_code {
                                 byte_push_size
                             } else {
@@ -554,15 +554,15 @@ impl<F: Field> BytecodeCircuitConfig<F> {
                         idx,
                         idx < last_row_offset,
                         idx == last_row_offset,
-                        Value::known(F::zero()),
+                        Value::known(F::ZERO),
                         F::from(BytecodeFieldTag::Padding as u64),
-                        F::zero(),
-                        F::one(),
-                        F::zero(),
+                        F::ZERO,
+                        F::ONE,
+                        F::ZERO,
                         0,
-                        Value::known(F::zero()),
-                        F::zero(),
-                        F::zero(),
+                        Value::known(F::ZERO),
+                        F::ZERO,
+                        F::ZERO,
                         true,
                         true,
                         F::from(push_rindex_prev),
@@ -700,8 +700,8 @@ pub fn unroll_with_codehash<F: Field>(code_hash: U256, bytes: Vec<u8>) -> Unroll
     let mut rows = vec![BytecodeRow::<F> {
         code_hash,
         tag: F::from(BytecodeFieldTag::Length as u64),
-        index: F::zero(),
-        is_code: F::zero(),
+        index: F::ZERO,
+        is_code: F::ZERO,
         value: F::from(bytes.len() as u64),
     }];
     // Run over all the bytes

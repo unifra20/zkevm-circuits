@@ -16,12 +16,12 @@ use eth_types::{Field, ToLittleEndian, ToScalar, Word, U256};
 use gadgets::binary_number::{BinaryNumberChip, BinaryNumberConfig};
 use gadgets::util::{split_u256, split_u256_limb64};
 use halo2_proofs::plonk::{Any, Expression, Fixed, VirtualCells};
+use halo2_proofs::{circuit::Layouter, poly::Rotation};
 use halo2_proofs::{
-    arithmetic::FieldExt,
     circuit::{Region, Value},
+    ff::PrimeField,
     plonk::{Advice, Column, ConstraintSystem, Error},
 };
-use halo2_proofs::{circuit::Layouter, poly::Rotation};
 
 #[cfg(feature = "onephase")]
 use halo2_proofs::plonk::FirstPhase as SecondPhase;
@@ -176,14 +176,14 @@ impl TxTable {
                         || "tx table all-zero row",
                         column,
                         offset,
-                        || Value::known(F::zero()),
+                        || Value::known(F::ZERO),
                     )?;
                 }
                 region.assign_fixed(
                     || "tx table all-zero row",
                     self.tag,
                     offset,
-                    || Value::known(F::zero()),
+                    || Value::known(F::ZERO),
                 )?;
                 offset += 1;
 
@@ -447,7 +447,7 @@ impl DynamicTableColumns for RwTable {
 }
 impl RwTable {
     /// Construct a new RwTable
-    pub fn construct<F: FieldExt>(meta: &mut ConstraintSystem<F>) -> Self {
+    pub fn construct<F: PrimeField>(meta: &mut ConstraintSystem<F>) -> Self {
         Self {
             rw_counter: meta.advice_column(),
             is_write: meta.advice_column(),
@@ -561,7 +561,7 @@ impl DynamicTableColumns for MptTable {
 
 impl MptTable {
     /// Construct a new MptTable
-    pub(crate) fn construct<F: FieldExt>(meta: &mut ConstraintSystem<F>) -> Self {
+    pub(crate) fn construct<F: PrimeField>(meta: &mut ConstraintSystem<F>) -> Self {
         Self([
             meta.advice_column(),               // Address
             meta.advice_column_in(SecondPhase), // Storage key
@@ -623,7 +623,7 @@ impl DynamicTableColumns for PoseidonTable {
 
 impl PoseidonTable {
     /// Construct a new PoseidonTable
-    pub(crate) fn construct<F: FieldExt>(meta: &mut ConstraintSystem<F>) -> Self {
+    pub(crate) fn construct<F: PrimeField>(meta: &mut ConstraintSystem<F>) -> Self {
         Self([0; 4].map(|_| meta.advice_column()))
     }
 
@@ -655,7 +655,7 @@ impl PoseidonTable {
         region: &mut Region<'_, F>,
         hashes: impl Iterator<Item = &'d [Value<F>]>,
     ) -> Result<(), Error> {
-        self.assign(region, 0, [Value::known(F::zero()); 7].as_slice())?;
+        self.assign(region, 0, [Value::known(F::ZERO); 7].as_slice())?;
         for (offset, row) in hashes.enumerate() {
             self.assign(region, offset + 1, row)?;
         }
@@ -721,7 +721,7 @@ impl BytecodeTable {
                         || "bytecode table all-zero row",
                         column,
                         offset,
-                        || Value::known(F::zero()),
+                        || Value::known(F::ZERO),
                     )?;
                 }
                 offset += 1;
@@ -828,7 +828,7 @@ impl BlockTable {
                         || "block table all-zero row",
                         *column,
                         offset,
-                        || Value::known(F::zero()),
+                        || Value::known(F::ZERO),
                     )?;
                 }
                 offset += 1;
@@ -913,7 +913,7 @@ impl KeccakTable {
         });
 
         vec![[
-            Value::known(F::one()),
+            Value::known(F::ONE),
             input_rlc,
             Value::known(input_len),
             output_rlc,
@@ -950,7 +950,7 @@ impl KeccakTable {
                         || "keccak table all-zero row",
                         column,
                         offset,
-                        || Value::known(F::zero()),
+                        || Value::known(F::ZERO),
                     )?;
                 }
                 offset += 1;
@@ -1058,9 +1058,9 @@ impl CopyTable {
                 .keccak_input()
                 .map(|keccak_input| rlc::value(values.iter().rev(), keccak_input))
         } else {
-            Value::known(F::zero())
+            Value::known(F::ZERO)
         };
-        let mut value_acc = Value::known(F::zero());
+        let mut value_acc = Value::known(F::ZERO);
         for (step_idx, (is_read_step, copy_step)) in copy_event
             .bytes
             .iter()
@@ -1086,12 +1086,12 @@ impl CopyTable {
             .enumerate()
         {
             // is_first
-            let is_first = Value::known(if step_idx == 0 { F::one() } else { F::zero() });
+            let is_first = Value::known(if step_idx == 0 { F::ONE } else { F::ZERO });
             // is last
             let is_last = if step_idx == copy_event.bytes.len() * 2 - 1 {
-                Value::known(F::one())
+                Value::known(F::ONE)
             } else {
-                Value::known(F::zero())
+                Value::known(F::ZERO)
             };
 
             // id
@@ -1146,11 +1146,11 @@ impl CopyTable {
             };
             // is_pad
             let is_pad = Value::known(F::from(
-                is_read_step && copy_step_addr >= copy_event.src_addr_end,
+                (is_read_step && copy_step_addr >= copy_event.src_addr_end) as u64,
             ));
 
             // is_code
-            let is_code = Value::known(copy_step.is_code.map_or(F::zero(), |v| F::from(v)));
+            let is_code = Value::known(copy_step.is_code.map_or(F::ZERO, |v| F::from(v as u64)));
 
             assignments.push((
                 tag,
@@ -1200,7 +1200,7 @@ impl CopyTable {
                         || "copy table all-zero row",
                         column,
                         offset,
-                        || Value::known(F::zero()),
+                        || Value::known(F::ZERO),
                     )?;
                 }
                 offset += 1;
@@ -1318,16 +1318,16 @@ impl ExpTable {
         let mut exponent = exp_event.exponent;
         for (step_idx, exp_step) in exp_event.steps.iter().rev().enumerate() {
             let is_last = if step_idx == exp_event.steps.len() - 1 {
-                F::one()
+                F::ONE
             } else {
-                F::zero()
+                F::ZERO
             };
             let (exp_lo, exp_hi) = split_u256(&exp_step.d);
             let (exponent_lo, exponent_hi) = split_u256(&exponent);
 
             // row 1
             assignments.push([
-                F::one(),
+                F::ONE,
                 identifier,
                 is_last,
                 base_limbs[0].as_u64().into(),
@@ -1340,9 +1340,9 @@ impl ExpTable {
             ]);
             // row 2
             assignments.push([
-                F::zero(),
+                F::ZERO,
                 identifier,
-                F::zero(),
+                F::ZERO,
                 base_limbs[1].as_u64().into(),
                 exponent_hi
                     .to_scalar()
@@ -1353,31 +1353,24 @@ impl ExpTable {
             ]);
             // row 3
             assignments.push([
-                F::zero(),
+                F::ZERO,
                 identifier,
-                F::zero(),
+                F::ZERO,
                 base_limbs[2].as_u64().into(),
-                F::zero(),
-                F::zero(),
+                F::ZERO,
+                F::ZERO,
             ]);
             // row 4
             assignments.push([
-                F::zero(),
+                F::ZERO,
                 identifier,
-                F::zero(),
+                F::ZERO,
                 base_limbs[3].as_u64().into(),
-                F::zero(),
-                F::zero(),
+                F::ZERO,
+                F::ZERO,
             ]);
             for _ in ROWS_PER_STEP..OFFSET_INCREMENT {
-                assignments.push([
-                    F::zero(),
-                    F::zero(),
-                    F::zero(),
-                    F::zero(),
-                    F::zero(),
-                    F::zero(),
-                ]);
+                assignments.push([F::ZERO, F::ZERO, F::ZERO, F::ZERO, F::ZERO, F::ZERO]);
             }
 
             // update intermediate exponent.
@@ -1543,7 +1536,7 @@ impl RlpTable {
                         || format!("empty row: {}", offset),
                         column,
                         offset,
-                        || Value::known(F::zero()),
+                        || Value::known(F::ZERO),
                     )?;
                 }
 
