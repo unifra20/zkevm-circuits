@@ -61,9 +61,9 @@ pub(crate) struct SarGadget<F> {
     // shf_div64 == 3
     shf_lo_div64_eq3: IsEqualGadget<F>,
     // Verify `a64s_lo[idx]` should be less than `p_lo` when idx in `(0, 1, 2, 3)`.
-    a64s_lo_lt_p_lo: [LtGadget<F, 16>; 4],
+    a64s_lo_lt_p_lo: [LtGadget<F, N_BYTES_U64>; 4],
     // Verify `a64s_hi[idx]` should be less than `p_hi` when idx in `(0, 1, 2, 3)`.
-    a64s_hi_lt_p_hi: [LtGadget<F, 16>; 4],
+    a64s_hi_lt_p_hi: [LtGadget<F, N_BYTES_U64>; 4],
 }
 
 impl<F: Field> ExecutionGadget<F> for SarGadget<F> {
