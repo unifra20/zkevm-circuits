@@ -13,6 +13,7 @@ pub use mpt_circuits::MPTProofType;
 pub mod hash {
     pub use mpt_circuits::hash::Hashable;
     pub use mpt_circuits::HashCircuit;
+    pub use mpt_circuits::hash::MessageHashable;
 }
 
 //pub use mpt_circuits::hash;
