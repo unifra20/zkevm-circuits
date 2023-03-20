@@ -254,7 +254,12 @@ impl<F: Field> SignVerifyChip<F> {
         let ecc_chip = EccChip::<F, FpChip<F>>::construct(ecdsa_chip.clone());
         // build Fq chip from Fp chip
         // TODO: pass the parameters
-        let fq_chip = FqChip::construct(ecdsa_chip.range().clone(), 88, 3, modulus::<Fq>());
+        let fq_chip = FqChip::construct(
+            ecdsa_chip.range().clone(),
+            ecdsa_chip.limb_bits,
+            ecdsa_chip.num_limbs,
+            modulus::<Fq>(),
+        );
 
         log::trace!("r: {:?}", sig_r);
         log::trace!("s: {:?}", sig_s);
@@ -296,7 +301,7 @@ impl<F: Field> SignVerifyChip<F> {
         );
         log::trace!("ECDSA res {:?}", ecdsa_is_valid);
         // end_timer!(timer_ecdsa);
-
+        // ecdsa_chip.finalize(ctx);
         // end_timer!(timer);
         Ok(AssignedECDSA {
             pk: pk_assigned,
@@ -366,8 +371,8 @@ impl<F: Field> SignVerifyChip<F> {
         chips: &ChipsRef<F>,
         sign_data: Option<&SignData>,
         challenges: &Challenges<Value<F>>,
-        sig_is_valid: &AssignedValue< F>,
-    ) -> Result<([AssignedValue< F>; 3], AssignedSignatureVerify< F>), Error> {
+        sig_is_valid: &AssignedValue<F>,
+    ) -> Result<([AssignedValue<F>; 3], AssignedSignatureVerify<F>), Error> {
         let ChipsRef {
             main_gate: _,
             ecdsa_chip,
@@ -431,7 +436,6 @@ impl<F: Field> SignVerifyChip<F> {
             .rev()
             .collect_vec();
 
-
         log::trace!("pk hash cell {:?}", pk_hash_cells);
 
         // address is the random linear combination of the public key
@@ -462,9 +466,7 @@ impl<F: Field> SignVerifyChip<F> {
                 .map(|&x| QuantumCell::Witness(Value::known(F::from_u128(x as u128))))
                 .collect_vec();
 
-
             log::trace!("assigned_msg_hash_le: {:?}", assigned_msg_hash_le);
-
 
             // assert the assigned_msg_hash_le is the right decomposition of msg_hash
             // msg_hash is an overflowing integer with 3 limbs, of sizes 88, 88, and 80
@@ -494,7 +496,10 @@ impl<F: Field> SignVerifyChip<F> {
                     )
                 })
                 .collect::<Vec<_>>();
-            log::trace!("assigned_msg_hash_le_selected: {:?}", assigned_msg_hash_le_selected);
+            log::trace!(
+                "assigned_msg_hash_le_selected: {:?}",
+                assigned_msg_hash_le_selected
+            );
             let msg_hash_rlc = flex_gate_chip.inner_product(
                 ctx,
                 assigned_msg_hash_le_selected
@@ -714,94 +719,94 @@ impl<F: Field> SignVerifyChip<F> {
         powers_of_256: &[QuantumCell<F>],
         overriding: &Option<&QuantumCell<F>>,
     ) -> Result<(), Error> {
-        // // length of byte representation is 32
-        // assert_eq!(byte_repr.len(), 32);
-        // // need to support decomposition of up to 88 bits
-        // assert!(powers_of_256.len() >= 11);
+        // length of byte representation is 32
+        assert_eq!(byte_repr.len(), 32);
+        // need to support decomposition of up to 88 bits
+        assert!(powers_of_256.len() >= 11);
 
-        // let flex_gate_chip = &chips.ecdsa_chip.range.gate;
-        // let zero = flex_gate_chip.load_zero(ctx);
-        // let zero_cell = QuantumCell::Existing(&zero);
+        let flex_gate_chip = &chips.ecdsa_chip.range.gate;
+        let zero = flex_gate_chip.load_zero(ctx);
+        let zero_cell = QuantumCell::Existing(&zero);
 
-        // // apply the overriding flag
-        // let (limb1_value, limb2_value, limb3_value) = match *overriding {
-        //     Some(p) => {
-        //         let l1 = flex_gate_chip.select(
-        //             ctx,
-        //             zero_cell.clone(),
-        //             QuantumCell::Existing(&crt_int.truncation.limbs[0]),
-        //             p.clone(),
-        //         );
-        //         let l2 = flex_gate_chip.select(
-        //             ctx,
-        //             zero_cell.clone(),
-        //             QuantumCell::Existing(&crt_int.truncation.limbs[1]),
-        //             p.clone(),
-        //         );
-        //         let l3 = flex_gate_chip.select(
-        //             ctx,
-        //             zero_cell.clone(),
-        //             QuantumCell::Existing(&crt_int.truncation.limbs[2]),
-        //             p.clone(),
-        //         );
-        //         (l1, l2, l3)
-        //     }
-        //     None => (
-        //         crt_int.truncation.limbs[0].clone(),
-        //         crt_int.truncation.limbs[1].clone(),
-        //         crt_int.truncation.limbs[2].clone(),
-        //     ),
-        // };
+        // apply the overriding flag
+        let (limb1_value, limb2_value, limb3_value) = match *overriding {
+            Some(p) => {
+                let l1 = flex_gate_chip.select(
+                    ctx,
+                    zero_cell.clone(),
+                    QuantumCell::Existing(&crt_int.truncation.limbs[0]),
+                    p.clone(),
+                );
+                let l2 = flex_gate_chip.select(
+                    ctx,
+                    zero_cell.clone(),
+                    QuantumCell::Existing(&crt_int.truncation.limbs[1]),
+                    p.clone(),
+                );
+                let l3 = flex_gate_chip.select(
+                    ctx,
+                    zero_cell.clone(),
+                    QuantumCell::Existing(&crt_int.truncation.limbs[2]),
+                    p.clone(),
+                );
+                (l1, l2, l3)
+            }
+            None => (
+                crt_int.truncation.limbs[0].clone(),
+                crt_int.truncation.limbs[1].clone(),
+                crt_int.truncation.limbs[2].clone(),
+            ),
+        };
 
-        // // assert the byte_repr is the right decomposition of overflow_int
-        // // overflow_int is an overflowing integer with 3 limbs, of sizes 88, 88, and 80
-        // // we reconstruct the three limbs from the bytes repr, and
-        // // then enforce equality with the CRT integer
-        // let limb1_recover = flex_gate_chip.inner_product(
-        //     ctx,
-        //     byte_repr[0..11].to_vec(),
-        //     powers_of_256[0..11].to_vec(),
-        // );
-        // let limb2_recover = flex_gate_chip.inner_product(
-        //     ctx,
-        //     byte_repr[11..22].to_vec(),
-        //     powers_of_256[0..11].to_vec(),
-        // );
-        // let limb3_recover = flex_gate_chip.inner_product(
-        //     ctx,
-        //     byte_repr[22..].to_vec(),
-        //     powers_of_256[0..10].to_vec(),
-        // );
-        // flex_gate_chip.assert_equal(
-        //     ctx,
-        //     QuantumCell::Existing(&limb1_value),
-        //     QuantumCell::Existing(&limb1_recover),
-        // );
-        // flex_gate_chip.assert_equal(
-        //     ctx,
-        //     QuantumCell::Existing(&limb2_value),
-        //     QuantumCell::Existing(&limb2_recover),
-        // );
-        // flex_gate_chip.assert_equal(
-        //     ctx,
-        //     QuantumCell::Existing(&limb3_value),
-        //     QuantumCell::Existing(&limb3_recover),
-        // );
-        // log::trace!(
-        //     "limb 1 \ninput {:?}\nreconstructed {:?}",
-        //     limb1_value.value(),
-        //     limb1_recover.value()
-        // );
-        // log::trace!(
-        //     "limb 2 \ninput {:?}\nreconstructed {:?}",
-        //     limb2_value.value(),
-        //     limb2_recover.value()
-        // );
-        // log::trace!(
-        //     "limb 3 \ninput {:?}\nreconstructed {:?}",
-        //     limb3_value.value(),
-        //     limb3_recover.value()
-        // );
+        // assert the byte_repr is the right decomposition of overflow_int
+        // overflow_int is an overflowing integer with 3 limbs, of sizes 88, 88, and 80
+        // we reconstruct the three limbs from the bytes repr, and
+        // then enforce equality with the CRT integer
+        let limb1_recover = flex_gate_chip.inner_product(
+            ctx,
+            byte_repr[0..11].to_vec(),
+            powers_of_256[0..11].to_vec(),
+        );
+        let limb2_recover = flex_gate_chip.inner_product(
+            ctx,
+            byte_repr[11..22].to_vec(),
+            powers_of_256[0..11].to_vec(),
+        );
+        let limb3_recover = flex_gate_chip.inner_product(
+            ctx,
+            byte_repr[22..].to_vec(),
+            powers_of_256[0..10].to_vec(),
+        );
+        flex_gate_chip.assert_equal(
+            ctx,
+            QuantumCell::Existing(&limb1_value),
+            QuantumCell::Existing(&limb1_recover),
+        );
+        flex_gate_chip.assert_equal(
+            ctx,
+            QuantumCell::Existing(&limb2_value),
+            QuantumCell::Existing(&limb2_recover),
+        );
+        flex_gate_chip.assert_equal(
+            ctx,
+            QuantumCell::Existing(&limb3_value),
+            QuantumCell::Existing(&limb3_recover),
+        );
+        log::trace!(
+            "limb 1 \ninput {:?}\nreconstructed {:?}",
+            limb1_value.value(),
+            limb1_recover.value()
+        );
+        log::trace!(
+            "limb 2 \ninput {:?}\nreconstructed {:?}",
+            limb2_value.value(),
+            limb2_recover.value()
+        );
+        log::trace!(
+            "limb 3 \ninput {:?}\nreconstructed {:?}",
+            limb3_value.value(),
+            limb3_recover.value()
+        );
 
         Ok(())
     }
@@ -898,6 +903,7 @@ mod sign_verify_tests {
             config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), Error> {
+            config.sign_verify.load_range(&mut layouter)?;
             let challenges = config.challenges.values(&mut layouter);
             self.sign_verify.assign(
                 &config.sign_verify,
@@ -910,7 +916,7 @@ mod sign_verify_tests {
                 &keccak_inputs_sign_verify(&self.signatures),
                 &challenges,
             )?;
-            config.sign_verify.load_range(&mut layouter)?;
+ 
             Ok(())
         }
     }

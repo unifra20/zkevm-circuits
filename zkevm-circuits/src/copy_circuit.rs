@@ -792,12 +792,12 @@ pub mod dev {
     use eth_types::Field;
     #[cfg(test)]
     use halo2_proofs::dev::{MockProver, VerifyFailure};
+    #[cfg(test)]
+    use halo2_proofs::ff::WithSmallOrderMulGroup;
     use halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner},
         plonk::{Circuit, ConstraintSystem},
     };
-    #[cfg(test)]
-    use halo2_proofs::ff::WithSmallOrderMulGroup;
 
     #[cfg(test)]
     use crate::witness::Block;
