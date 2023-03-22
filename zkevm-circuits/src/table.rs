@@ -622,6 +622,12 @@ impl DynamicTableColumns for PoseidonTable {
 }
 
 impl PoseidonTable {
+    /// the permutation width of current poseidon table
+    pub(crate) const WIDTH: usize = 3;
+
+    /// the input width of current poseidon table
+    pub(crate) const INPUT_WIDTH: usize = Self::WIDTH - 1;
+
     /// Construct a new PoseidonTable
     pub(crate) fn construct<F: PrimeField>(meta: &mut ConstraintSystem<F>) -> Self {
         Self([0; 4].map(|_| meta.advice_column()))

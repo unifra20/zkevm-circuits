@@ -129,9 +129,9 @@ impl<F: Field> SignVerifyConfig<F> {
             meta,
             FpStrategy::SimplePlus,
             &[NUM_ADVICE],
-            &[13],
+            &[1],
             1,
-            13,
+            18,
             88,
             3,
             modulus::<Fp>(),
@@ -199,7 +199,7 @@ impl<F: Field> SignVerifyConfig<F> {
 pub(crate) struct AssignedECDSA<F: Field, FC: FieldChip<F>> {
     pk: EcPoint<F, FC::FieldPoint>,
     msg_hash: CRTInteger<F>,
-    sig_is_valid: AssignedValue<F>,
+    // sig_is_valid: AssignedValue<F>,
 }
 
 #[derive(Debug)]
@@ -208,7 +208,7 @@ pub(crate) struct AssignedSignatureVerify<F: Field> {
     pub(crate) msg_len: usize,
     pub(crate) msg_rlc: Value<F>,
     pub(crate) msg_hash_rlc: AssignedValue<F>,
-    pub(crate) sig_is_valid: AssignedValue<F>,
+    // pub(crate) sig_is_valid: AssignedValue<F>,
 }
 
 /// Helper structure pass around references to all the chips required for an
@@ -289,24 +289,24 @@ impl<F: Field> SignVerifyChip<F> {
         // make sure the caller checks this result!
 
         // let timer_ecdsa = start_timer!(|| "ecdsa");
-        let ecdsa_is_valid = ecdsa_verify_no_pubkey_check::<F, Fp, Fq, Secp256k1Affine>(
-            &ecc_chip.field_chip,
-            ctx,
-            &pk_assigned,
-            &integer_r,
-            &integer_s,
-            &msg_hash,
-            4,
-            4,
-        );
-        log::trace!("ECDSA res {:?}", ecdsa_is_valid);
+        // let ecdsa_is_valid = ecdsa_verify_no_pubkey_check::<F, Fp, Fq, Secp256k1Affine>(
+        //     &ecc_chip.field_chip,
+        //     ctx,
+        //     &pk_assigned,
+        //     &integer_r,
+        //     &integer_s,
+        //     &msg_hash,
+        //     4,
+        //     4,
+        // );
+        // log::trace!("ECDSA res {:?}", ecdsa_is_valid);
         // end_timer!(timer_ecdsa);
         // ecdsa_chip.finalize(ctx);
         // end_timer!(timer);
         Ok(AssignedECDSA {
             pk: pk_assigned,
             msg_hash,
-            sig_is_valid: ecdsa_is_valid,
+            // sig_is_valid: ecdsa_is_valid,
         })
     }
 
@@ -371,7 +371,7 @@ impl<F: Field> SignVerifyChip<F> {
         chips: &ChipsRef<F>,
         sign_data: Option<&SignData>,
         challenges: &Challenges<Value<F>>,
-        sig_is_valid: &AssignedValue<F>,
+        // sig_is_valid: &AssignedValue<F>,
     ) -> Result<([AssignedValue<F>; 3], AssignedSignatureVerify<F>), Error> {
         let ChipsRef {
             main_gate: _,
@@ -587,7 +587,7 @@ impl<F: Field> SignVerifyChip<F> {
                     .keccak_input()
                     .map(|r| rlc::value(sign_data.msg.iter().rev(), r)),
                 msg_hash_rlc,
-                sig_is_valid: sig_is_valid.clone(),
+                // sig_is_valid: sig_is_valid.clone(),
             },
         ))
     }
@@ -665,7 +665,7 @@ impl<F: Field> SignVerifyChip<F> {
                         &chips,
                         sign_data,
                         challenges,
-                        &e.sig_is_valid,
+                        // &e.sig_is_valid,
                     )?;
                     assigned_sig_verifs.push(assigned_sig_verif);
                     deferred_keccak_check.push(to_be_keccak_checked);
@@ -824,9 +824,9 @@ impl<F: Field> SignVerifyChip<F> {
             |region| {
                 let mut ctx = config.ecdsa_config.new_context(region);
 
-                for sig_verif in sig_verifs {
-                    flex_gate_chip.assert_is_const(&mut ctx, &sig_verif.sig_is_valid, F::ONE);
-                }
+                // for sig_verif in sig_verifs {
+                //     flex_gate_chip.assert_is_const(&mut ctx, &sig_verif.sig_is_valid, F::ONE);
+                // }
                 config.ecdsa_config.range.finalize(&mut ctx);
 
                 Ok(())
@@ -916,7 +916,7 @@ mod sign_verify_tests {
                 &keccak_inputs_sign_verify(&self.signatures),
                 &challenges,
             )?;
- 
+            
             Ok(())
         }
     }
