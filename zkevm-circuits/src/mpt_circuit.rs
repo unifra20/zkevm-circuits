@@ -1,5 +1,6 @@
 //! wrapping of mpt-circuit
 use crate::{
+    keccak_circuit::util::extract_field,
     table::{MptTable, PoseidonTable},
     util::{Challenges, SubCircuit, SubCircuitConfig},
     witness,
@@ -98,7 +99,7 @@ impl<F: Field + Hashable> SubCircuit<F> for MptCircuit<F> {
     ) -> Result<(), Error> {
         config.0.load_mpt_table(
             layouter,
-            challenges.evm_word().inner,
+            Some(extract_field(challenges.evm_word())),
             self.0.ops.as_slice(),
             self.0.mpt_table.iter().copied(),
             self.0.calcs,
