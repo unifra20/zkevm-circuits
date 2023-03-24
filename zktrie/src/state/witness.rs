@@ -80,10 +80,9 @@ impl From<&ZktrieState> for WitnessGenerator {
             .accounts
             .iter()
             .map(|(addr, storage_root)| (*addr, state.zk_db.borrow_mut().new_trie(storage_root)))
-            .filter(|(addr, storage_root)| {
-                log::warn!("can not create zktrie for storage in account {addr:?}");
-                storage_root.is_some()
-            })
+            // if an account has no storage slot being touched in execution, they do not need
+            // storage trie and would be filter out here
+            .filter(|(addr, storage_root)| storage_root.is_some())
             .map(|(addr, storage_root)| (addr, storage_root.expect("None has been filtered")))
             .collect();
 
