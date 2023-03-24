@@ -2650,7 +2650,7 @@ checksum = "eabb4a44450da02c90444cf74558da904edde8fb4e9035a9a6a4e15445af0bd7"
 [[package]]
 name = "halo2-base"
 version = "0.2.2"
-source = "git+https://github.com/scroll-tech/halo2-lib?branch=halo2-ecc-snark-verifier-0322#658ae8f460682c3313d5a72b9fa89cc71447d43a"
+source = "git+https://github.com/scroll-tech/halo2-lib?branch=halo2-ecc-snark-verifier-0323#dd0cfba226a4624656039bf5ccd7891cbee860c7"
 dependencies = [
  "ff 0.12.1",
  "halo2_proofs",
@@ -2666,7 +2666,7 @@ dependencies = [
 [[package]]
 name = "halo2-ecc"
 version = "0.2.2"
-source = "git+https://github.com/scroll-tech/halo2-lib?branch=halo2-ecc-snark-verifier-0322#658ae8f460682c3313d5a72b9fa89cc71447d43a"
+source = "git+https://github.com/scroll-tech/halo2-lib?branch=halo2-ecc-snark-verifier-0323#dd0cfba226a4624656039bf5ccd7891cbee860c7"
 dependencies = [
  "ff 0.12.1",
  "group 0.12.1",
