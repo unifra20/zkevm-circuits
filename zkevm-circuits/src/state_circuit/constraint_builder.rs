@@ -9,7 +9,7 @@ use crate::{
     util::Expr,
 };
 use eth_types::Field;
-use gadgets::{binary_number::BinaryNumberConfig, util::or};
+use gadgets::binary_number::BinaryNumberConfig;
 use halo2_proofs::plonk::Expression;
 use strum::IntoEnumIterator;
 
@@ -160,10 +160,10 @@ impl<F: Field> ConstraintBuilder<F> {
             // If we decide to implement optional access list of tx later,
             // we need to revist this constraint.
             cb.condition(
-                not::expr(or::expr([
-                    q.tag_matches(RwTableTag::TxAccessListAccount),
-                    q.tag_matches(RwTableTag::TxAccessListAccountStorage),
-                ])),
+                not::expr(
+                    q.tag_matches(RwTableTag::TxAccessListAccount)
+                        + q.tag_matches(RwTableTag::TxAccessListAccountStorage),
+                ),
                 |cb| {
                     cb.require_equal(
                         "value_prev column is initial_value for first access",
