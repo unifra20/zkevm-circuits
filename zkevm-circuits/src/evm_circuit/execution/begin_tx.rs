@@ -154,19 +154,29 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
             tx_fee.expr(),
         );
 
-        // TODO: Take gas cost of access list (EIP 2930) into consideration.
+        // a valid precompile address is: 1 <= addr <= 9 (addr != 0 && addr < 0xA)
+        let is_precompile_lt = LtGadget::construct(cb, tx_callee_address.expr(), 0xA.expr());
+        let is_precompile = and::expr([
+            not::expr(tx_callee_address_is_zero.expr()),
+            is_precompile_lt.expr(),
+        ]);
+
+        // TODO1: Take gas cost of access list (EIP 2930) into consideration.
         // Use intrinsic gas
+        // TODO2: contrain calling precompile directly
         let intrinsic_gas_cost = cb.query_cell();
         #[cfg(feature = "reject-eip2718")]
-        cb.require_equal(
-            "calculate intrinsic gas cost",
-            intrinsic_gas_cost.expr(),
-            select::expr(
-                tx_is_create.expr(),
-                eth_types::evm_types::GasCost::CREATION_TX.expr(),
-                eth_types::evm_types::GasCost::TX.expr(),
-            ) + tx_call_data_gas_cost.expr(),
-        );
+        cb.condition(not::expr(is_precompile.expr()), |cb| {
+            cb.require_equal(
+                "calculate intrinsic gas cost",
+                intrinsic_gas_cost.expr(),
+                select::expr(
+                    tx_is_create.expr(),
+                    eth_types::evm_types::GasCost::CREATION_TX.expr(),
+                    eth_types::evm_types::GasCost::TX.expr(),
+                ) + tx_call_data_gas_cost.expr(),
+            )
+        });
         // Check gas_left is sufficient
         let gas_left = tx_gas.expr() - intrinsic_gas_cost.expr();
         let sufficient_gas_left = RangeCheckGadget::construct(cb, gas_left.clone());
@@ -200,12 +210,6 @@ impl<F: Field> ExecutionGadget<F> for BeginTxGadget<F> {
         // code_hash = 0).
         let no_callee_code = is_empty_code_hash.expr() + callee_not_exists.expr();
 
-        // a valid precompile address is: 1 <= addr <= 9 (addr != 0 && addr < 0xA)
-        let is_precompile_lt = LtGadget::construct(cb, tx_callee_address.expr(), 0xA.expr());
-        let is_precompile = and::expr([
-            not::expr(tx_callee_address_is_zero.expr()),
-            is_precompile_lt.expr(),
-        ]);
         cb.condition(
             and::expr([
                 not::expr(tx_is_create.expr()),
