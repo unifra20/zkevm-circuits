@@ -158,7 +158,7 @@ impl<F: Field> ConstraintBuilder<F> {
                 q.is_read() * (q.rw_table.value.clone() - q.initial_value()),
             );
             // FIXME
-            // precompile should be warm 
+            // precompile should be warm
             // https://github.com/scroll-tech/zkevm-circuits/issues/343
             // If we decide to implement optional access list of tx later,
             // we need to revist this constraint.

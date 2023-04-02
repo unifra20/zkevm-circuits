@@ -579,7 +579,7 @@ impl<F: Field> BytecodeCircuitConfig<F> {
                     length,
                     F::from(push_data_size as u64),
                 )?;
-                /* 
+                /*
                 trace!(
                     "bytecode.set_row({}): last:{} h:{:?} t:{:?} i:{:?} c:{:?} v:{:?} pdl:{} rlc:{:?} l:{:?} pds:{:?}",
                     offset,
