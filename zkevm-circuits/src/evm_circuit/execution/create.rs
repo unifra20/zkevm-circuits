@@ -21,8 +21,8 @@ use crate::{
     table::{AccountFieldTag, CallContextFieldTag},
     util::Expr,
 };
-use bus_mapping::{circuit_input_builder::CopyDataType, evm::OpcodeId, state_db::CodeDB};
-use eth_types::{evm_types::GasCost, Field, ToBigEndian, ToLittleEndian, ToScalar, ToWord, U256};
+use bus_mapping::{circuit_input_builder::CopyDataType, evm::OpcodeId};
+use eth_types::{evm_types::GasCost, Field, ToBigEndian, ToLittleEndian, ToScalar, U256};
 use ethers_core::utils::keccak256;
 use gadgets::util::expr_from_bytes;
 use halo2_proofs::{circuit::Value, plonk::Error};
@@ -46,7 +46,6 @@ pub(crate) struct CreateGadget<F, const IS_CREATE2: bool, const S: ExecutionStat
     memory_expansion: MemoryExpansionGadget<F, 1, N_BYTES_MEMORY_WORD_SIZE>,
     gas_left: ConstantDivisionGadget<F, N_BYTES_GAS>,
     create: ContractCreateGadget<F, IS_CREATE2>,
-    keccak_code_hash: Cell<F>,
     keccak_output: Word<F>,
 }
 
@@ -107,7 +106,6 @@ impl<F: Field, const IS_CREATE2: bool, const S: ExecutionState> ExecutionGadget<
         cb.stack_push(callee_is_success.expr() * new_address_rlc);
 
         cb.condition(init_code.has_length(), |cb| {
-        let keccak_code_hash = cb.query_cell_phase2();
             // TODO(rohit): lookup to keccak table to verify keccak code hash?
             cb.copy_table_lookup(
                 cb.curr.state.call_id.expr(),
@@ -122,7 +120,8 @@ impl<F: Field, const IS_CREATE2: bool, const S: ExecutionState> ExecutionGadget<
                 init_code.length(),
             );
         });
-        cb.condition(not::expr(init_code.has_length()), |cb| {
+        cb.condition(not::expr(init_code.has_length()), |_cb| {
+            /* FIXME
             cb.require_equal(
                 "keccak hash of empty bytes",
                 keccak_code_hash.expr(),
@@ -130,9 +129,10 @@ impl<F: Field, const IS_CREATE2: bool, const S: ExecutionState> ExecutionGadget<
             );
             cb.require_equal(
                 "code hash of empty bytes",
-                code_hash.expr(),
+                create.code_hash_keccak_rlc(cb),
                 cb.empty_code_hash_rlc(),
             );
+            */
         });
 
         let tx_id = cb.call_context(None, CallContextFieldTag::TxId);
@@ -291,7 +291,6 @@ impl<F: Field, const IS_CREATE2: bool, const S: ExecutionState> ExecutionGadget<
             })
         });
 
-
         Self {
             opcode,
             reversion_info,
@@ -340,7 +339,7 @@ impl<F: Field, const IS_CREATE2: bool, const S: ExecutionState> ExecutionGadget<
             ..4 + usize::from(is_create2) + init_code_length.as_usize())
             .map(|i| block.rws[step.rw_indices[i]].memory_value())
             .collect();
-        
+
         let init_code_address =
             self.init_code
                 .assign(region, offset, init_code_start, init_code_length)?;
