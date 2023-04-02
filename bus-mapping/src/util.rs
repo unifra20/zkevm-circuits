@@ -1,6 +1,5 @@
 //! ..
-use eth_types::{Hash, H256, U256};
-use ethers_core::utils::keccak256;
+use eth_types::{Hash, U256};
 use halo2_proofs::halo2curves::{bn256::Fr, group::ff::PrimeField};
 use once_cell::sync::Lazy;
 
@@ -72,14 +71,14 @@ pub(crate) fn hash_code_poseidon(code: &[u8]) -> Hash {
 #[test]
 fn code_hashing() {
     assert_eq!(
-        format!("{:?}", hash_code(&simple_byte)),
-        "0x1bd41d9cc3187305de467d841b6b999d1222260b7057cb6f63d2ae92c43a7322"
+        format!("{:?}", hash_code(&[])),
+        "0x2098f5fb9e239eab3ceac3f27b81e481dc3124d55ffed523a839ee8446b64864"
     );
 
-    let byte32: [u8; 32] = [1; 32];
+    let simple_byte: [u8; 1] = [0];
     assert_eq!(
-        format!("{:?}", hash_code(&byte32)),
-        "0x0b46d156183dffdbed8e6c6b0af139b95c058e735878ca7f4dca334e0ea8bd20"
+        format!("{:?}", hash_code(&simple_byte)),
+        "0x29f94b67ee4e78b2bb08da025f9943c1201a7af025a27600c2dd0a2e71c7cf8b"
     );
 
     let simple_byte: [u8; 2] = [0, 1];

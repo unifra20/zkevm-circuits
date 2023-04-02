@@ -762,7 +762,7 @@ pub fn build_state_code_db(
                 nonce: proof.nonce,
                 balance: proof.balance,
                 storage,
-                code_hash: proof.poseidon_code_hash,
+                code_hash: proof.code_hash,
                 keccak_code_hash: proof.keccak_code_hash,
                 code_size: proof.code_size,
             },
