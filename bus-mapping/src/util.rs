@@ -18,8 +18,19 @@ pub static CHECK_MEM_STRICT: Lazy<bool> = Lazy::new(|| read_env_var("CHECK_MEM_S
 /// Default number of bytes to pack into a field element.
 pub const POSEIDON_HASH_BYTES_IN_FIELD: usize = 31;
 
-/// Default code hash (use poseidon hash now)
+/// Default code hash
 pub(crate) fn hash_code(code: &[u8]) -> Hash {
+    #[cfg(feature = "scroll")]
+    return hash_code_poseidon(code);
+    #[cfg(not(feature = "scroll"))]
+    return hash_code_keccak(code);
+}
+
+pub(crate) fn hash_code_keccak(code: &[u8]) -> Hash {
+    eth_types::H256(ethers_core::utils::keccak256(code))
+}
+
+pub(crate) fn hash_code_poseidon(code: &[u8]) -> Hash {
     use poseidon_circuit::hash::{Hashable, MessageHashable, HASHABLE_DOMAIN_SPEC};
 
     let bytes_in_field = POSEIDON_HASH_BYTES_IN_FIELD;
@@ -57,17 +68,18 @@ pub(crate) fn hash_code(code: &[u8]) -> Hash {
     Hash::from_slice(&buf)
 }
 
+#[cfg(feature = "scroll")]
 #[test]
 fn code_hashing() {
     assert_eq!(
-        format!("{:?}", hash_code(&[])),
-        "0x2098f5fb9e239eab3ceac3f27b81e481dc3124d55ffed523a839ee8446b64864"
+        format!("{:?}", hash_code(&simple_byte)),
+        "0x1bd41d9cc3187305de467d841b6b999d1222260b7057cb6f63d2ae92c43a7322"
     );
 
-    let simple_byte: [u8; 1] = [0];
+    let byte32: [u8; 32] = [1; 32];
     assert_eq!(
-        format!("{:?}", hash_code(&simple_byte)),
-        "0x29f94b67ee4e78b2bb08da025f9943c1201a7af025a27600c2dd0a2e71c7cf8b"
+        format!("{:?}", hash_code(&byte32)),
+        "0x0b46d156183dffdbed8e6c6b0af139b95c058e735878ca7f4dca334e0ea8bd20"
     );
 
     let simple_byte: [u8; 2] = [0, 1];
@@ -92,6 +104,6 @@ fn code_hashing() {
 }
 
 /// the zero keccak code hash
-pub static KECCAK_CODE_HASH_ZERO: Lazy<Hash> = Lazy::new(|| H256(keccak256([])));
+pub static KECCAK_CODE_HASH_ZERO: Lazy<Hash> = Lazy::new(|| hash_code_keccak(&[]));
 /// the zero poseidon code hash
-pub static POSEIDON_CODE_HASH_ZERO: Lazy<Hash> = Lazy::new(|| hash_code(&[]));
+pub static POSEIDON_CODE_HASH_ZERO: Lazy<Hash> = Lazy::new(|| hash_code_poseidon(&[]));
