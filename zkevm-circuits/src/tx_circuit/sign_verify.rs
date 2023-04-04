@@ -58,13 +58,18 @@ const MAX_NUM_SIG: usize = 32;
 // We set CELLS_PER_SIG = 535000 to allows for a few buffer
 const CELLS_PER_SIG: usize = 535000;
 // Total number of rows allocated for ecdsa chip
-const TOTAL_NUM_ROWS: usize = 20;
+const TOTAL_NUM_ROWS: usize = 19;
 
 fn calc_required_advices(num_verif: usize) -> usize {
     let mut num_adv = 1;
     let total_cells = num_verif * CELLS_PER_SIG;
     while num_adv < 100 {
         if num_adv << TOTAL_NUM_ROWS > total_cells {
+            log::info!(
+                "ecdsa chip uses {} advice columns for {} signatures",
+                num_adv,
+                num_verif
+            );
             return num_adv;
         }
         num_adv += 1;
@@ -396,7 +401,7 @@ impl<F: Field> SignVerifyChip<F> {
             4,
             4,
         );
-        log::info!("ECDSA res {:?}", ecdsa_is_valid);
+        log::trace!("ECDSA res {:?}", ecdsa_is_valid);
 
         Ok(AssignedECDSA {
             pk: pk_assigned,
@@ -433,7 +438,7 @@ impl<F: Field> SignVerifyChip<F> {
         copy(ctx, "pk_hash_rlc", rlc_column, pk_hash_rlc)?;
         ctx.next();
 
-        log::info!("finished keccak lookup");
+        log::trace!("finished keccak lookup");
         Ok(())
     }
 
@@ -568,7 +573,7 @@ impl<F: Field> SignVerifyChip<F> {
         )?;
 
         let assigned_pk_le_selected = [pk_y_le, pk_x_le].concat();
-        log::info!("finished data decomposition");
+        log::trace!("finished data decomposition");
         Ok(SignDataDecomposed {
             pk_hash_cells,
             msg_hash_cells: assigned_msg_hash_le,
@@ -647,7 +652,7 @@ impl<F: Field> SignVerifyChip<F> {
         );
 
         log::trace!("pk hash rlc halo2ecc: {:?}", pk_hash_rlc.value());
-        log::info!("finished sign verify");
+        log::trace!("finished sign verify");
         Ok((
             [
                 sign_data_decomposed.is_address_zero.clone(),
@@ -1071,7 +1076,7 @@ mod sign_verify_tests {
         let mut rng = XorShiftRng::seed_from_u64(1);
         let max_sigs = [1, 2, 4, 8, 16, 32];
         for max_sig in max_sigs.iter() {
-            println!("testing for {} signatures", max_sig);
+            log::info!("testing for {} signatures", max_sig);
             let mut signatures = Vec::new();
             for _ in 0..*max_sig {
                 let (sk, pk) = gen_key_pair(&mut rng);
@@ -1094,7 +1099,7 @@ mod sign_verify_tests {
             let k = TOTAL_NUM_ROWS as u32;
             run::<Fr>(k, *max_sig, signatures);
 
-            println!();
+            log::info!("end of testing for {} signatures", max_sig);
         }
     }
 }
