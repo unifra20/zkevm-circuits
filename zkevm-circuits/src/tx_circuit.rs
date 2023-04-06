@@ -1800,7 +1800,7 @@ mod tx_circuit_tests {
         max_calldata: usize,
     ) -> Result<(), Vec<VerifyFailure>> {
         let k = max(
-            18,
+            19,
             log2_ceil(TxCircuit::<F>::min_num_rows(max_txs, max_calldata)),
         );
         // SignVerifyChip -> ECDSAChip -> MainGate instance column
