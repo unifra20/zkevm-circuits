@@ -781,22 +781,22 @@ impl<F: Field> SignVerifyChip<F> {
                 ctx.print_stats(&["Range"]);
 
 
-                for sig_verif in assigned_sig_verifs.iter() {
-                    // // let cell_one = 
-                    config.ecdsa_config.range.gate.assert_equal(
-                        &mut ctx,
-                        QuantumCell::Existing(&sig_verif.sig_is_valid.clone().into()),
-                        QuantumCell::Constant(F::one()),
-                    );
+                // for sig_verif in assigned_sig_verifs.iter() {
+                //     // // let cell_one = 
+                //     config.ecdsa_config.range.gate.assert_equal(
+                //         &mut ctx,
+                //         QuantumCell::Existing(&sig_verif.sig_is_valid.clone().into()),
+                //         QuantumCell::Constant(F::one()),
+                //     );
 
-                    // ctx.region.constrain_equal(sig_verif.sig_is_valid.
-                    // clone().cell,cell_one)?;
-                    // flex_gate_chip.assert_is_const(
-                    //     &mut ctx,
-                    //     &sig_verif.sig_is_valid.clone().into(),
-                    //     F::one(),
-                    // );
-                }
+                //     // ctx.region.constrain_equal(sig_verif.sig_is_valid.
+                //     // clone().cell,cell_one)?;
+                //     // flex_gate_chip.assert_is_const(
+                //     //     &mut ctx,
+                //     //     &sig_verif.sig_is_valid.clone().into(git),
+                //     //     F::one(),
+                //     // );
+                // }
 
                 Ok((deferred_keccak_check, assigned_sig_verifs))
             },
@@ -960,12 +960,11 @@ impl<F: Field> SignVerifyChip<F> {
 
 
                 for sig_verif in sig_verifs {
-                    // // let cell_one = 
-                    // config.ecdsa_config.range.gate.assert_equal(
-                    //     &mut ctx,
-                    //     QuantumCell::Existing(&sig_verif.sig_is_valid.clone().into()),
-                    //     QuantumCell::Constant(F::one()),
-                    // );
+                    config.ecdsa_config.range.gate.assert_equal(
+                        &mut ctx,
+                        QuantumCell::Existing(&sig_verif.sig_is_valid.clone().into()),
+                        QuantumCell::Constant(F::one()),
+                    );
 
                     // ctx.region.constrain_equal(sig_verif.sig_is_valid.
                     // clone().cell,cell_one)?;
