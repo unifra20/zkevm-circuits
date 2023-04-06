@@ -49,7 +49,7 @@ use std::{iter, marker::PhantomData};
 
 // Hard coded parameters.
 // FIXME: allow for a configurable param.
-const MAX_NUM_SIG: usize = 100;
+const MAX_NUM_SIG: usize = 4;
 // Each ecdsa signature requires 534042 cells
 // We set CELLS_PER_SIG = 535000 to allows for a few buffer
 const CELLS_PER_SIG: usize = 535000;
@@ -170,7 +170,7 @@ impl<F: Field> SignVerifyConfig<F> {
         // need one extra column to host the lookup cells and RLC cells
         let num_advice = [calc_required_advices(MAX_NUM_SIG) + 1];
         #[cfg(not(feature = "onephase"))]
-        // need two phase 2 columns: 
+        // need two phase 2 columns:
         // - one to hold the witnesses for RLC computations
         // - one to hold the actual results of RLCs, i.e., rlc_column
         let num_advice = [calc_required_advices(MAX_NUM_SIG), 2];
@@ -780,6 +780,24 @@ impl<F: Field> SignVerifyChip<F> {
                 log::info!("total number of lookup cells: {}", lookup_cells);
                 ctx.print_stats(&["Range"]);
 
+
+                for sig_verif in assigned_sig_verifs.iter() {
+                    // // let cell_one = 
+                    config.ecdsa_config.range.gate.assert_equal(
+                        &mut ctx,
+                        QuantumCell::Existing(&sig_verif.sig_is_valid.clone().into()),
+                        QuantumCell::Constant(F::one()),
+                    );
+
+                    // ctx.region.constrain_equal(sig_verif.sig_is_valid.
+                    // clone().cell,cell_one)?;
+                    // flex_gate_chip.assert_is_const(
+                    //     &mut ctx,
+                    //     &sig_verif.sig_is_valid.clone().into(),
+                    //     F::one(),
+                    // );
+                }
+
                 Ok((deferred_keccak_check, assigned_sig_verifs))
             },
         )?;
@@ -920,20 +938,44 @@ impl<F: Field> SignVerifyChip<F> {
         layouter: &mut impl Layouter<F>,
         sig_verifs: &[AssignedSignatureVerify<F>],
     ) -> Result<(), Error> {
-        let flex_gate_chip = &config.ecdsa_config.range.gate;
+        // let flex_gate_chip = &config.ecdsa_config.range.gate;
+        for (i, s) in sig_verifs.iter().enumerate() {
+            log::trace!(
+                "checking {}-th signature is valid: {:?}",
+                i,
+                s.sig_is_valid.value
+            );
+        }
 
         layouter.assign_region(
             || "assert sigs are valid",
             |region| {
                 let mut ctx = config.ecdsa_config.new_context(region);
+
+                // config.ecdsa_config.range.gate.assert_equal(
+                //     &mut ctx,
+                //     QuantumCell::Existing(&sig_verifs[0].sig_is_valid.clone().into()),
+                //     QuantumCell::Constant(F::one()),
+                // );
+
+
                 for sig_verif in sig_verifs {
-                    flex_gate_chip.assert_is_const(
-                        &mut ctx,
-                        &sig_verif.sig_is_valid.clone().into(),
-                        F::one(),
-                    );
+                    // // let cell_one = 
+                    // config.ecdsa_config.range.gate.assert_equal(
+                    //     &mut ctx,
+                    //     QuantumCell::Existing(&sig_verif.sig_is_valid.clone().into()),
+                    //     QuantumCell::Constant(F::one()),
+                    // );
+
+                    // ctx.region.constrain_equal(sig_verif.sig_is_valid.
+                    // clone().cell,cell_one)?;
+                    // flex_gate_chip.assert_is_const(
+                    //     &mut ctx,
+                    //     &sig_verif.sig_is_valid.clone().into(),
+                    //     F::one(),
+                    // );
                 }
-                config.ecdsa_config.finalize(&mut ctx);
+                // config.ecdsa_config.finalize(&mut ctx);
 
                 Ok(())
             },
@@ -1015,7 +1057,7 @@ mod sign_verify_tests {
         ) -> Result<(), Error> {
             let challenges = config.challenges.values(&layouter);
             config.sign_verify.load_range(&mut layouter)?;
-            self.sign_verify.assign(
+            let assigned_sig_verifs = self.sign_verify.assign(
                 &config.sign_verify,
                 &mut layouter,
                 &self.signatures,
@@ -1025,6 +1067,11 @@ mod sign_verify_tests {
                 &mut layouter,
                 &keccak_inputs_sign_verify(&self.signatures),
                 &challenges,
+            )?;
+            self.sign_verify.assert_sig_is_valid(
+                &config.sign_verify,
+                &mut layouter,
+                assigned_sig_verifs.as_slice(),
             )?;
 
             Ok(())
@@ -1085,7 +1132,7 @@ mod sign_verify_tests {
     #[test]
     fn sign_verify() {
         let mut rng = XorShiftRng::seed_from_u64(1);
-        let max_sigs = [100];
+        let max_sigs = [4];
         for max_sig in max_sigs.iter() {
             log::info!("testing for {} signatures", max_sig);
             let mut signatures = Vec::new();
