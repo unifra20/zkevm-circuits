@@ -49,7 +49,7 @@ use std::{iter, marker::PhantomData};
 
 // Hard coded parameters.
 // FIXME: allow for a configurable param.
-const MAX_NUM_SIG: usize = 4;
+const MAX_NUM_SIG: usize = 100;
 // Each ecdsa signature requires 534042 cells
 // We set CELLS_PER_SIG = 535000 to allows for a few buffer
 const CELLS_PER_SIG: usize = 535000;
@@ -778,26 +778,15 @@ impl<F: Field> SignVerifyChip<F> {
                 // This is not optional.
                 let lookup_cells = ecdsa_chip.finalize(&mut ctx);
                 log::info!("total number of lookup cells: {}", lookup_cells);
+
+                for sig_verif in assigned_sig_verifs.iter() {
+                    config.ecdsa_config.range.gate.assert_equal(
+                        &mut ctx,
+                        QuantumCell::Existing(&sig_verif.sig_is_valid.clone().into()),
+                        QuantumCell::Constant(F::one()),
+                    );
+                }
                 ctx.print_stats(&["Range"]);
-
-
-                // for sig_verif in assigned_sig_verifs.iter() {
-                //     // // let cell_one = 
-                //     config.ecdsa_config.range.gate.assert_equal(
-                //         &mut ctx,
-                //         QuantumCell::Existing(&sig_verif.sig_is_valid.clone().into()),
-                //         QuantumCell::Constant(F::one()),
-                //     );
-
-                //     // ctx.region.constrain_equal(sig_verif.sig_is_valid.
-                //     // clone().cell,cell_one)?;
-                //     // flex_gate_chip.assert_is_const(
-                //     //     &mut ctx,
-                //     //     &sig_verif.sig_is_valid.clone().into(git),
-                //     //     F::one(),
-                //     // );
-                // }
-
                 Ok((deferred_keccak_check, assigned_sig_verifs))
             },
         )?;
@@ -934,7 +923,7 @@ impl<F: Field> SignVerifyChip<F> {
 
     pub(crate) fn assert_sig_is_valid(
         &self,
-        config: &SignVerifyConfig<F>,
+        _config: &SignVerifyConfig<F>,
         layouter: &mut impl Layouter<F>,
         sig_verifs: &[AssignedSignatureVerify<F>],
     ) -> Result<(), Error> {
@@ -948,33 +937,10 @@ impl<F: Field> SignVerifyChip<F> {
         }
 
         layouter.assign_region(
-            || "assert sigs are valid",
-            |region| {
-                let mut ctx = config.ecdsa_config.new_context(region);
-
-                // config.ecdsa_config.range.gate.assert_equal(
-                //     &mut ctx,
-                //     QuantumCell::Existing(&sig_verifs[0].sig_is_valid.clone().into()),
-                //     QuantumCell::Constant(F::one()),
-                // );
-
-
-                for sig_verif in sig_verifs {
-                    config.ecdsa_config.range.gate.assert_equal(
-                        &mut ctx,
-                        QuantumCell::Existing(&sig_verif.sig_is_valid.clone().into()),
-                        QuantumCell::Constant(F::one()),
-                    );
-
-                    // ctx.region.constrain_equal(sig_verif.sig_is_valid.
-                    // clone().cell,cell_one)?;
-                    // flex_gate_chip.assert_is_const(
-                    //     &mut ctx,
-                    //     &sig_verif.sig_is_valid.clone().into(),
-                    //     F::one(),
-                    // );
-                }
-                // config.ecdsa_config.finalize(&mut ctx);
+            || "ecdsa chip verification",
+            |_region| {
+                // not doing anything as the validity is already been checked 
+                // within assign() function
 
                 Ok(())
             },
