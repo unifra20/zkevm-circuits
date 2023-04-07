@@ -49,7 +49,7 @@ use std::{iter, marker::PhantomData};
 
 // Hard coded parameters.
 // FIXME: allow for a configurable param.
-const MAX_NUM_SIG: usize = 100;
+const MAX_NUM_SIG: usize = 32;
 // Each ecdsa signature requires 534042 cells
 // We set CELLS_PER_SIG = 535000 to allows for a few buffer
 const CELLS_PER_SIG: usize = 535000;
