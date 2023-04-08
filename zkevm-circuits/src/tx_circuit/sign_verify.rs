@@ -40,11 +40,9 @@ use halo2_proofs::{
     plonk::{ConstraintSystem, Error, Selector},
     poly::Rotation,
 };
-
 use itertools::Itertools;
 use keccak256::plain::Keccak;
 use log::error;
-use maingate::{MainGate, MainGateConfig, RegionCtx};
 use std::{iter, marker::PhantomData};
 
 // Hard coded parameters.
@@ -142,10 +140,9 @@ impl<F: Field> Default for SignVerifyChip<F> {
 pub(crate) struct SignVerifyConfig<F: Field> {
     // ECDSA
     ecdsa_config: FpChip<F>,
-    main_gate_config: MainGateConfig,
+    // main_gate_config: MainGateConfig,
     // Keccak
     q_keccak: Selector,
-    // rlc_column: Column<Advice>,
     keccak_table: KeccakTable,
 }
 
@@ -195,7 +192,8 @@ impl<F: Field> SignVerifyConfig<F> {
         );
 
         // halo2wrong's main gate config
-        let main_gate_config = MainGate::<F>::configure(meta);
+        let instance = meta.instance_column();
+        meta.enable_equality(instance);
 
         #[cfg(not(feature = "onephase"))]
         let rlc_column = ecdsa_config.range.gate.basic_gates[1].last().unwrap().value;
@@ -206,24 +204,26 @@ impl<F: Field> SignVerifyConfig<F> {
         // by keccak table lookup, where pub_key_bytes is built from the pub_key
         // in the ecdsa_chip.
         let q_keccak = meta.complex_selector();
+
         meta.lookup_any("keccak lookup table", |meta| {
             // When address is 0, we disable the signature verification by using a dummy pk,
-            // msg_hash and signature which is not constrainted to match msg_hash_rlc nor
+            // msg_hash and signature which is not constrained to match msg_hash_rlc nor
             // the address.
             // Layout:
-            // | q_keccak |        a        |     rlc     |
-            // | -------- | --------------- | ----------- |
-            // |     1    | is_address_zero |    pk_rlc   |
-            // |          |                 | pk_hash_rlc |
+            // | q_keccak |        rlc      |
+            // | -------- | --------------- |
+            // |     1    | is_address_zero |
+            // |          |    pk_rlc       |
+            // |          |    pk_hash_rlc  |
             let q_keccak = meta.query_selector(q_keccak);
-            let is_address_zero = meta.query_advice(main_gate_config.advices()[0], Rotation::cur());
+            let is_address_zero = meta.query_advice(rlc_column, Rotation::cur());
             let is_enable = q_keccak * not::expr(is_address_zero);
 
             let input = [
                 is_enable.clone(),
-                is_enable.clone() * meta.query_advice(rlc_column, Rotation::cur()),
+                is_enable.clone() * meta.query_advice(rlc_column, Rotation(1)),
                 is_enable.clone() * 64usize.expr(),
-                is_enable * meta.query_advice(rlc_column, Rotation::next()),
+                is_enable * meta.query_advice(rlc_column, Rotation(2)),
             ];
             let table = [
                 keccak_table.is_enabled,
@@ -238,7 +238,6 @@ impl<F: Field> SignVerifyConfig<F> {
 
         Self {
             ecdsa_config,
-            main_gate_config,
             keccak_table,
             q_keccak,
         }
@@ -379,12 +378,10 @@ impl<F: Field> SignVerifyChip<F> {
 
         let integer_s =
             fq_chip.load_private(ctx, FqChip::<F>::fe_to_witness(&Value::known(*sig_s)));
-        // log::trace!("s: {:?}", integer_s);
         let msg_hash =
             fq_chip.load_private(ctx, FqChip::<F>::fe_to_witness(&Value::known(*msg_hash)));
-        // log::trace!("msg: {:?}", msg_hash);
         let pk_assigned = ecc_chip.load_private(ctx, (Value::known(pk.x), Value::known(pk.y)));
-        // log::trace!("pk: {:?}", pk_assigned);
+
         // returns the verification result of ecdsa signature
         //
         // WARNING: this circuit does not enforce the returned value to be true
@@ -411,21 +408,21 @@ impl<F: Field> SignVerifyChip<F> {
     fn enable_keccak_lookup(
         &self,
         config: &SignVerifyConfig<F>,
-        ctx: &mut RegionCtx<F>,
+        ctx: &mut Context<F>,
+        offset: &mut usize,
         is_address_zero: &AssignedValue<F>,
         pk_rlc: &AssignedValue<F>,
         pk_hash_rlc: &AssignedValue<F>,
     ) -> Result<(), Error> {
         log::trace!("keccak lookup");
 
-        let copy = |ctx: &mut RegionCtx<F>, name, column, assigned: &AssignedValue<F>| {
-            let copied = ctx.assign_advice(|| name, column, assigned.value().copied())?;
-            ctx.constrain_equal(assigned.cell(), copied.cell())?;
-            Ok::<_, Error>(())
-        };
-
-        let a = config.main_gate_config.advices()[0];
-        ctx.enable(config.q_keccak)?;
+        // Layout:
+        // | q_keccak |        rlc      |
+        // | -------- | --------------- |
+        // |     1    | is_address_zero |
+        // |          |    pk_rlc       |
+        // |          |    pk_hash_rlc  |
+        config.q_keccak.enable(&mut ctx.region, *offset)?;
 
         // this is a phase 2 column if "onephase" is not enabled
         #[cfg(not(feature = "onephase"))]
@@ -439,12 +436,33 @@ impl<F: Field> SignVerifyChip<F> {
             .unwrap()
             .value;
 
-        copy(ctx, "is_address_zero", a, is_address_zero)?;
-        copy(ctx, "pk_rlc", rlc_column, pk_rlc)?;
-        ctx.next();
-        copy(ctx, "pk_hash_rlc", rlc_column, pk_hash_rlc)?;
-        ctx.next();
+        // is_address_zero
+        let tmp_cell = ctx.region.assign_advice(
+            || "is_address_zero",
+            rlc_column,
+            *offset,
+            || is_address_zero.value,
+        )?;
+        ctx.region
+            .constrain_equal(is_address_zero.cell, tmp_cell.cell())?;
 
+        // pk_rlc
+        let tmp_cell =
+            ctx.region
+                .assign_advice(|| "pk_rlc", rlc_column, *offset + 1, || pk_rlc.value)?;
+        ctx.region.constrain_equal(pk_rlc.cell, tmp_cell.cell())?;
+
+        // pk_hash_rlc
+        let tmp_cell = ctx.region.assign_advice(
+            || "pk_hash_rlc",
+            rlc_column,
+            *offset + 2,
+            || pk_hash_rlc.value,
+        )?;
+        ctx.region
+            .constrain_equal(pk_hash_rlc.cell, tmp_cell.cell())?;
+
+        *offset += 3;
         log::trace!("finished keccak lookup");
         Ok(())
     }
@@ -794,7 +812,8 @@ impl<F: Field> SignVerifyChip<F> {
         layouter.assign_region(
             || "keccak lookup",
             |region| {
-                let mut ctx = RegionCtx::new(region, 0);
+                let mut ctx = ecdsa_chip.new_context(region);
+                let mut offset = 0;
                 for e in deferred_keccak_check.iter() {
                     let [is_address_zero, pk_rlc, pk_hash_rlc] = e;
                     let is_address_zero = AssignedValue::from(is_address_zero);
@@ -803,6 +822,7 @@ impl<F: Field> SignVerifyChip<F> {
                     self.enable_keccak_lookup(
                         config,
                         &mut ctx,
+                        &mut offset,
                         &is_address_zero,
                         &pk_rlc,
                         &pk_hash_rlc,
@@ -902,21 +922,21 @@ impl<F: Field> SignVerifyChip<F> {
             QuantumCell::Existing(&limb3_value),
             QuantumCell::Existing(&limb3_recover),
         );
-        // log::trace!(
-        //     "limb 1 \ninput {:?}\nreconstructed {:?}",
-        //     limb1_value.value(),
-        //     limb1_recover.value()
-        // );
-        // log::trace!(
-        //     "limb 2 \ninput {:?}\nreconstructed {:?}",
-        //     limb2_value.value(),
-        //     limb2_recover.value()
-        // );
-        // log::trace!(
-        //     "limb 3 \ninput {:?}\nreconstructed {:?}",
-        //     limb3_value.value(),
-        //     limb3_recover.value()
-        // );
+        log::trace!(
+            "limb 1 \ninput {:?}\nreconstructed {:?}",
+            limb1_value.value(),
+            limb1_recover.value()
+        );
+        log::trace!(
+            "limb 2 \ninput {:?}\nreconstructed {:?}",
+            limb2_value.value(),
+            limb2_recover.value()
+        );
+        log::trace!(
+            "limb 3 \ninput {:?}\nreconstructed {:?}",
+            limb3_value.value(),
+            limb3_recover.value()
+        );
 
         Ok(())
     }
@@ -939,7 +959,7 @@ impl<F: Field> SignVerifyChip<F> {
         layouter.assign_region(
             || "ecdsa chip verification",
             |_region| {
-                // not doing anything as the validity is already been checked 
+                // not doing anything as the validity is already been checked
                 // within assign() function
 
                 Ok(())
