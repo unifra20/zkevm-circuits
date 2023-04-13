@@ -4,6 +4,8 @@
 // - *_be: Big-Endian bytes
 // - *_le: Little-Endian bytes
 
+mod config;
+mod param;
 pub mod sign_verify;
 
 #[cfg(any(feature = "test", test, feature = "test-circuits"))]
@@ -44,7 +46,7 @@ use halo2_proofs::{
 };
 use log::error;
 use num::Zero;
-use sign_verify::{AssignedSignatureVerify, SignVerifyChip, SignVerifyConfig};
+use sign_verify::AssignedSignatureVerify;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     iter,
@@ -66,6 +68,8 @@ use halo2_proofs::plonk::{Fixed, TableColumn};
 use crate::table::BlockContextFieldTag::CumNumTxs;
 use gadgets::comparator::{ComparatorChip, ComparatorConfig, ComparatorInstruction};
 use halo2_proofs::circuit::Chip;
+
+use self::{config::SignVerifyConfig, sign_verify::SignVerifyCircuit};
 /// Number of rows of one tx occupies in the fixed part of tx table
 pub const TX_LEN: usize = 19;
 /// Offset of TxHash tag in the tx table
@@ -1239,7 +1243,7 @@ pub struct TxCircuit<F: Field> {
     /// Max number of supported calldata bytes
     pub max_calldata: usize,
     /// SignVerify chip
-    pub sign_verify: SignVerifyChip<F>,
+    pub sign_verify: SignVerifyCircuit<F>,
     /// List of Transactions
     pub txs: Vec<Transaction>,
     /// Chain ID
@@ -1262,7 +1266,7 @@ impl<F: Field> TxCircuit<F> {
         TxCircuit::<F> {
             max_txs,
             max_calldata,
-            sign_verify: SignVerifyChip::new(max_txs),
+            sign_verify: SignVerifyCircuit::new(max_txs),
             txs,
             size: Self::min_num_rows(max_txs, max_calldata),
             chain_id,
@@ -1320,7 +1324,7 @@ impl<F: Field> TxCircuit<F> {
     pub fn min_num_rows(txs_len: usize, call_data_len: usize) -> usize {
         let tx_table_len = txs_len * TX_LEN + call_data_len;
         #[cfg(feature = "enable-sign-verify")]
-        let min_rows = std::cmp::max(tx_table_len, SignVerifyChip::<F>::min_num_rows(txs_len));
+        let min_rows = std::cmp::max(tx_table_len, SignVerifyCircuit::<F>::min_num_rows(txs_len));
         #[cfg(not(feature = "enable-sign-verify"))]
         let min_rows = tx_table_len;
         min_rows
@@ -1440,7 +1444,7 @@ impl<F: Field> TxCircuit<F> {
                     }
 
                     #[cfg(feature = "enable-sign-verify")]
-                    let tx_sign_hash = assigned_sig_verif.msg_hash_rlc.value;
+                    let tx_sign_hash = assigned_sig_verif.msg_hash_rlc;
                     #[cfg(not(feature = "enable-sign-verify"))]
                     let tx_sign_hash = {
                         challenges.evm_word().map(|rand| {
@@ -1600,9 +1604,12 @@ impl<F: Field> TxCircuit<F> {
                             CallerAddress => {
                                 #[cfg(feature = "enable-sign-verify")]
                                 {
-                                    let address: AssignedValue<_> =
-                                        assigned_sig_verif.address.clone().into();
-                                    address.copy_advice(&mut region, config.sv_address, offset - 1);
+                                    region.assign_advice(
+                                        || "sv_address",
+                                        config.sv_address,
+                                        offset - 1,
+                                        || assigned_sig_verif.address,
+                                    )?;
                                 }
                                 #[cfg(not(feature = "enable-sign-verify"))]
                                 {
@@ -1622,16 +1629,16 @@ impl<F: Field> TxCircuit<F> {
                             TxSignHash => {
                                 #[cfg(feature = "enable-sign-verify")]
                                 {
-                                    region.constrain_equal(
-                                        assigned_sig_verif.msg_hash_rlc.clone().cell,
-                                        Cell {
-                                            // FIXME
-                                            region_index: RegionIndex(1),
-                                            row_offset: offset - 1, /* offset is increased by 1
-                                                                     * inside assign_row */
-                                            column: config.tx_table.value.into(),
-                                        },
-                                    )?;
+                                    // region.constrain_equal(
+                                    //     assigned_sig_verif.msg_hash_rlc.clone().cell.unwrap(),
+                                    //     Cell {
+                                    //         // FIXME
+                                    //         region_index: RegionIndex(1),
+                                    //         row_offset: offset - 1, /* offset is increased by 1
+                                    //                                  * inside assign_row */
+                                    //         column: config.tx_table.value.into(),
+                                    //     },
+                                    // )?;
                                 }
                             }
                             SigV => {
@@ -1823,7 +1830,7 @@ impl<F: Field> SubCircuit<F> for TxCircuit<F> {
         {
             let assigned_sig_verifs =
                 self.sign_verify
-                    .assign(&config.sign_verify, layouter, &sign_datas, challenges)?;
+                    .assign(&config.sign_verify, layouter,  challenges)?;
             self.sign_verify.assert_sig_is_valid(
                 &config.sign_verify,
                 layouter,

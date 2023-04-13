@@ -42,12 +42,12 @@ pub use ethers_core::{
 };
 
 use serde::{de, Deserialize, Serialize};
-use std::{collections::HashMap, fmt, str::FromStr};
+use std::{collections::HashMap, fmt, hash::Hash as StdHash, str::FromStr};
 
 /// Trait used to reduce verbosity with the declaration of the [`FieldExt`]
 /// trait and its repr.
 pub trait Field:
-    FieldExt + Halo2Field + PrimeField<Repr = [u8; 32]> + poseidon_circuit::hash::Hashable
+    FieldExt + Halo2Field + PrimeField<Repr = [u8; 32]> + poseidon_circuit::hash::Hashable + StdHash
 {
 }
 
