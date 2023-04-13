@@ -104,17 +104,28 @@ impl PublicData {
         let dummy_tx_hash = get_dummy_tx_hash(self.chain_id.as_u64());
         let withdraw_trie_root = self.withdraw_trie_root;
 
+        let end_state_root = self
+            .block_ctxs
+            .ctxs
+            .last_key_value()
+            .map(|(_, blk)| blk.eth_block.state_root)
+            .unwrap_or(self.prev_state_root)
+            .to_fixed_bytes();
+
+        log::debug!(
+            "[PI] prev_state_root: {}",
+            hex::encode(self.prev_state_root.to_fixed_bytes())
+        );
+        log::debug!("[PI] end_state_root: {}", hex::encode(end_state_root));
+        log::debug!(
+            "[PI] withdraw_trie_root: {}",
+            hex::encode(withdraw_trie_root.to_fixed_bytes())
+        );
+
         let result = iter::empty()
             // state roots
             .chain(self.prev_state_root.to_fixed_bytes())
-            .chain(
-                self.block_ctxs
-                    .ctxs
-                    .last_key_value()
-                    .map(|(_, blk)| blk.eth_block.state_root)
-                    .unwrap_or(self.prev_state_root)
-                    .to_fixed_bytes(),
-            )
+            .chain(end_state_root)
             // withdraw trie root
             .chain(withdraw_trie_root.to_fixed_bytes())
             .chain(self.block_ctxs.ctxs.iter().flat_map(|(block_num, block)| {
@@ -124,6 +135,11 @@ impl PublicData {
                     .filter(|tx| tx.block_number == *block_num)
                     .count() as u16;
                 let parent_hash = block.eth_block.parent_hash;
+                let block_hash = block
+                    .eth_block
+                    .hash
+                    .expect("block.eth_block.hash should be some")
+                    .to_fixed_bytes();
                 log::debug!(
                     "block.history_hashes.len() = {}, parent_hash = {}",
                     block.history_hashes.len(),
@@ -132,15 +148,36 @@ impl PublicData {
                 // TODO: use reasonable method to get this data
                 let num_l1_msgs = 0_u16; // 0 for now
 
+                log::debug!("[PI] block_hash: {}", hex::encode(block_hash));
+                log::debug!(
+                    "[PI] parent_hash: {}",
+                    hex::encode(parent_hash.to_fixed_bytes())
+                );
+                log::debug!(
+                    "[PI] number: {}",
+                    hex::encode(block.number.as_u64().to_be_bytes())
+                );
+                log::debug!(
+                    "[PI] timestamp: {}",
+                    hex::encode(block.timestamp.as_u64().to_be_bytes())
+                );
+                log::debug!(
+                    "[PI] baseFee: {}",
+                    hex::encode(block.base_fee.to_be_bytes())
+                );
+                log::debug!(
+                    "[PI] gasLimit: {}",
+                    hex::encode(block.gas_limit.to_be_bytes())
+                );
+                log::debug!("[PI] num_txs: {}", hex::encode(num_txs.to_be_bytes()));
+                log::debug!(
+                    "[PI] num_l1_msgs: {}",
+                    hex::encode(num_l1_msgs.to_be_bytes())
+                );
+
                 iter::empty()
                     // Block Values
-                    .chain(
-                        block
-                            .eth_block
-                            .hash
-                            .expect("block.eth_block.hash should be some")
-                            .to_fixed_bytes(),
-                    )
+                    .chain(block_hash)
                     .chain(parent_hash.to_fixed_bytes()) // parent hash
                     .chain(block.number.as_u64().to_be_bytes())
                     .chain(block.timestamp.as_u64().to_be_bytes())
@@ -162,6 +199,18 @@ impl PublicData {
             )
             .collect::<Vec<u8>>();
 
+        for (i, tx) in self.transactions.iter().enumerate() {
+            log::debug!("[PI] rlp(tx_{}): {}", i, hex::encode(&tx.rlp_signed));
+            log::debug!(
+                "[PI] hash(rlp(tx_{})): {}",
+                i,
+                hex::encode(tx.hash.to_fixed_bytes())
+            );
+        }
+        for i in self.transactions.len()..max_txs {
+            log::debug!("[PI] padding tx_{} hash: {}", i, hex::encode(dummy_tx_hash));
+        }
+
         assert_eq!(
             result.len(),
             BLOCK_HEADER_BYTES_NUM * self.block_ctxs.ctxs.len()
@@ -173,6 +222,7 @@ impl PublicData {
 
     fn get_pi(&self, max_txs: usize) -> H256 {
         let rpi_bytes = self.raw_public_input_bytes(max_txs);
+        log::debug!("[PI] raw pi bytes: {}", hex::encode(&rpi_bytes));
         let rpi_keccak = keccak256(rpi_bytes);
         H256(rpi_keccak)
     }
@@ -1298,6 +1348,11 @@ impl<F: Field> SubCircuit<F> for PiCircuit<F> {
                 acc * F::from(BYTE_POW_BASE) + F::from(*byte as u64)
             });
 
+        log::debug!(
+            "[PI] final pi hash (high = {}, low = {})",
+            hex::encode(&keccak_rpi.to_fixed_bytes()[16..]),
+            hex::encode(&keccak_rpi.to_fixed_bytes()[..16])
+        );
         let public_inputs = vec![keccak_hi, keccak_lo];
         vec![public_inputs]
     }
