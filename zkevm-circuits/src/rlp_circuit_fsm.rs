@@ -19,7 +19,7 @@ use crate::{
     evm_circuit::{param::N_BYTES_U64, util::constraint_builder::BaseConstraintBuilder},
     table::{LookupTable, RlpFsmDataTable, RlpFsmRlpTable, RlpFsmRomTable},
     util::{Challenges, SubCircuit, SubCircuitConfig},
-    witness::{Block, GenericSignedTransaction, RlpFsmWitnessGen, State, Tag},
+    witness::{Block, GenericSignedTransaction, RlpFsmWitnessGen, RlpTag, State, Tag},
 };
 
 struct Range256Table(Column<Fixed>);
@@ -552,7 +552,6 @@ impl<F: Field> RlpCircuitConfig<F> {
                         meta.query_advice(rlp_table.is_output, Rotation::cur()),
                         true.expr(),
                     );
-                    // TODO(rohit): if depth == 0
 
                     // state transitions.
                     cb.require_equal(
@@ -565,15 +564,79 @@ impl<F: Field> RlpCircuitConfig<F> {
                         meta.query_advice(byte_idx, Rotation::next()),
                         meta.query_advice(byte_idx, Rotation::cur()) + 1.expr(),
                     );
-                    // TODO(rohit): if tag == BeginVector
                 });
+                cb.condition(
+                    and::expr([case_3.expr(), depth_check.is_equal_expression.expr()]),
+                    |cb| {
+                        cb.require_equal(
+                            "rlp_tag == RlpTag::Len",
+                            meta.query_advice(rlp_table.rlp_tag, Rotation::cur()),
+                            RlpTag::Len.expr(),
+                        );
+                        cb.require_equal(
+                            "tag_value_acc == byte_idx + 1 + byte_value - 0xc0",
+                            meta.query_advice(rlp_table.tag_value_acc, Rotation::cur()),
+                            meta.query_advice(byte_idx, Rotation::cur())
+                                + meta.query_advice(byte_value, Rotation::cur())
+                                + 1.expr()
+                                - 0xc0.expr(),
+                        );
+                    },
+                );
+                cb.condition(
+                    and::expr([case_3.expr(), is_tag_begin_vector(meta)]),
+                    |cb| {
+                        cb.require_equal(
+                            "depth' == depth + 1",
+                            meta.query_advice(depth, Rotation::next()),
+                            meta.query_advice(depth, Rotation::cur()) + 1.expr(),
+                        );
+                    },
+                );
 
                 // case 4: tag in [EndList, EndVector]
                 let case_4 = or::expr([is_tag_end_list(meta), is_tag_end_vector(meta)]);
-                cb.condition(case_4.expr(), |cb| {
-                    // TODO(rohit): if depth == 0
+                cb.condition(case_4.expr(), |cb| {});
+                cb.condition(
+                    and::expr([case_4.expr(), depth_check.is_equal_expression.expr()]),
+                    |cb| {
+                        // assertions.
+                        cb.require_equal(
+                            "rlp_tag == RlpTag::Rlc",
+                            meta.query_advice(rlp_table.rlp_tag, Rotation::cur()),
+                            RlpTag::Rlp.expr(),
+                        );
+                        cb.require_equal(
+                            "is_output == true",
+                            meta.query_advice(rlp_table.is_output, Rotation::cur()),
+                            true.expr(),
+                        );
+                        // TODO(rohit): fix this.
+                        cb.require_equal(
+                            "tag_value_acc == *",
+                            meta.query_advice(rlp_table.tag_value_acc, Rotation::cur()),
+                            todo!(),
+                        );
+                        cb.require_equal(
+                            "byte_rev_idx == 1",
+                            meta.query_advice(byte_rev_idx, Rotation::cur()),
+                            1.expr(),
+                        );
 
-                    // TODO(rohit): if tag == EndVector
+                        // state transition.
+                        cb.require_equal(
+                            "byte_idx' == 0",
+                            meta.query_advice(byte_idx, Rotation::next()),
+                            0.expr(),
+                        );
+                    },
+                );
+                cb.condition(and::expr([case_4.expr(), is_tag_end_vector(meta)]), |cb| {
+                    cb.require_equal(
+                        "depth' == depth - 1",
+                        meta.query_advice(depth, Rotation::next()) + 1.expr(),
+                        meta.query_advice(depth, Rotation::cur()),
+                    );
                 });
 
                 // one of the cases is true, and only one case is true.
