@@ -2178,6 +2178,7 @@ pub struct RlpFsmDataTable {
     pub byte_idx: Column<Advice>,
     pub byte_rev_idx: Column<Advice>,
     pub byte_value: Column<Advice>,
+    pub bytes_rlc: Column<Advice>,
 }
 
 impl<F: Field> LookupTable<F> for RlpFsmDataTable {
@@ -2188,6 +2189,7 @@ impl<F: Field> LookupTable<F> for RlpFsmDataTable {
             self.byte_idx.into(),
             self.byte_rev_idx.into(),
             self.byte_value.into(),
+            self.bytes_rlc.into(),
         ]
     }
 
@@ -2198,6 +2200,7 @@ impl<F: Field> LookupTable<F> for RlpFsmDataTable {
             String::from("byte_idx"),
             String::from("byte_rev_idx"),
             String::from("byte_value"),
+            String::from("bytes_rlc"),
         ]
     }
 }
@@ -2210,6 +2213,7 @@ impl RlpFsmDataTable {
             byte_idx: meta.advice_column(),
             byte_rev_idx: meta.advice_column(),
             byte_value: meta.advice_column(),
+            bytes_rlc: meta.advice_column(),
         }
     }
 
