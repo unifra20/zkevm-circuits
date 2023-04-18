@@ -5,7 +5,7 @@ use gadgets::{
     binary_number::{BinaryNumberChip, BinaryNumberConfig},
     comparator::{ComparatorChip, ComparatorConfig},
     is_equal::{IsEqualChip, IsEqualConfig},
-    util::{and, not, Expr},
+    util::{and, not, or, sum, Expr},
 };
 use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
@@ -377,6 +377,18 @@ impl<F: Field> RlpCircuitConfig<F> {
         is_state_next!(is_next_long_list, LongList);
         is_state_next!(is_next_end, End);
 
+        macro_rules! is_tag {
+            ($var:ident, $tag_variant:ident) => {
+                let $var = |meta: &mut VirtualCells<F>| {
+                    tag_bits.value_equals(Tag::$tag_variant, Rotation::cur())(meta)
+                };
+            };
+        }
+        is_tag!(is_tag_begin_list, BeginList);
+        is_tag!(is_tag_begin_vector, BeginVector);
+        is_tag!(is_tag_end_list, EndList);
+        is_tag!(is_tag_end_vector, EndVector);
+
         // construct the comparators.
         let cmp_enabled = |meta: &mut VirtualCells<F>| {
             and::expr([
@@ -428,12 +440,148 @@ impl<F: Field> RlpCircuitConfig<F> {
             |_meta| 0.expr(),
         );
 
-        // TODO(rohit)
         // DecodeTagStart => DecodeTagStart
         meta.create_gate(
             "state transition: DecodeTagStart => DecodeTagStart",
             |meta| {
                 let mut cb = BaseConstraintBuilder::default();
+
+                let (bv_gt_0x00, bv_eq_0x00) = byte_value_gte_0x00.expr(meta, None);
+                let (bv_lt_0x80, bv_eq_0x80) = byte_value_lte_0x80.expr(meta, None);
+                let (bv_gt_0xc0, bv_eq_0xc0) = byte_value_gte_0xc0.expr(meta, None);
+                let (bv_lt_0xf8, bv_eq_0xf8) = byte_value_lte_0xf8.expr(meta, None);
+
+                // case 1: 0x00 <= byte_value < 0x80
+                let case_1 = and::expr([
+                    or::expr([bv_gt_0x00, bv_eq_0x00]),
+                    bv_lt_0x80,
+                    not::expr(bv_eq_0x80.expr()),
+                    not::expr(is_tag_end_list(meta)),
+                    not::expr(is_tag_end_vector(meta)),
+                ]);
+                cb.condition(case_1.expr(), |cb| {
+                    // assertions.
+                    cb.require_equal(
+                        "is_output == true",
+                        meta.query_advice(rlp_table.is_output, Rotation::cur()),
+                        true.expr(),
+                    );
+                    cb.require_equal(
+                        "is_list == false",
+                        meta.query_advice(is_list, Rotation::cur()),
+                        false.expr(),
+                    );
+                    cb.require_equal(
+                        "tag_value_acc == byte_value",
+                        meta.query_advice(rlp_table.tag_value_acc, Rotation::cur()),
+                        meta.query_advice(byte_value, Rotation::cur()),
+                    );
+                    cb.require_equal(
+                        "rlp_tag == tag",
+                        meta.query_advice(rlp_table.rlp_tag, Rotation::cur()),
+                        meta.query_advice(tag, Rotation::cur()),
+                    );
+
+                    // state transitions.
+                    cb.require_equal(
+                        "tag' == tag_next",
+                        meta.query_advice(tag, Rotation::next()),
+                        meta.query_advice(tag_next, Rotation::cur()),
+                    );
+                    cb.require_equal(
+                        "byte_idx' == byte_idx + 1",
+                        meta.query_advice(byte_idx, Rotation::next()),
+                        meta.query_advice(byte_idx, Rotation::cur()) + 1.expr(),
+                    );
+                });
+
+                // case 2: byte_value == 0x80
+                let case_2 = and::expr([
+                    bv_eq_0x80,
+                    not::expr(is_tag_end_list(meta)),
+                    not::expr(is_tag_end_vector(meta)),
+                ]);
+                cb.condition(case_2.expr(), |cb| {
+                    // assertions.
+                    cb.require_equal(
+                        "is_output == true",
+                        meta.query_advice(rlp_table.is_output, Rotation::cur()),
+                        true.expr(),
+                    );
+                    cb.require_equal(
+                        "tag_value_acc == 0",
+                        meta.query_advice(rlp_table.tag_value_acc, Rotation::cur()),
+                        0.expr(),
+                    );
+                    cb.require_equal(
+                        "rlp_tag == tag",
+                        meta.query_advice(rlp_table.rlp_tag, Rotation::cur()),
+                        meta.query_advice(tag, Rotation::cur()),
+                    );
+
+                    // state transitions.
+                    cb.require_equal(
+                        "tag' == tag_next",
+                        meta.query_advice(tag, Rotation::next()),
+                        meta.query_advice(tag_next, Rotation::cur()),
+                    );
+                    cb.require_equal(
+                        "byte_idx' == byte_idx + 1",
+                        meta.query_advice(byte_idx, Rotation::next()),
+                        meta.query_advice(byte_idx, Rotation::cur()) + 1.expr(),
+                    );
+                });
+
+                // case 3: 0xc0 <= byte_value < 0xf8
+                let case_3 = and::expr([
+                    or::expr([bv_gt_0xc0, bv_eq_0xc0]),
+                    bv_lt_0xf8,
+                    not::expr(bv_eq_0xf8),
+                    not::expr(is_tag_end_list(meta)),
+                    not::expr(is_tag_end_vector(meta)),
+                ]);
+                cb.condition(case_3.expr(), |cb| {
+                    // assertions.
+                    cb.require_equal(
+                        "tag in [BeginList, BeginVector]",
+                        sum::expr([is_tag_begin_list(meta), is_tag_begin_vector(meta)]),
+                        1.expr(),
+                    );
+                    cb.require_equal(
+                        "is_output == true",
+                        meta.query_advice(rlp_table.is_output, Rotation::cur()),
+                        true.expr(),
+                    );
+                    // TODO(rohit): if depth == 0
+
+                    // state transitions.
+                    cb.require_equal(
+                        "tag' == tag_next",
+                        meta.query_advice(tag, Rotation::next()),
+                        meta.query_advice(tag_next, Rotation::cur()),
+                    );
+                    cb.require_equal(
+                        "byte_idx' == byte_idx + 1",
+                        meta.query_advice(byte_idx, Rotation::next()),
+                        meta.query_advice(byte_idx, Rotation::cur()) + 1.expr(),
+                    );
+                    // TODO(rohit): if tag == BeginVector
+                });
+
+                // case 4: tag in [EndList, EndVector]
+                let case_4 = or::expr([is_tag_end_list(meta), is_tag_end_vector(meta)]);
+                cb.condition(case_4.expr(), |cb| {
+                    // TODO(rohit): if depth == 0
+
+                    // TODO(rohit): if tag == EndVector
+                });
+
+                // one of the cases is true, and only one case is true.
+                cb.require_equal(
+                    "cover all cases for state transition",
+                    sum::expr([case_1, case_2, case_3, case_4]),
+                    1.expr(),
+                );
 
                 cb.gate(and::expr([
                     meta.query_fixed(q_enabled, Rotation::cur()),
