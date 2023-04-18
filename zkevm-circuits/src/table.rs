@@ -2126,11 +2126,11 @@ impl RlpTable {
 
 #[derive(Clone, Copy, Debug)]
 pub struct RlpFsmRomTable {
-    tag: Column<Fixed>,
-    tag_next: Column<Fixed>,
-    max_length: Column<Fixed>,
-    is_list: Column<Fixed>,
-    format: Column<Fixed>,
+    pub tag: Column<Fixed>,
+    pub tag_next: Column<Fixed>,
+    pub max_length: Column<Fixed>,
+    pub is_list: Column<Fixed>,
+    pub format: Column<Fixed>,
 }
 
 impl<F: Field> LookupTable<F> for RlpFsmRomTable {
@@ -2173,11 +2173,11 @@ impl RlpFsmRomTable {
 
 #[derive(Clone, Copy, Debug)]
 pub struct RlpFsmDataTable {
-    tx_id: Column<Advice>,
-    format: Column<Advice>,
-    byte_idx: Column<Advice>,
-    byte_rev_idx: Column<Advice>,
-    byte_value: Column<Advice>,
+    pub tx_id: Column<Advice>,
+    pub format: Column<Advice>,
+    pub byte_idx: Column<Advice>,
+    pub byte_rev_idx: Column<Advice>,
+    pub byte_value: Column<Advice>,
 }
 
 impl<F: Field> LookupTable<F> for RlpFsmDataTable {
@@ -2223,12 +2223,12 @@ impl RlpFsmDataTable {
 
 #[derive(Clone, Copy, Debug)]
 pub struct RlpFsmRlpTable {
-    tx_id: Column<Advice>,
-    format: Column<Advice>,
-    rlp_tag: Column<Advice>,
-    tag_value_acc: Column<Advice>,
-    is_output: Column<Advice>,
-    is_none: Column<Advice>,
+    pub tx_id: Column<Advice>,
+    pub format: Column<Advice>,
+    pub rlp_tag: Column<Advice>,
+    pub tag_value_acc: Column<Advice>,
+    pub is_output: Column<Advice>,
+    pub is_none: Column<Advice>,
 }
 
 impl<F: Field> LookupTable<F> for RlpFsmRlpTable {

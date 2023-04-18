@@ -1,6 +1,7 @@
 use ethers_core::utils::rlp::Encodable;
 use gadgets::{impl_expr, util::Expr};
 use halo2_proofs::{arithmetic::FieldExt, circuit::Value, plonk::Expression};
+use strum::EnumIter;
 
 use crate::{
     evm_circuit::param::{N_BYTES_ACCOUNT_ADDRESS, N_BYTES_U64, N_BYTES_WORD},
@@ -14,7 +15,7 @@ mod eip2930;
 mod l1_msg;
 mod pre_eip155;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, EnumIter)]
 pub enum Tag {
     BeginList = 0,
     EndList,
@@ -34,6 +35,12 @@ pub enum Tag {
     AccessListStorageKey,
     MaxPriorityFeePerGas,
     MaxFeePerGas,
+}
+
+impl From<Tag> for usize {
+    fn from(value: Tag) -> Self {
+        value as usize
+    }
 }
 
 impl Tag {
@@ -99,13 +106,19 @@ pub enum Format {
     L1MsgHash,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, EnumIter)]
 pub enum State {
     DecodeTagStart = 0,
     Bytes,
     LongBytes,
     LongList,
     End,
+}
+
+impl From<State> for usize {
+    fn from(value: State) -> Self {
+        value as usize
+    }
 }
 
 impl_expr!(Tag);
