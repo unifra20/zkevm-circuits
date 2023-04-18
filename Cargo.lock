@@ -2264,16 +2264,21 @@ dependencies = [
 [[package]]
 name = "halo2-mpt-circuits"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/mpt-circuit.git?branch=scroll-dev-0411#da63fcc93077a43f44eadb2e1eff20d66b693d8c"
+source = "git+https://github.com/scroll-tech/mpt-circuit.git?branch=feat/refactor#2cc63d2b765a20cd12136d1df675052c9353a582"
 dependencies = [
+ "ethers-core",
  "halo2_proofs",
  "hex",
+ "itertools",
  "lazy_static",
  "num-bigint",
+ "num-traits",
  "poseidon-circuit",
  "rand",
  "serde",
  "serde_json",
+ "strum",
+ "strum_macros",
  "thiserror",
 ]
 
@@ -3635,7 +3640,7 @@ dependencies = [
 [[package]]
 name = "poseidon-circuit"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/poseidon-circuit.git?branch=scroll-dev-0408#89e9c0456f0fa00d49cd7920c6b437c66b48db17"
+source = "git+https://github.com/scroll-tech/poseidon-circuit.git?branch=scroll-dev-0408#5c8ca0004ffe13aa48e86316bfb41af789c914d5"
 dependencies = [
  "bitvec 1.0.1",
  "halo2_proofs",
