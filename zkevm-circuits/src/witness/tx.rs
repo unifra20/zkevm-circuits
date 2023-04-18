@@ -28,6 +28,72 @@ use num_bigint::BigUint;
 
 use super::{step::step_convert, Call, ExecStep};
 
+mod eip155;
+mod eip1559;
+mod eip2930;
+mod l1_msg;
+mod pre_eip155;
+
+pub use eip155::{SignedTxEip155, TxEip155};
+pub use eip1559::{SignedTxEip1559, TxEip1559};
+pub use eip2930::{SignedTxEip2930, TxEip2930};
+pub use l1_msg::L1MsgTx;
+pub use pre_eip155::{SignedTxPreEip155, TxPreEip155};
+
+pub enum GenericTransaction {
+    Eip155(TxEip155),
+    PreEip155(TxPreEip155),
+    L1Msg(L1MsgTx),
+    Eip2930(TxEip2930),
+    Eip1559(TxEip1559),
+}
+
+pub enum GenericSignedTransaction {
+    Eip155(SignedTxEip155),
+    PreEip155(SignedTxPreEip155),
+    L1Msg(L1MsgTx),
+    Eip2930(SignedTxEip2930),
+    Eip1559(SignedTxEip1559),
+}
+
+impl Encodable for GenericTransaction {
+    fn rlp_append(&self, s: &mut RlpStream) {
+        match self {
+            Self::Eip155(tx) => tx.rlp_append(s),
+            Self::PreEip155(tx) => tx.rlp_append(s),
+            Self::L1Msg(tx) => tx.rlp_append(s),
+            Self::Eip2930(tx) => tx.rlp_append(s),
+            Self::Eip1559(tx) => tx.rlp_append(s),
+        }
+    }
+}
+
+impl Encodable for GenericSignedTransaction {
+    fn rlp_append(&self, s: &mut RlpStream) {
+        match self {
+            Self::Eip155(signed_tx) => signed_tx.rlp_append(s),
+            Self::PreEip155(signed_tx) => signed_tx.rlp_append(s),
+            Self::L1Msg(signed_tx) => signed_tx.rlp_append(s),
+            Self::Eip2930(signed_tx) => signed_tx.rlp_append(s),
+            Self::Eip1559(signed_tx) => signed_tx.rlp_append(s),
+        }
+    }
+}
+
+pub struct NewTransaction {
+    // fields specific to zkevm witness.
+    block_number: u64,
+    id: usize,
+    hash: H256,
+    is_create: bool,
+    call_data_length: usize,
+    call_data_gas_cost: u64,
+    calls: Vec<Call>,
+    steps: Vec<ExecStep>,
+    // eth tx fields.
+    tx: GenericSignedTransaction,
+}
+
 /// Transaction in a witness block
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Transaction {

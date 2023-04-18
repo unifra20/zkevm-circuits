@@ -7,8 +7,8 @@ use crate::{
     impl_expr,
     util::{build_tx_log_address, Challenges},
     witness::{
-        Block, BlockContext, BlockContexts, Bytecode, MptUpdateRow, MptUpdates, RlpWitnessGen, Rw,
-        RwMap, RwRow, SignedTransaction, Transaction,
+        Block, BlockContext, BlockContexts, Bytecode, MptUpdateRow, MptUpdates, RlpFsmWitnessGen,
+        RlpWitnessGen, Rw, RwMap, RwRow, SignedTransaction, Transaction,
     },
 };
 use bus_mapping::circuit_input_builder::{CopyDataType, CopyEvent, CopyStep, ExpEvent};
@@ -2121,5 +2121,136 @@ impl RlpTable {
                 Ok(())
             },
         )
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RlpFsmRomTable {
+    tag: Column<Fixed>,
+    tag_next: Column<Fixed>,
+    max_length: Column<Fixed>,
+    is_list: Column<Fixed>,
+    format: Column<Fixed>,
+}
+
+impl<F: Field> LookupTable<F> for RlpFsmRomTable {
+    fn columns(&self) -> Vec<Column<Any>> {
+        vec![
+            self.tag.into(),
+            self.tag_next.into(),
+            self.max_length.into(),
+            self.is_list.into(),
+            self.format.into(),
+        ]
+    }
+
+    fn annotations(&self) -> Vec<String> {
+        vec![
+            String::from("tag"),
+            String::from("tag_next"),
+            String::from("max_length"),
+            String::from("is_list"),
+            String::from("format"),
+        ]
+    }
+}
+
+impl RlpFsmRomTable {
+    pub fn construct<F: Field>(meta: &mut ConstraintSystem<F>) -> Self {
+        Self {
+            tag: meta.fixed_column(),
+            tag_next: meta.fixed_column(),
+            max_length: meta.fixed_column(),
+            is_list: meta.fixed_column(),
+            format: meta.fixed_column(),
+        }
+    }
+
+    pub fn load<F: Field>(layouter: &mut impl Layouter<F>) -> Result<(), Error> {
+        unimplemented!("RlpFsmRomTable::load")
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RlpFsmDataTable {
+    tx_id: Column<Advice>,
+    format: Column<Advice>,
+    byte_idx: Column<Advice>,
+    byte_rev_idx: Column<Advice>,
+    byte_value: Column<Advice>,
+}
+
+impl<F: Field> LookupTable<F> for RlpFsmDataTable {
+    fn columns(&self) -> Vec<Column<Any>> {
+        vec![
+            self.tx_id.into(),
+            self.format.into(),
+            self.byte_idx.into(),
+            self.byte_rev_idx.into(),
+            self.byte_value.into(),
+        ]
+    }
+
+    fn annotations(&self) -> Vec<String> {
+        vec![
+            String::from("tx_id"),
+            String::from("format"),
+            String::from("byte_idx"),
+            String::from("byte_rev_idx"),
+            String::from("byte_value"),
+        ]
+    }
+}
+
+impl RlpFsmDataTable {
+    pub fn construct<F: Field>(meta: &mut ConstraintSystem<F>) -> Self {
+        Self {
+            tx_id: meta.advice_column(),
+            format: meta.advice_column(),
+            byte_idx: meta.advice_column(),
+            byte_rev_idx: meta.advice_column(),
+            byte_value: meta.advice_column(),
+        }
+    }
+
+    pub fn assignments<F: Field, RLP: RlpFsmWitnessGen<F>>(
+        inputs: Vec<RLP>,
+        challenges: &Challenges<Value<F>>,
+    ) -> Vec<[Value<F>; 5]> {
+        unimplemented!("RlpFsmDataTable::assignments")
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RlpFsmRlpTable {
+    tx_id: Column<Advice>,
+    format: Column<Advice>,
+    rlp_tag: Column<Advice>,
+    tag_value_acc: Column<Advice>,
+    is_output: Column<Advice>,
+    is_none: Column<Advice>,
+}
+
+impl<F: Field> LookupTable<F> for RlpFsmRlpTable {
+    fn columns(&self) -> Vec<Column<Any>> {
+        vec![
+            self.tx_id.into(),
+            self.format.into(),
+            self.rlp_tag.into(),
+            self.tag_value_acc.into(),
+            self.is_output.into(),
+            self.is_none.into(),
+        ]
+    }
+
+    fn annotations(&self) -> Vec<String> {
+        vec![
+            String::from("tx_id"),
+            String::from("format"),
+            String::from("rlp_tag"),
+            String::from("tag_value_acc"),
+            String::from("is_output"),
+            String::from("is_none"),
+        ]
     }
 }
