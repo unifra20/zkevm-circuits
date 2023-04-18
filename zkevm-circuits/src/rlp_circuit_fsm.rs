@@ -3,17 +3,20 @@ use std::marker::PhantomData;
 use eth_types::Field;
 use gadgets::{
     binary_number::{BinaryNumberChip, BinaryNumberConfig},
+    comparator::{ComparatorChip, ComparatorConfig},
     is_equal::{IsEqualChip, IsEqualConfig},
     util::{and, not, Expr},
 };
 use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
-    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Expression, Fixed, Selector},
+    plonk::{
+        Advice, Circuit, Column, ConstraintSystem, Error, Expression, Fixed, Selector, VirtualCells,
+    },
     poly::Rotation,
 };
 
 use crate::{
-    evm_circuit::util::constraint_builder::BaseConstraintBuilder,
+    evm_circuit::{param::N_BYTES_U64, util::constraint_builder::BaseConstraintBuilder},
     table::{LookupTable, RlpFsmDataTable, RlpFsmRlpTable, RlpFsmRomTable},
     util::{Challenges, SubCircuit, SubCircuitConfig},
     witness::{Block, GenericSignedTransaction, RlpFsmWitnessGen, State, Tag},
@@ -78,6 +81,29 @@ pub struct RlpCircuitConfig<F> {
     tx_id_check: IsEqualConfig<F>,
     /// Check equality between format' and format in the data table.
     format_check: IsEqualConfig<F>,
+
+    /// Check for byte_value >= 0
+    byte_value_gte_0x00: ComparatorConfig<F, N_BYTES_U64>,
+    /// Check for byte_value <= 0x80
+    byte_value_lte_0x80: ComparatorConfig<F, N_BYTES_U64>,
+    /// Check for byte_value >= 0x80
+    byte_value_gte_0x80: ComparatorConfig<F, N_BYTES_U64>,
+    /// Check for byte_value <= 0xb8
+    byte_value_lte_0xb8: ComparatorConfig<F, N_BYTES_U64>,
+    /// Check for byte_value >= 0xb8
+    byte_value_gte_0xb8: ComparatorConfig<F, N_BYTES_U64>,
+    /// Check for byte_value <= 0xc0
+    byte_value_lte_0xc0: ComparatorConfig<F, N_BYTES_U64>,
+    /// Check for byte_value >= 0xc0
+    byte_value_gte_0xc0: ComparatorConfig<F, N_BYTES_U64>,
+    /// Check for byte_value <= 0xf8
+    byte_value_lte_0xf8: ComparatorConfig<F, N_BYTES_U64>,
+    /// Check for byte_value >= 0xf8
+    byte_value_gte_0xf8: ComparatorConfig<F, N_BYTES_U64>,
+    /// Check for tag_idx <= tag_length
+    tidx_lte_tlength: ComparatorConfig<F, 4>,
+    /// Check for depth == 0
+    depth_check: IsEqualConfig<F>,
 }
 
 impl<F: Field> RlpCircuitConfig<F> {
@@ -326,7 +352,227 @@ impl<F: Field> RlpCircuitConfig<F> {
             .collect()
         });
 
-        // TODO(rohit): state transition constraints.
+        macro_rules! is_state {
+            ($var:ident, $state_variant:ident) => {
+                let $var = |meta: &mut VirtualCells<F>| {
+                    state_bits.value_equals(State::$state_variant, Rotation::cur())(meta)
+                };
+            };
+        }
+        macro_rules! is_state_next {
+            ($var:ident, $state_variant:ident) => {
+                let $var = |meta: &mut VirtualCells<F>| {
+                    state_bits.value_equals(State::$state_variant, Rotation::next())(meta)
+                };
+            };
+        }
+        is_state!(is_decode_tag_start, DecodeTagStart);
+        is_state!(is_bytes, Bytes);
+        is_state!(is_long_bytes, LongBytes);
+        is_state!(is_long_list, LongList);
+        is_state!(is_end, End);
+        is_state_next!(is_next_decode_tag_start, DecodeTagStart);
+        is_state_next!(is_next_bytes, Bytes);
+        is_state_next!(is_next_long_bytes, LongBytes);
+        is_state_next!(is_next_long_list, LongList);
+        is_state_next!(is_next_end, End);
+
+        // construct the comparators.
+        let cmp_enabled = |meta: &mut VirtualCells<F>| {
+            and::expr([
+                meta.query_fixed(q_enabled, Rotation::cur()),
+                is_not_padding.expr(),
+            ])
+        };
+        macro_rules! byte_value_lte {
+            ($var:ident, $value:expr) => {
+                let $var = ComparatorChip::configure(
+                    meta,
+                    cmp_enabled,
+                    |meta| meta.query_advice(byte_value, Rotation::cur()),
+                    |_| $value.expr(),
+                );
+            };
+        }
+        macro_rules! byte_value_gte {
+            ($var:ident, $value:expr) => {
+                let $var = ComparatorChip::configure(
+                    meta,
+                    cmp_enabled,
+                    |_| $value.expr(),
+                    |meta| meta.query_advice(byte_value, Rotation::cur()),
+                );
+            };
+        }
+
+        byte_value_gte!(byte_value_gte_0x00, 0x00);
+        byte_value_lte!(byte_value_lte_0x80, 0x80);
+        byte_value_gte!(byte_value_gte_0x80, 0x80);
+        byte_value_lte!(byte_value_lte_0xb8, 0xb8);
+        byte_value_gte!(byte_value_gte_0xb8, 0xb8);
+        byte_value_lte!(byte_value_lte_0xc0, 0xc0);
+        byte_value_gte!(byte_value_gte_0xc0, 0xc0);
+        byte_value_lte!(byte_value_lte_0xf8, 0xf8);
+        byte_value_gte!(byte_value_gte_0xf8, 0xf8);
+
+        let tidx_lte_tlength = ComparatorChip::configure(
+            meta,
+            cmp_enabled,
+            |meta| meta.query_advice(tag_idx, Rotation::cur()),
+            |meta| meta.query_advice(tag_length, Rotation::cur()),
+        );
+        let depth_check = IsEqualChip::configure(
+            meta,
+            cmp_enabled,
+            |meta| meta.query_advice(depth, Rotation::cur()),
+            |_meta| 0.expr(),
+        );
+
+        // TODO(rohit)
+        // DecodeTagStart => DecodeTagStart
+        meta.create_gate(
+            "state transition: DecodeTagStart => DecodeTagStart",
+            |meta| {
+                let mut cb = BaseConstraintBuilder::default();
+
+                cb.gate(and::expr([
+                    meta.query_fixed(q_enabled, Rotation::cur()),
+                    is_not_padding.expr(),
+                    is_decode_tag_start(meta),
+                    is_next_decode_tag_start(meta),
+                ]))
+            },
+        );
+
+        // TODO(rohit)
+        // DecodeTagStart => Bytes
+        meta.create_gate("state transition: DecodeTagStart => Bytes", |meta| {
+            let mut cb = BaseConstraintBuilder::default();
+
+            cb.gate(and::expr([
+                meta.query_fixed(q_enabled, Rotation::cur()),
+                is_not_padding.expr(),
+                is_decode_tag_start(meta),
+                is_next_bytes(meta),
+            ]))
+        });
+
+        // TODO(rohit)
+        // Bytes => Bytes
+        meta.create_gate("state transition: Bytes => Bytes", |meta| {
+            let mut cb = BaseConstraintBuilder::default();
+
+            cb.gate(and::expr([
+                meta.query_fixed(q_enabled, Rotation::cur()),
+                is_not_padding.expr(),
+                is_bytes(meta),
+                is_next_bytes(meta),
+            ]))
+        });
+
+        // TODO(rohit)
+        // Bytes => DecodeTagStart
+        meta.create_gate("state transition: Bytes => DecodeTagStart", |meta| {
+            let mut cb = BaseConstraintBuilder::default();
+
+            cb.gate(and::expr([
+                meta.query_fixed(q_enabled, Rotation::cur()),
+                is_not_padding.expr(),
+                is_bytes(meta),
+                is_next_decode_tag_start(meta),
+            ]))
+        });
+
+        // TODO(rohit)
+        // DecodeTagStart => LongBytes
+        meta.create_gate("state transition: DecodeTagStart => LongBytes", |meta| {
+            let mut cb = BaseConstraintBuilder::default();
+
+            cb.gate(and::expr([
+                meta.query_fixed(q_enabled, Rotation::cur()),
+                is_not_padding.expr(),
+                is_decode_tag_start(meta),
+                is_next_long_bytes(meta),
+            ]))
+        });
+
+        // TODO(rohit)
+        // LongBytes => LongBytes
+        meta.create_gate("state transition: LongBytes => LongBytes", |meta| {
+            let mut cb = BaseConstraintBuilder::default();
+
+            cb.gate(and::expr([
+                meta.query_fixed(q_enabled, Rotation::cur()),
+                is_not_padding.expr(),
+                is_long_bytes(meta),
+                is_next_long_bytes(meta),
+            ]))
+        });
+
+        // TODO(rohit)
+        // LongBytes => Bytes
+        meta.create_gate("state transition: LongBytes => Bytes", |meta| {
+            let mut cb = BaseConstraintBuilder::default();
+
+            cb.gate(and::expr([
+                meta.query_fixed(q_enabled, Rotation::cur()),
+                is_not_padding.expr(),
+                is_long_bytes(meta),
+                is_next_bytes(meta),
+            ]))
+        });
+
+        // TODO(rohit)
+        // DecodeTagStart => LongList
+        meta.create_gate("state transition: DecodeTagStart => LongList", |meta| {
+            let mut cb = BaseConstraintBuilder::default();
+
+            cb.gate(and::expr([
+                meta.query_fixed(q_enabled, Rotation::cur()),
+                is_not_padding.expr(),
+                is_decode_tag_start(meta),
+                is_next_long_list(meta),
+            ]))
+        });
+
+        // TODO(rohit)
+        // LongList => LongList
+        meta.create_gate("state transition: LongList => LongList", |meta| {
+            let mut cb = BaseConstraintBuilder::default();
+
+            cb.gate(and::expr([
+                meta.query_fixed(q_enabled, Rotation::cur()),
+                is_not_padding.expr(),
+                is_long_list(meta),
+                is_next_long_list(meta),
+            ]))
+        });
+
+        // TODO(rohit)
+        // LongList => DecodeTagStart
+        meta.create_gate("state transition: LongList => DecodeTagStart", |meta| {
+            let mut cb = BaseConstraintBuilder::default();
+
+            cb.gate(and::expr([
+                meta.query_fixed(q_enabled, Rotation::cur()),
+                is_not_padding.expr(),
+                is_long_list(meta),
+                is_next_decode_tag_start(meta),
+            ]))
+        });
+
+        // TODO(rohit)
+        // DecodeTagStart => End
+        meta.create_gate("state transition: DecodeTagStart => End", |meta| {
+            let mut cb = BaseConstraintBuilder::default();
+
+            cb.gate(and::expr([
+                meta.query_fixed(q_enabled, Rotation::cur()),
+                is_not_padding.expr(),
+                is_decode_tag_start(meta),
+                is_next_end(meta),
+            ]))
+        });
 
         Self {
             q_enabled,
@@ -349,6 +595,19 @@ impl<F: Field> RlpCircuitConfig<F> {
             // data table checks.
             tx_id_check,
             format_check,
+
+            // comparators
+            byte_value_gte_0x00,
+            byte_value_lte_0x80,
+            byte_value_gte_0x80,
+            byte_value_lte_0xb8,
+            byte_value_gte_0xb8,
+            byte_value_lte_0xc0,
+            byte_value_gte_0xc0,
+            byte_value_lte_0xf8,
+            byte_value_gte_0xf8,
+            tidx_lte_tlength,
+            depth_check,
         }
     }
 
