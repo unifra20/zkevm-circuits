@@ -36,6 +36,14 @@ impl TryInto<Account> for AccountMatch {
     }
 }
 
+impl AccountMatch {
+    pub(crate) fn is_non_existent(&self) -> bool {
+        self.balance.unwrap_or_default().is_zero() &&
+            self.nonce.unwrap_or_default().is_zero() &&
+            self.code.as_ref().map_or_else(|| 0, |c| c.len()) == 0
+    }
+}
+
 pub type StateTestResult = HashMap<Address, AccountMatch>;
 
 #[derive(PartialEq, Clone, Eq, Debug)]

@@ -38,6 +38,7 @@ urlencoding = "2.1.2"
 ctor = "0.1.22"
 
 [features]
-default = ["ignore-test-docker", "skip-self-destruct"]
+default = ["ignore-test-docker", "skip-non-existent-acc-storage-mismatch", "skip-self-destruct"]
 ignore-test-docker = []
+skip-non-existent-acc-storage-mismatch = []
 skip-self-destruct = []

@@ -107,14 +107,6 @@ fn check_post(
             }
         }
         for (slot, expected_value) in &expected.storage {
-            if actual.is_empty() {
-                // FIXME:
-                // Only check storage if account exists. Since non-existing
-                // account storage is cleared in CREATE of busmapping, and
-                // not reversible.
-                // https://github.com/scroll-tech/zkevm-circuits/blob/700e93c898775a19c22f9abd560ebb945082c854/bus-mapping/src/evm/opcodes/create.rs#L57
-                continue;
-            }
             let actual_value = actual.storage.get(slot).cloned().unwrap_or_else(U256::zero);
             if expected_value != &actual_value {
                 log::error!(
@@ -123,6 +115,10 @@ fn check_post(
                     expected,
                     actual
                 );
+                #[cfg(feature = "skip-non-existent-acc-storage-mismatch")]
+                if expected.is_non_existent() {
+                    continue;
+                }
                 return Err(StateTestError::StorageMismatch {
                     slot: *slot,
                     expected: *expected_value,
