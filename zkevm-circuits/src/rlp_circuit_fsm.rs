@@ -1138,10 +1138,35 @@ impl<F: Field> RlpCircuitConfig<F> {
             ]))
         });
 
-        // TODO(rohit)
         // LongList => DecodeTagStart
         meta.create_gate("state transition: LongList => DecodeTagStart", |meta| {
             let mut cb = BaseConstraintBuilder::default();
+
+            let (_, tidx_eq_tlen) = tidx_lte_tlength.expr(meta, None);
+
+            // condition.
+            cb.require_equal(
+                "tag_idx == tag_length",
+                meta.query_advice(tag_idx, Rotation::cur()),
+                meta.query_advice(tag_length, Rotation::cur()),
+            );
+
+            // assertions.
+            cb.condition(depth_check.is_equal_expression.expr(), |cb| {
+                // TODO(rohit): fix this.
+            });
+
+            // state transition.
+            cb.require_equal(
+                "tag' == tag_next",
+                meta.query_advice(tag, Rotation::next()),
+                meta.query_advice(tag_next, Rotation::cur()),
+            );
+            cb.require_equal(
+                "byte_idx' == byte_idx + 1",
+                meta.query_advice(byte_idx, Rotation::next()),
+                meta.query_advice(byte_idx, Rotation::cur()) + 1.expr(),
+            );
 
             cb.gate(and::expr([
                 meta.query_fixed(q_enabled, Rotation::cur()),
@@ -1151,10 +1176,21 @@ impl<F: Field> RlpCircuitConfig<F> {
             ]))
         });
 
-        // TODO(rohit)
         // DecodeTagStart => End
         meta.create_gate("state transition: DecodeTagStart => End", |meta| {
             let mut cb = BaseConstraintBuilder::default();
+
+            // condition.
+            cb.require_equal(
+                "depth == 0",
+                depth_check.is_equal_expression.expr(),
+                true.expr(),
+            );
+            cb.require_equal(
+                "tx_id' == 0",
+                meta.query_advice(tx_id, Rotation::next()),
+                0.expr(),
+            );
 
             cb.gate(and::expr([
                 meta.query_fixed(q_enabled, Rotation::cur()),
