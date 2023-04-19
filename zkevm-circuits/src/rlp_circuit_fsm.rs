@@ -9,9 +9,7 @@ use gadgets::{
 };
 use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
-    plonk::{
-        Advice, Circuit, Column, ConstraintSystem, Error, Expression, Fixed, Selector, VirtualCells,
-    },
+    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Expression, Fixed, VirtualCells},
     poly::Rotation,
 };
 
@@ -43,7 +41,7 @@ pub struct RlpCircuitConfig<F> {
     /// Whether the row is enabled.
     q_enabled: Column<Fixed>,
     /// Whether we should do a lookup to the data table or not.
-    q_lookup_data: Selector,
+    q_lookup_data: Column<Advice>,
     /// The state of RLP verifier at the current row.
     state: Column<Advice>,
     /// A utility gadget to compare/query what state we are at.
@@ -60,6 +58,8 @@ pub struct RlpCircuitConfig<F> {
     byte_rev_idx: Column<Advice>,
     /// The byte value at this index in the RLP encoded data.
     byte_value: Column<Advice>,
+    /// The RLC accumulator of all the bytes of this RLP instance.
+    bytes_rlc: Column<Advice>,
     /// When the tag occupies several bytes, this index denotes the
     /// incremental index of the byte within this tag instance.
     tag_idx: Column<Advice>,
@@ -123,6 +123,7 @@ impl<F: Field> RlpCircuitConfig<F> {
             byte_idx,
             byte_rev_idx,
             byte_value,
+            bytes_rlc,
             tag,
             tag_next,
             tag_idx,
@@ -132,7 +133,8 @@ impl<F: Field> RlpCircuitConfig<F> {
             depth,
         ) = (
             meta.fixed_column(),
-            meta.complex_selector(),
+            meta.advice_column(),
+            meta.advice_column(),
             meta.advice_column(),
             meta.advice_column(),
             meta.advice_column(),
@@ -319,7 +321,7 @@ impl<F: Field> RlpCircuitConfig<F> {
         });
 
         meta.lookup_any("data table lookup", |meta| {
-            let cond = meta.query_selector(q_lookup_data);
+            let cond = meta.query_advice(q_lookup_data, Rotation::cur());
             vec![
                 meta.query_advice(tx_id, Rotation::cur()),
                 meta.query_advice(format, Rotation::cur()),
@@ -472,6 +474,11 @@ impl<F: Field> RlpCircuitConfig<F> {
                         false.expr(),
                     );
                     cb.require_equal(
+                        "q_lookup_data == true",
+                        meta.query_advice(q_lookup_data, Rotation::cur()),
+                        true.expr(),
+                    );
+                    cb.require_equal(
                         "tag_value_acc == byte_value",
                         meta.query_advice(rlp_table.tag_value_acc, Rotation::cur()),
                         meta.query_advice(byte_value, Rotation::cur()),
@@ -506,6 +513,11 @@ impl<F: Field> RlpCircuitConfig<F> {
                     cb.require_equal(
                         "is_output == true",
                         meta.query_advice(rlp_table.is_output, Rotation::cur()),
+                        true.expr(),
+                    );
+                    cb.require_equal(
+                        "q_lookup_data == true",
+                        meta.query_advice(q_lookup_data, Rotation::cur()),
                         true.expr(),
                     );
                     cb.require_equal(
@@ -552,6 +564,11 @@ impl<F: Field> RlpCircuitConfig<F> {
                         meta.query_advice(rlp_table.is_output, Rotation::cur()),
                         true.expr(),
                     );
+                    cb.require_equal(
+                        "q_lookup_data == true",
+                        meta.query_advice(q_lookup_data, Rotation::cur()),
+                        true.expr(),
+                    );
 
                     // state transitions.
                     cb.require_equal(
@@ -596,7 +613,13 @@ impl<F: Field> RlpCircuitConfig<F> {
 
                 // case 4: tag in [EndList, EndVector]
                 let case_4 = or::expr([is_tag_end_list(meta), is_tag_end_vector(meta)]);
-                cb.condition(case_4.expr(), |cb| {});
+                cb.condition(case_4.expr(), |cb| {
+                    cb.require_equal(
+                        "q_lookup_data == false",
+                        meta.query_advice(q_lookup_data, Rotation::cur()),
+                        false.expr(),
+                    );
+                });
                 cb.condition(
                     and::expr([case_4.expr(), depth_check.is_equal_expression.expr()]),
                     |cb| {
@@ -611,11 +634,10 @@ impl<F: Field> RlpCircuitConfig<F> {
                             meta.query_advice(rlp_table.is_output, Rotation::cur()),
                             true.expr(),
                         );
-                        // TODO(rohit): fix this.
                         cb.require_equal(
-                            "tag_value_acc == *",
+                            "tag_value_acc == bytes_rlc",
                             meta.query_advice(rlp_table.tag_value_acc, Rotation::cur()),
-                            todo!(),
+                            meta.query_advice(bytes_rlc, Rotation::cur()),
                         );
                         cb.require_equal(
                             "byte_rev_idx == 1",
@@ -796,6 +818,7 @@ impl<F: Field> RlpCircuitConfig<F> {
             byte_idx,
             byte_rev_idx,
             byte_value,
+            bytes_rlc,
             tag_idx,
             tag_length,
             is_list,
