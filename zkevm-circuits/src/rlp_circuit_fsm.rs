@@ -677,10 +677,63 @@ impl<F: Field> RlpCircuitConfig<F> {
             },
         );
 
-        // TODO(rohit)
         // DecodeTagStart => Bytes
         meta.create_gate("state transition: DecodeTagStart => Bytes", |meta| {
             let mut cb = BaseConstraintBuilder::default();
+
+            let (bv_gt_0x80, bv_eq_0x80) = byte_value_gte_0x80.expr(meta, None);
+            let (bv_lt_0xb8, bv_eq_0xb8) = byte_value_lte_0xb8.expr(meta, None);
+
+            // condition.
+            cb.require_equal(
+                "0x80 < byte_value < 0xb8",
+                and::expr([
+                    bv_gt_0x80,
+                    not::expr(bv_eq_0x80),
+                    bv_lt_0xb8,
+                    not::expr(bv_eq_0xb8),
+                ]),
+                1.expr(),
+            );
+
+            // assertions.
+            cb.require_equal(
+                "is_output == false",
+                meta.query_advice(rlp_table.is_output, Rotation::cur()),
+                false.expr(),
+            );
+            cb.require_equal(
+                "q_lookup_data == true",
+                meta.query_advice(q_lookup_data, Rotation::cur()),
+                true.expr(),
+            );
+            cb.require_equal(
+                "is_list == false",
+                meta.query_advice(is_list, Rotation::cur()),
+                false.expr(),
+            );
+
+            // state transitions.
+            cb.require_equal(
+                "tag_idx' == 1",
+                meta.query_advice(tag_idx, Rotation::cur()),
+                1.expr(),
+            );
+            cb.require_equal(
+                "tag_length' == byte_value - 0x80",
+                meta.query_advice(tag_length, Rotation::next()) + 0x80.expr(),
+                meta.query_advice(byte_value, Rotation::cur()),
+            );
+            cb.require_equal(
+                "byte_idx' == byte_idx + 1",
+                meta.query_advice(byte_idx, Rotation::next()),
+                meta.query_advice(byte_idx, Rotation::cur()) + 1.expr(),
+            );
+            cb.require_equal(
+                "tag_value_acc' == byte_value'",
+                meta.query_advice(rlp_table.tag_value_acc, Rotation::next()),
+                meta.query_advice(byte_value, Rotation::next()),
+            );
 
             cb.gate(and::expr([
                 meta.query_fixed(q_enabled, Rotation::cur()),
