@@ -5,7 +5,7 @@ use gadgets::{
     binary_number::{BinaryNumberChip, BinaryNumberConfig},
     comparator::{ComparatorChip, ComparatorConfig},
     is_equal::{IsEqualChip, IsEqualConfig},
-    util::{and, not, or, sum, Expr},
+    util::{and, not, or, select, sum, Expr},
 };
 use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
@@ -102,6 +102,8 @@ pub struct RlpCircuitConfig<F> {
     byte_value_gte_0xf8: ComparatorConfig<F, N_BYTES_U64>,
     /// Check for tag_idx <= tag_length
     tidx_lte_tlength: ComparatorConfig<F, 4>,
+    /// Check for tag_length <= 32
+    tlength_lte_0x20: ComparatorConfig<F, N_BYTES_U64>,
     /// Check for depth == 0
     depth_check: IsEqualConfig<F>,
 }
@@ -215,7 +217,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                         "correct random linear combination of byte value",
                         meta.query_advice(data_table.bytes_rlc, Rotation::next()),
                         meta.query_advice(data_table.bytes_rlc, Rotation::cur())
-                            * keccak_input_rand
+                            * keccak_input_rand.expr()
                             + meta.query_advice(data_table.byte_value, Rotation::next()),
                     );
                 },
@@ -434,6 +436,12 @@ impl<F: Field> RlpCircuitConfig<F> {
             cmp_enabled,
             |meta| meta.query_advice(tag_idx, Rotation::cur()),
             |meta| meta.query_advice(tag_length, Rotation::cur()),
+        );
+        let tlength_lte_0x20 = ComparatorChip::configure(
+            meta,
+            cmp_enabled,
+            |meta| meta.query_advice(tag_length, Rotation::cur()),
+            |_meta| 0x20.expr(),
         );
         let depth_check = IsEqualChip::configure(
             meta,
@@ -743,10 +751,54 @@ impl<F: Field> RlpCircuitConfig<F> {
             ]))
         });
 
-        // TODO(rohit)
         // Bytes => Bytes
         meta.create_gate("state transition: Bytes => Bytes", |meta| {
             let mut cb = BaseConstraintBuilder::default();
+
+            let (tidx_lt_tlen, tidx_eq_tlen) = tidx_lte_tlength.expr(meta, None);
+            let (tlen_lt_0x20, tlen_eq_0x20) = tlength_lte_0x20.expr(meta, None);
+
+            // condition.
+            cb.require_equal(
+                "tag_idx < tag_length",
+                and::expr([tidx_lt_tlen, not::expr(tidx_eq_tlen)]),
+                1.expr(),
+            );
+
+            // assertions.
+            cb.require_equal(
+                "is_output == false",
+                meta.query_advice(rlp_table.is_output, Rotation::cur()),
+                false.expr(),
+            );
+            cb.require_equal(
+                "q_lookup_data == true",
+                meta.query_advice(q_lookup_data, Rotation::cur()),
+                true.expr(),
+            );
+
+            // state transitions.
+            cb.require_equal(
+                "tag_idx' == tag_idx + 1",
+                meta.query_advice(tag_idx, Rotation::next()),
+                meta.query_advice(tag_idx, Rotation::cur()) + 1.expr(),
+            );
+            cb.require_equal(
+                "byte_idx' == byte_idx + 1",
+                meta.query_advice(byte_idx, Rotation::next()),
+                meta.query_advice(byte_idx, Rotation::cur()) + 1.expr(),
+            );
+            let b = select::expr(
+                tlen_lt_0x20,
+                256.expr(),
+                select::expr(tlen_eq_0x20, evm_word_rand, keccak_input_rand),
+            );
+            cb.require_equal(
+                "tag_value_acc' == tag_value_acc * b + byte_value'",
+                meta.query_advice(rlp_table.tag_value_acc, Rotation::next()),
+                meta.query_advice(rlp_table.tag_value_acc, Rotation::cur()) * b
+                    + meta.query_advice(byte_value, Rotation::next()),
+            );
 
             cb.gate(and::expr([
                 meta.query_fixed(q_enabled, Rotation::cur()),
@@ -756,10 +808,42 @@ impl<F: Field> RlpCircuitConfig<F> {
             ]))
         });
 
-        // TODO(rohit)
         // Bytes => DecodeTagStart
         meta.create_gate("state transition: Bytes => DecodeTagStart", |meta| {
             let mut cb = BaseConstraintBuilder::default();
+
+            let (_, tidx_eq_tlen) = tidx_lte_tlength.expr(meta, None);
+
+            // condition.
+            cb.require_equal(
+                "tag_idx == tag_length",
+                meta.query_advice(tag_idx, Rotation::cur()),
+                meta.query_advice(tag_length, Rotation::cur()),
+            );
+
+            // assertions.
+            cb.require_equal(
+                "is_output == true",
+                meta.query_advice(rlp_table.is_output, Rotation::cur()),
+                true.expr(),
+            );
+            cb.require_equal(
+                "q_lookup_data == true",
+                meta.query_advice(q_lookup_data, Rotation::cur()),
+                true.expr(),
+            );
+
+            // state transition.
+            cb.require_equal(
+                "tag' == tag_next",
+                meta.query_advice(tag, Rotation::next()),
+                meta.query_advice(tag_next, Rotation::cur()),
+            );
+            cb.require_equal(
+                "byte_idx' == byte_idx + 1",
+                meta.query_advice(byte_idx, Rotation::next()),
+                meta.query_advice(byte_idx, Rotation::cur()) + 1.expr(),
+            );
 
             cb.gate(and::expr([
                 meta.query_fixed(q_enabled, Rotation::cur()),
@@ -769,10 +853,62 @@ impl<F: Field> RlpCircuitConfig<F> {
             ]))
         });
 
-        // TODO(rohit)
         // DecodeTagStart => LongBytes
         meta.create_gate("state transition: DecodeTagStart => LongBytes", |meta| {
             let mut cb = BaseConstraintBuilder::default();
+
+            let (bv_gt_0xb8, bv_eq_0xb8) = byte_value_gte_0xb8.expr(meta, None);
+            let (bv_lt_0xc0, bv_eq_0xc0) = byte_value_lte_0xc0.expr(meta, None);
+
+            // condition.
+            cb.require_equal(
+                "0xb8 <= byte_value < 0xc0",
+                and::expr([
+                    or::expr([bv_gt_0xb8, bv_eq_0xb8]),
+                    bv_lt_0xc0,
+                    not::expr(bv_eq_0xc0),
+                ]),
+                1.expr(),
+            );
+
+            // assertions.
+            cb.require_equal(
+                "is_output == false",
+                meta.query_advice(rlp_table.is_output, Rotation::cur()),
+                false.expr(),
+            );
+            cb.require_equal(
+                "q_lookup_data == true",
+                meta.query_advice(q_lookup_data, Rotation::cur()),
+                true.expr(),
+            );
+            cb.require_equal(
+                "is_list == false",
+                meta.query_advice(is_list, Rotation::cur()),
+                false.expr(),
+            );
+
+            // state transition.
+            cb.require_equal(
+                "tag_length' == byte_value - 0xb7",
+                meta.query_advice(tag_length, Rotation::next()) + 0xb7.expr(),
+                meta.query_advice(byte_value, Rotation::cur()),
+            );
+            cb.require_equal(
+                "tag_idx' == 1",
+                meta.query_advice(tag_idx, Rotation::next()),
+                1.expr(),
+            );
+            cb.require_equal(
+                "tag_value_acc' == byte_value'",
+                meta.query_advice(rlp_table.tag_value_acc, Rotation::next()),
+                meta.query_advice(byte_value, Rotation::next()),
+            );
+            cb.require_equal(
+                "byte_idx' == byte_idx + 1",
+                meta.query_advice(byte_idx, Rotation::next()),
+                meta.query_advice(byte_idx, Rotation::cur()) + 1.expr(),
+            );
 
             cb.gate(and::expr([
                 meta.query_fixed(q_enabled, Rotation::cur()),
@@ -894,6 +1030,7 @@ impl<F: Field> RlpCircuitConfig<F> {
             byte_value_lte_0xf8,
             byte_value_gte_0xf8,
             tidx_lte_tlength,
+            tlength_lte_0x20,
             depth_check,
         }
     }
