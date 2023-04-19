@@ -520,6 +520,8 @@ impl<F: Field> RlpCircuitConfig<F> {
                         meta.query_advice(byte_idx, Rotation::next()),
                         meta.query_advice(byte_idx, Rotation::cur()) + 1.expr(),
                     );
+
+                    constrain_unchanged_fields!(meta, cb; depth);
                 });
 
                 // case 2: byte_value == 0x80
@@ -562,6 +564,8 @@ impl<F: Field> RlpCircuitConfig<F> {
                         meta.query_advice(byte_idx, Rotation::next()),
                         meta.query_advice(byte_idx, Rotation::cur()) + 1.expr(),
                     );
+
+                    constrain_unchanged_fields!(meta, cb; depth);
                 });
 
                 // case 3: 0xc0 <= byte_value < 0xf8
@@ -630,6 +634,12 @@ impl<F: Field> RlpCircuitConfig<F> {
                         );
                     },
                 );
+                cb.condition(
+                    and::expr([case_3.expr(), not::expr(is_tag_begin_vector(meta))]),
+                    |cb| {
+                        constrain_unchanged_fields!(meta, cb; depth);
+                    },
+                );
 
                 // case 4: tag in [EndList, EndVector]
                 let case_4 = or::expr([is_tag_end_list(meta), is_tag_end_vector(meta)]);
@@ -669,7 +679,7 @@ impl<F: Field> RlpCircuitConfig<F> {
                         cb.require_equal(
                             "byte_idx' == 0",
                             meta.query_advice(byte_idx, Rotation::next()),
-                            0.expr(),
+                            0.expr(), // TODO(rohit): should be 1?
                         );
                     },
                 );
