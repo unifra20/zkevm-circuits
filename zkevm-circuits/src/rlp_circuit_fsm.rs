@@ -450,6 +450,18 @@ impl<F: Field> RlpCircuitConfig<F> {
             |_meta| 0.expr(),
         );
 
+        macro_rules! constrain_unchanged_fields {
+            ( $meta:ident, $cb:ident; $($field:ident),+ ) => {
+                $(
+                    $cb.require_equal(
+                        "equate fields",
+                        $meta.query_advice($field, Rotation::cur()),
+                        $meta.query_advice($field, Rotation::next()),
+                    );
+                )+
+            };
+        }
+
         // DecodeTagStart => DecodeTagStart
         meta.create_gate(
             "state transition: DecodeTagStart => DecodeTagStart",
@@ -743,6 +755,9 @@ impl<F: Field> RlpCircuitConfig<F> {
                 meta.query_advice(byte_value, Rotation::next()),
             );
 
+            // depth is unchanged.
+            constrain_unchanged_fields!(meta, cb; depth);
+
             cb.gate(and::expr([
                 meta.query_fixed(q_enabled, Rotation::cur()),
                 is_not_padding.expr(),
@@ -800,6 +815,9 @@ impl<F: Field> RlpCircuitConfig<F> {
                     + meta.query_advice(byte_value, Rotation::next()),
             );
 
+            // depth, tag_length unchanged.
+            constrain_unchanged_fields!(meta, cb; depth, tag_length);
+
             cb.gate(and::expr([
                 meta.query_fixed(q_enabled, Rotation::cur()),
                 is_not_padding.expr(),
@@ -844,6 +862,9 @@ impl<F: Field> RlpCircuitConfig<F> {
                 meta.query_advice(byte_idx, Rotation::next()),
                 meta.query_advice(byte_idx, Rotation::cur()) + 1.expr(),
             );
+
+            // depth is unchanged.
+            constrain_unchanged_fields!(meta, cb; depth);
 
             cb.gate(and::expr([
                 meta.query_fixed(q_enabled, Rotation::cur()),
@@ -910,6 +931,9 @@ impl<F: Field> RlpCircuitConfig<F> {
                 meta.query_advice(byte_idx, Rotation::cur()) + 1.expr(),
             );
 
+            // depth is unchanged.
+            constrain_unchanged_fields!(meta, cb; depth);
+
             cb.gate(and::expr([
                 meta.query_fixed(q_enabled, Rotation::cur()),
                 is_not_padding.expr(),
@@ -957,6 +981,9 @@ impl<F: Field> RlpCircuitConfig<F> {
                 meta.query_advice(byte_idx, Rotation::cur()) + 1.expr(),
             );
 
+            // depth, tag_length are unchanged.
+            constrain_unchanged_fields!(meta, cb; depth, tag_length);
+
             cb.gate(and::expr([
                 meta.query_fixed(q_enabled, Rotation::cur()),
                 is_not_padding.expr(),
@@ -1002,6 +1029,9 @@ impl<F: Field> RlpCircuitConfig<F> {
                 meta.query_advice(byte_idx, Rotation::next()),
                 meta.query_advice(byte_idx, Rotation::cur()) + 1.expr(),
             );
+
+            // depth is unchanged.
+            constrain_unchanged_fields!(meta, cb; depth);
 
             cb.gate(and::expr([
                 meta.query_fixed(q_enabled, Rotation::cur()),
@@ -1078,6 +1108,10 @@ impl<F: Field> RlpCircuitConfig<F> {
                     meta.query_advice(depth, Rotation::cur()) + 1.expr(),
                 );
             });
+            // depth is unchanged if tag != BeginVector.
+            cb.condition(not::expr(is_tag_begin_vector(meta)), |cb| {
+                constrain_unchanged_fields!(meta, cb; depth);
+            });
 
             cb.gate(and::expr([
                 meta.query_fixed(q_enabled, Rotation::cur()),
@@ -1129,6 +1163,9 @@ impl<F: Field> RlpCircuitConfig<F> {
                 meta.query_advice(rlp_table.tag_value_acc, Rotation::cur()) * 256.expr()
                     + meta.query_advice(byte_value, Rotation::next()),
             );
+
+            // depth, tag_length are unchanged.
+            constrain_unchanged_fields!(meta, cb; depth, tag_length);
 
             cb.gate(and::expr([
                 meta.query_fixed(q_enabled, Rotation::cur()),
