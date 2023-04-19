@@ -918,10 +918,44 @@ impl<F: Field> RlpCircuitConfig<F> {
             ]))
         });
 
-        // TODO(rohit)
         // LongBytes => LongBytes
         meta.create_gate("state transition: LongBytes => LongBytes", |meta| {
             let mut cb = BaseConstraintBuilder::default();
+
+            let (tidx_lt_tlen, _) = tidx_lte_tlength.expr(meta, None);
+
+            // condition.
+            cb.require_equal("tag_idx < tag_length", tidx_lt_tlen, true.expr());
+
+            // assertions.
+            cb.require_equal(
+                "is_output = false",
+                meta.query_advice(rlp_table.is_output, Rotation::cur()),
+                false.expr(),
+            );
+            cb.require_equal(
+                "q_lookup_data == true",
+                meta.query_advice(q_lookup_data, Rotation::cur()),
+                true.expr(),
+            );
+
+            // state transition.
+            cb.require_equal(
+                "tag_idx' == tag_idx + 1",
+                meta.query_advice(tag_idx, Rotation::next()),
+                meta.query_advice(tag_idx, Rotation::cur()) + 1.expr(),
+            );
+            cb.require_equal(
+                "tag_value_acc' == tag_value_acc * 256 + byte_value'",
+                meta.query_advice(rlp_table.tag_value_acc, Rotation::next()),
+                meta.query_advice(rlp_table.tag_value_acc, Rotation::cur()) * 256.expr()
+                    + meta.query_advice(byte_value, Rotation::next()),
+            );
+            cb.require_equal(
+                "byte_idx' == byte_idx + 1",
+                meta.query_advice(byte_idx, Rotation::next()),
+                meta.query_advice(byte_idx, Rotation::cur()) + 1.expr(),
+            );
 
             cb.gate(and::expr([
                 meta.query_fixed(q_enabled, Rotation::cur()),
@@ -931,10 +965,43 @@ impl<F: Field> RlpCircuitConfig<F> {
             ]))
         });
 
-        // TODO(rohit)
         // LongBytes => Bytes
         meta.create_gate("state transition: LongBytes => Bytes", |meta| {
             let mut cb = BaseConstraintBuilder::default();
+
+            let (_, tidx_eq_tlen) = tidx_lte_tlength.expr(meta, None);
+
+            // condition.
+            cb.require_equal("tag_idx == tag_length", tidx_eq_tlen, true.expr());
+
+            // assertions.
+            cb.require_equal(
+                "is_output == false",
+                meta.query_advice(rlp_table.is_output, Rotation::cur()),
+                false.expr(),
+            );
+            cb.require_equal(
+                "q_lookup_data == true",
+                meta.query_advice(q_lookup_data, Rotation::cur()),
+                true.expr(),
+            );
+
+            // state transition.
+            cb.require_equal(
+                "tag_length' == tag_value_acc",
+                meta.query_advice(tag_length, Rotation::next()),
+                meta.query_advice(rlp_table.tag_value_acc, Rotation::cur()),
+            );
+            cb.require_equal(
+                "tag_idx' == 1",
+                meta.query_advice(tag_idx, Rotation::next()),
+                1.expr(),
+            );
+            cb.require_equal(
+                "byte_idx' == byte_idx + 1",
+                meta.query_advice(byte_idx, Rotation::next()),
+                meta.query_advice(byte_idx, Rotation::cur()) + 1.expr(),
+            );
 
             cb.gate(and::expr([
                 meta.query_fixed(q_enabled, Rotation::cur()),
@@ -944,10 +1011,73 @@ impl<F: Field> RlpCircuitConfig<F> {
             ]))
         });
 
-        // TODO(rohit)
         // DecodeTagStart => LongList
         meta.create_gate("state transition: DecodeTagStart => LongList", |meta| {
             let mut cb = BaseConstraintBuilder::default();
+
+            let (bv_gt_0xf8, bv_eq_0xf8) = byte_value_gte_0xf8.expr(meta, None);
+
+            // condition.
+            cb.require_equal(
+                "byte_value >= 0xf8",
+                or::expr([bv_gt_0xf8, bv_eq_0xf8]),
+                true.expr(),
+            );
+
+            // assertions.
+            cb.require_equal(
+                "tag in [BeginList, BeginVector]",
+                or::expr([is_tag_begin_list(meta), is_tag_begin_vector(meta)]),
+                true.expr(),
+            );
+            cb.require_equal(
+                "q_lookup_data == true",
+                meta.query_advice(q_lookup_data, Rotation::cur()),
+                true.expr(),
+            );
+            // if depth == 0:
+            cb.condition(depth_check.is_equal_expression.expr(), |cb| {
+                cb.require_equal(
+                    "is_output == false",
+                    meta.query_advice(rlp_table.is_output, Rotation::cur()),
+                    false.expr(),
+                );
+                cb.require_equal(
+                    "rlp_tag == RlpTag::Len",
+                    meta.query_advice(rlp_table.rlp_tag, Rotation::cur()),
+                    RlpTag::Len.expr(),
+                );
+                cb.require_equal(
+                    "tag_value_acc == byte_idx + byte_rev_idx",
+                    meta.query_advice(rlp_table.tag_value_acc, Rotation::cur()),
+                    meta.query_advice(byte_idx, Rotation::cur())
+                        + meta.query_advice(byte_rev_idx, Rotation::cur()),
+                );
+            });
+
+            // state transition.
+            cb.require_equal(
+                "tag_length' == byte_value - 0xf7",
+                meta.query_advice(tag_length, Rotation::next()) + 0xf7.expr(),
+                meta.query_advice(byte_value, Rotation::cur()),
+            );
+            cb.require_equal(
+                "tag_idx == 1",
+                meta.query_advice(tag_idx, Rotation::next()),
+                1.expr(),
+            );
+            cb.require_equal(
+                "byte_idx' == byte_idx + 1",
+                meta.query_advice(byte_idx, Rotation::next()),
+                meta.query_advice(byte_idx, Rotation::cur()) + 1.expr(),
+            );
+            cb.condition(is_tag_begin_vector(meta), |cb| {
+                cb.require_equal(
+                    "depth' == depth + 1",
+                    meta.query_advice(depth, Rotation::next()),
+                    meta.query_advice(depth, Rotation::cur()) + 1.expr(),
+                );
+            });
 
             cb.gate(and::expr([
                 meta.query_fixed(q_enabled, Rotation::cur()),
@@ -957,10 +1087,48 @@ impl<F: Field> RlpCircuitConfig<F> {
             ]))
         });
 
-        // TODO(rohit)
         // LongList => LongList
         meta.create_gate("state transition: LongList => LongList", |meta| {
             let mut cb = BaseConstraintBuilder::default();
+
+            let (tidx_lt_tlen, tidx_eq_tlen) = tidx_lte_tlength.expr(meta, None);
+
+            // condition.
+            cb.require_equal(
+                "tag_idx < tag_length",
+                and::expr([tidx_lt_tlen, not::expr(tidx_eq_tlen)]),
+                true.expr(),
+            );
+
+            // assertions.
+            cb.require_equal(
+                "is_output == false",
+                meta.query_advice(rlp_table.is_output, Rotation::cur()),
+                false.expr(),
+            );
+            cb.require_equal(
+                "q_lookup_data == true",
+                meta.query_advice(q_lookup_data, Rotation::cur()),
+                true.expr(),
+            );
+
+            // state transition.
+            cb.require_equal(
+                "tag_idx' == tag_idx + 1",
+                meta.query_advice(tag_idx, Rotation::next()),
+                meta.query_advice(tag_idx, Rotation::cur()) + 1.expr(),
+            );
+            cb.require_equal(
+                "byte_idx' == byte_idx + 1",
+                meta.query_advice(byte_idx, Rotation::next()),
+                meta.query_advice(byte_idx, Rotation::cur()) + 1.expr(),
+            );
+            cb.require_equal(
+                "tag_value_acc' == tag_value_acc * 256 + byte_value'",
+                meta.query_advice(rlp_table.tag_value_acc, Rotation::next()),
+                meta.query_advice(rlp_table.tag_value_acc, Rotation::cur()) * 256.expr()
+                    + meta.query_advice(byte_value, Rotation::next()),
+            );
 
             cb.gate(and::expr([
                 meta.query_fixed(q_enabled, Rotation::cur()),
