@@ -1200,19 +1200,19 @@ mod test {
                     call_op
                 );
                 let mut code = self.setup_code.clone();
-                code.push(32, self.ret_size)
-                    .push(32, self.ret_offset)
-                    .push(32, self.call_data_length)
-                    .push(32, self.call_data_offset);
+                code.op_push32(self.ret_size)
+                    .op_push32(self.ret_offset)
+                    .op_push32(self.call_data_length)
+                    .op_push32(self.call_data_offset);
                 if call_op == OpcodeId::CALL || call_op == OpcodeId::CALLCODE {
-                    code.push(32, self.value);
+                    code.op_push32(self.value);
                 }
-                code.push(32, self.address)
-                    .push(32, self.gas)
+                code.op_push32(self.address)
+                    .op_push32(self.gas)
                     .write_op(call_op)
-                    .write_op(OpcodeId::POP);
+                    .op_pop();
                 for (offset, _) in self.stack_value.iter().rev() {
-                    code.push(32, *offset).write_op(OpcodeId::MLOAD);
+                    code.op_mload(*offset);
                 }
 
                 code

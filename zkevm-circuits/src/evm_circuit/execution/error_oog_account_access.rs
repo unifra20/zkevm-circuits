@@ -191,12 +191,12 @@ mod test {
         if is_warm {
             code.push(20, address.to_word());
             code.write_op(opcode);
-            code.write_op(OpcodeId::POP);
+            code.op_pop();
         }
 
         code.push(20, address.to_word());
         code.write_op(opcode);
-        code.write_op(OpcodeId::STOP);
+        code.op_stop();
 
         let gas = GasCost::TX.0
             + if is_warm {
@@ -257,12 +257,12 @@ mod test {
             code_b.push(20, address.to_word());
 
             code_b.write_op(opcode);
-            code_b.write_op(OpcodeId::POP);
+            code_b.op_pop();
         }
 
         code_b.push(20, address.to_word());
         code_b.write_op(opcode);
-        code_b.write_op(OpcodeId::STOP);
+        code_b.op_stop();
 
         // code A calls code B.
         let pushdata = rand_bytes(8);

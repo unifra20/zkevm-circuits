@@ -787,28 +787,21 @@ mod test {
             MSTORE
         };
 
-        code.append(&bytecode! {PUSH1(45)}); // salt;
-        code.append(&bytecode! {
-            PUSH1(initialization_bytes.len()) // size
-            PUSH1(32 - initialization_bytes.len()) // length
-            PUSH2(23414) // value
-        });
-        code.write_op(OpcodeId::CREATE2);
+        code.op_create2(
+            23414,
+            32 - initialization_bytes.len(),
+            initialization_bytes.len(),
+            45,
+        );
 
         // construct address collision by create2 twice
-        code.append(&bytecode! {PUSH1(45)}); // salt;
-
-        code.append(&bytecode! {
-            PUSH1(initialization_bytes.len()) // size
-            PUSH1(32 - initialization_bytes.len()) // length
-            PUSH2(23414) // value
-        });
-        code.write_op(OpcodeId::CREATE2);
-        code.append(&bytecode! {
-            PUSH1(0)
-            PUSH1(0)
-            REVERT
-        });
+        code.op_create2(
+            23414,
+            32 - initialization_bytes.len(),
+            initialization_bytes.len(),
+            45,
+        );
+        code.op_revert(0, 0);
 
         code
     }

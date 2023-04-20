@@ -138,18 +138,15 @@ mod test {
         let memory_bytes = [0xef; 10];
         let memory_value = Word::from_big_endian(&memory_bytes);
 
-        let mut code = bytecode! {
+        bytecode! {
             PUSH10(memory_value)
             PUSH32(0)
             MSTORE
             PUSH2( 5 ) // length to copy
             PUSH2(32u64 - u64::try_from(memory_bytes.len()).unwrap()) // offset
             //PUSH2(0x00) // offset
-
-        };
-        code.write_op(OpcodeId::RETURN);
-
-        code
+            RETURN
+        }
     }
 
     fn creator_bytecode(initialization_bytecode: Bytecode, is_create2: bool) -> Bytecode {
@@ -164,9 +161,7 @@ mod test {
             .chain(0u8..((32 - initialization_bytes.len() % 32) as u8))
             .collect();
         for (index, word) in code_creator.chunks(32).enumerate() {
-            code.push(32, Word::from_big_endian(word));
-            code.push(32, Word::from(index * 32));
-            code.write_op(OpcodeId::MSTORE);
+            code.op_mstore(index * 32, Word::from_big_endian(word));
         }
 
         if is_create2 {

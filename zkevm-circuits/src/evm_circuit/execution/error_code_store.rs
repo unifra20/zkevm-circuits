@@ -189,9 +189,7 @@ mod test {
             .chain(0u8..((32 - initialization_bytes.len() % 32) as u8))
             .collect();
         for (index, word) in code_creator.chunks(32).enumerate() {
-            code.push(32, Word::from_big_endian(word));
-            code.push(32, Word::from(index * 32));
-            code.write_op(OpcodeId::MSTORE);
+            code.op_mstore(index * 32, Word::from_big_endian(word));
         }
 
         if is_create2 {
