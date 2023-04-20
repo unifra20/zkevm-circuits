@@ -461,6 +461,17 @@ impl<F: Field> RlpCircuitConfig<F> {
                 )+
             };
         }
+        macro_rules! constrain_fields {
+            ( $meta:ident, $cb:ident, $value:expr; $($field:ident),+ ) => {
+                $(
+                    $cb.require_equal(
+                        "field constrained (by default)",
+                        $meta.query_advice($field, Rotation::cur()),
+                        $value.expr(),
+                    );
+                ),+
+            }
+        }
 
         // DecodeTagStart => DecodeTagStart
         meta.create_gate(
@@ -520,6 +531,11 @@ impl<F: Field> RlpCircuitConfig<F> {
                         meta.query_advice(byte_idx, Rotation::next()),
                         meta.query_advice(byte_idx, Rotation::cur()) + 1.expr(),
                     );
+                    cb.require_equal(
+                        "byte_rev_idx' + 1 == byte_rev_idx",
+                        meta.query_advice(byte_rev_idx, Rotation::next()) + 1.expr(),
+                        meta.query_advice(byte_rev_idx, Rotation::cur()),
+                    );
 
                     constrain_unchanged_fields!(meta, cb; depth);
                 });
@@ -536,6 +552,11 @@ impl<F: Field> RlpCircuitConfig<F> {
                         "is_output == true",
                         meta.query_advice(rlp_table.is_output, Rotation::cur()),
                         true.expr(),
+                    );
+                    cb.require_equal(
+                        "is_list == false",
+                        meta.query_advice(is_list, Rotation::cur()),
+                        false.expr(),
                     );
                     cb.require_equal(
                         "q_lookup_data == true",
@@ -564,6 +585,11 @@ impl<F: Field> RlpCircuitConfig<F> {
                         meta.query_advice(byte_idx, Rotation::next()),
                         meta.query_advice(byte_idx, Rotation::cur()) + 1.expr(),
                     );
+                    cb.require_equal(
+                        "byte_rev_idx' + 1 == byte_rev_idx",
+                        meta.query_advice(byte_rev_idx, Rotation::next()) + 1.expr(),
+                        meta.query_advice(byte_rev_idx, Rotation::cur()),
+                    );
 
                     constrain_unchanged_fields!(meta, cb; depth);
                 });
@@ -589,6 +615,11 @@ impl<F: Field> RlpCircuitConfig<F> {
                         true.expr(),
                     );
                     cb.require_equal(
+                        "is_list == false",
+                        meta.query_advice(is_list, Rotation::cur()),
+                        false.expr(),
+                    );
+                    cb.require_equal(
                         "q_lookup_data == true",
                         meta.query_advice(q_lookup_data, Rotation::cur()),
                         true.expr(),
@@ -604,6 +635,11 @@ impl<F: Field> RlpCircuitConfig<F> {
                         "byte_idx' == byte_idx + 1",
                         meta.query_advice(byte_idx, Rotation::next()),
                         meta.query_advice(byte_idx, Rotation::cur()) + 1.expr(),
+                    );
+                    cb.require_equal(
+                        "byte_rev_idx' == byte_rev_idx - 1",
+                        meta.query_advice(byte_rev_idx, Rotation::next()) + 1.expr(),
+                        meta.query_advice(byte_rev_idx, Rotation::cur()),
                     );
                 });
                 cb.condition(
@@ -621,6 +657,19 @@ impl<F: Field> RlpCircuitConfig<F> {
                                 + meta.query_advice(byte_value, Rotation::cur())
                                 + 1.expr()
                                 - 0xc0.expr(),
+                        );
+                    },
+                );
+                cb.condition(
+                    and::expr([
+                        case_3.expr(),
+                        not::expr(depth_check.is_equal_expression.expr()),
+                    ]),
+                    |cb| {
+                        cb.require_equal(
+                            "rlp_tag == tag",
+                            meta.query_advice(rlp_table.rlp_tag, Rotation::cur()),
+                            meta.query_advice(tag, Rotation::cur()),
                         );
                     },
                 );
@@ -676,10 +725,11 @@ impl<F: Field> RlpCircuitConfig<F> {
                         );
 
                         // state transition.
+                        // TODO(rohit): do this only if the next state is not State::End.
                         cb.require_equal(
-                            "byte_idx' == 0",
+                            "byte_idx' == 1",
                             meta.query_advice(byte_idx, Rotation::next()),
-                            0.expr(), // TODO(rohit): should be 1?
+                            1.expr(),
                         );
                     },
                 );
@@ -1200,7 +1250,13 @@ impl<F: Field> RlpCircuitConfig<F> {
 
             // assertions.
             cb.condition(depth_check.is_equal_expression.expr(), |cb| {
-                // TODO(rohit): fix this.
+                // if depth == 0:
+                // tag_value_acc == byte_rev_idx - 1
+                cb.require_equal(
+                    "byte_rev_idx ends at 1",
+                    meta.query_advice(rlp_table.tag_value_acc, Rotation::cur()) + 1.expr(),
+                    meta.query_advice(byte_rev_idx, Rotation::cur()),
+                );
             });
 
             // state transition.
