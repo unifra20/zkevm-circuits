@@ -90,11 +90,11 @@ pub(crate) struct AssignedECDSA<F: Field, FC: FieldChip<F>> {
 #[derive(Debug, Clone)]
 /// Output of the Sign Verify circuit
 pub(crate) struct AssignedSignatureVerify<F: Field> {
-    pub(crate) address: Value<F>,
+    pub(crate) address: AssignedValue<F>,
     pub(crate) msg_len: usize,
     pub(crate) msg_rlc: Value<F>,
-    pub(crate) msg_hash_rlc: Value<F>,
-    pub(crate) sig_is_valid: Value<F>,
+    pub(crate) msg_hash_rlc: AssignedValue<F>,
+    pub(crate) sig_is_valid: AssignedValue<F>,
 }
 
 #[derive(Debug, Clone)]
@@ -120,10 +120,11 @@ impl<F: Field> SignVerifyCircuit<F> {
     /// is (in)valid or not under the given public key and the message hash in
     /// the circuit. Does not enforce the signature is valid.
     ///
-    /// Returns the cells for
-    /// - public keys
-    /// - message hashes
-    /// - a boolean whether the signature is correct or not
+    /// Returns
+    /// - the cells for public keys
+    /// - the message
+    /// - the cells for message hashes
+    /// - the cells for a boolean whether the signature is correct or not
     ///
     /// WARNING: this circuit does not enforce the returned value to be true
     /// make sure the caller checks this result!
@@ -141,18 +142,22 @@ impl<F: Field> SignVerifyCircuit<F> {
         let ecc_chip = EccChip::<F, FpChip<F>>::new(&fp_chip);
 
         // assign ecdsa witnesses
-        let sign_data_pad = vec![SignData::default(); self.max_sigs - self.sign_data.len()];
+        // pad the signatures to max_sigs
+        let pad_len = self.max_sigs - self.sign_data.len();
+        let sign_data_pad = vec![SignData::default(); pad_len];
+        log::info!(
+            "{} real signatures, {} pads, {} total",
+            self.sign_data.len(),
+            pad_len,
+            self.max_sigs
+        );
         let res: Vec<AssignedECDSA<F, FpChip<F>>> = self
             .sign_data
             .iter()
             .chain(sign_data_pad.iter())
             .enumerate()
             .map(|(index, sign_data)| {
-                log::trace!(
-                    "assigning {}-th out of {} sign data",
-                    index,
-                    self.sign_data.len()
-                );
+                log::trace!("assigning {}-th out of {} sign data", index, self.max_sigs);
 
                 let SignData {
                     signature,
@@ -204,31 +209,34 @@ impl<F: Field> SignVerifyCircuit<F> {
     fn enable_keccak_lookup(
         &self,
         config: &SignVerifyConfig<F>,
+        ctx: &mut Context<F>,
         region: &mut Region<F>,
-        offset: &mut usize,
-        is_address_zero: &AssignedValue<F>,
-        pk_rlc: &AssignedValue<F>,
-        pk_hash_rlc: &AssignedValue<F>,
+        // offset: &mut usize,
+        deferred_keccak_checks: &[DeferredKeccakCheck<F>],
     ) -> Result<(), Error> {
         log::trace!("keccak lookup");
+        let mut offset = 0;
+        for deferred_keccak_check in deferred_keccak_checks.iter() {
+            // Layout:
+            // | q_keccak |        rlc      |
+            // | -------- | --------------- |
+            // |     1    | is_address_zero |
+            // |          |    pk_rlc       |
+            // |          |    pk_hash_rlc  |
+            config.q_keccak.enable(region, offset)?;
 
-        // // Layout:
-        // // | q_keccak |        rlc      |
-        // // | -------- | --------------- |
-        // // |     1    | is_address_zero |
-        // // |          |    pk_rlc       |
-        // // |          |    pk_hash_rlc  |
-        // config.q_keccak.enable(&mut region, *offset)?;
-
-        // // is_address_zero
-        // let tmp_cell = region.assign_advice(
-        //     || "is_address_zero",
-        //     config.rlc_column,
-        //     *offset,
-        //     || Value::known(is_address_zero.value().clone()),
-        // )?;
-        // region.constrain_equal(is_address_zero.cell.unwrap(), tmp_cell.cell())?;
-
+            // is_address_zero
+            let tmp_cell = region.assign_advice(
+                || "is_address_zero",
+                config.rlc_column,
+                offset,
+                || Value::known(deferred_keccak_check.is_address_zero.value().clone()),
+            )?;
+            region.constrain_equal(
+                deferred_keccak_check.is_address_zero.cell.unwrap(),
+                tmp_cell.cell(),
+            )?;
+        }
         Ok(())
     }
 
@@ -346,7 +354,6 @@ impl<F: Field> SignVerifyCircuit<F> {
             let pk_assigned = ecc_chip.load_private(ctx, (sign_data.pk.x, sign_data.pk.y));
 
             assert_crt_int_byte_repr(ctx, &pk_assigned.x, &pk_x_le, &powers_of_256_cells, &None)?;
-
             assert_crt_int_byte_repr(ctx, &pk_assigned.y, &pk_y_le, &powers_of_256_cells, &None)?;
 
             let assigned_pk_le_selected = [pk_y_le, pk_x_le].concat();
@@ -370,6 +377,8 @@ impl<F: Field> SignVerifyCircuit<F> {
         sign_data_decomposed_vec: &[SignDataDecomposed<F>],
         challenges: &Challenges<Value<F>>,
     ) -> Result<(Vec<DeferredKeccakCheck<F>>, Vec<AssignedSignatureVerify<F>>), Error> {
+        log::trace!("begin assign sign verify");
+
         assert_eq!(assigned_ecdsas.len(), sign_data_decomposed_vec.len());
         assert_eq!(assigned_ecdsas.len(), self.max_sigs);
 
@@ -394,7 +403,6 @@ impl<F: Field> SignVerifyCircuit<F> {
                 .map(|x| QuantumCell::Witness(x))
                 .collect_vec();
 
-        let sign_data_pad = vec![SignData::default(); self.max_sigs - self.sign_data.len()];
         let mut deferred_keccak_check = vec![];
         let mut assigned_sig_verif = vec![];
 
@@ -403,6 +411,7 @@ impl<F: Field> SignVerifyCircuit<F> {
             .zip(sign_data_decomposed_vec.iter())
             .enumerate()
         {
+            log::trace!("{} out of {} signature", index, self.max_sigs);
             // ================================================
             // step 1 random linear combination of message hash
             // ================================================
@@ -448,15 +457,16 @@ impl<F: Field> SignVerifyCircuit<F> {
                 pk_hash_rlc,
             });
             assigned_sig_verif.push(AssignedSignatureVerify {
-                address: Value::known(*sign_data_decomposed.address.value()),
+                address: sign_data_decomposed.address,
                 msg_len: assigned_ecdsa.msg.len(),
                 msg_rlc: challenges
                     .keccak_input()
                     .map(|r| rlc::value(assigned_ecdsa.msg.iter().rev(), r)),
-                msg_hash_rlc: Value::known(*msg_hash_rlc.value()),
-                sig_is_valid: Value::known(*assigned_ecdsa.sig_is_valid.value()),
+                msg_hash_rlc: msg_hash_rlc,
+                sig_is_valid: assigned_ecdsa.sig_is_valid,
             })
         }
+        log::trace!("finished assign sign verify");
         Ok((deferred_keccak_check, assigned_sig_verif))
     }
 
@@ -466,6 +476,9 @@ impl<F: Field> SignVerifyCircuit<F> {
         layouter: &mut impl Layouter<F>,
         challenges: &Challenges<Value<F>>,
     ) -> Result<Vec<AssignedSignatureVerify<F>>, Error> {
+        log::trace!("begin ecdsa assignment");
+        log::trace!("using configuration: {:?}", config);
+
         let mut first_pass = SKIP_FIRST_PASS;
 
         // assemble chips
@@ -478,21 +491,17 @@ impl<F: Field> SignVerifyCircuit<F> {
 
         let assigned_sig_verifs = layouter.assign_region(
             || "ecdsa chip verification",
-            |region| {
+            |mut region| {
                 let mut builder = GateThreadBuilder::<F>::mock();
-                //
-                // if first_pass {
-                //     first_pass = false;
-                //     return Ok(())
-                //     // return Ok((vec![], vec![]));
-                // }
 
-                // let mut ctx = range_config.new_context(region);
+                if first_pass {
+                    first_pass = false;
+                    return Ok(vec![]);
+                }
 
                 // ================================================
                 // step 1: assert the signature is valid in circuit
                 // ================================================
-
                 let assigned_ecdsas = self.assign_ecdsas(&mut builder.main(0), &config.params)?;
 
                 // ================================================
@@ -504,19 +513,18 @@ impl<F: Field> SignVerifyCircuit<F> {
                 // ================================================
                 // step 3: compute RLC of keys and messages
                 // ================================================
-                let ( _deferred_keccak_check, assigned_sig_verifs) = self.assign_sig_verify(
-                    &mut builder.main(1),
+                let (deferred_keccak_check, assigned_sig_verifs) = self.assign_sig_verify(
+                    &mut builder.main(0),
                     assigned_ecdsas.as_ref(),
                     sign_data_decomposed_vec.as_ref(),
                     challenges,
                 )?;
 
-                // // // IMPORTANT: this assigns all constants to the fixed columns
-                // // // IMPORTANT: this copies cells to the lookup advice column to perform range
-                // // // check lookups
-                // // // This is not optional.
-                // // let lookup_cells = ecdsa_chip.finalize(&mut ctx);
-                // // log::info!("total number of lookup cells: {}", lookup_cells);
+                // ================================================
+                // step 4: check keccak lookup
+                // ================================================
+
+                self.enable_keccak_lookup(config, &mut builder.main(0), &mut region,&deferred_keccak_check)?;
 
                 // for sig_verif in assigned_sig_verifs.iter() {
                 //     config.ecdsa_config.range.gate.assert_equal(
@@ -527,28 +535,19 @@ impl<F: Field> SignVerifyCircuit<F> {
                 // }
                 // ctx.print_stats(&["Range"]);
                 // Ok((deferred_keccak_check, assigned_sig_verifs))
+
+                builder.assign_all(
+                    &config.range_config.gate,
+                    &config.range_config.lookup_advice,
+                    &config.range_config.q_lookup,
+                    &mut region,
+                    Default::default(),
+                );
+
                 Ok(assigned_sig_verifs)
             },
         )?;
 
-        // layouter.assign_region(
-        //     || "keccak lookup",
-        //     |region| {
-        //         let mut ctx = RegionCtx::new(region, 0);
-        //         for e in deferred_keccak_check.iter() {
-        //             let [is_address_zero, pk_rlc, pk_hash_rlc] = e;
-        //             self.enable_keccak_lookup(
-        //                 config,
-        //                 &mut ctx,
-        //                 &is_address_zero,
-        //                 &pk_rlc,
-        //                 &pk_hash_rlc,
-        //             )?;
-        //         }
-        //         Ok(())
-        //     },
-        // )?;
-        // todo!()
         Ok(assigned_sig_verifs)
     }
 
@@ -560,21 +559,22 @@ impl<F: Field> SignVerifyCircuit<F> {
     ) -> Result<(), Error> {
         // let gate_chip = GateChip::default();
 
-        layouter.assign_region(
-            || "assert sigs are valid",
-            |region| {
-                // let mut ctx = config.ecdsa_config.new_context(region);
-                // for sig_verif in sig_verifs {
-                //     flex_gate_chip.assert_is_const(
-                //         &mut ctx,
-                //         &sig_verif.sig_is_valid.clone().into(),
-                //         &F::one(),
-                //     );
-                // }
+        // layouter.assign_region(
+        //     || "assert sigs are valid",
+        //     |region| {
+        //         let mut builder = GateThreadBuilder::<F>::mock();
+        //         for sig_verif in sig_verifs {
+        //             gate_chip.assert_is_const(
+        //                 &mut builder.main(0),
+        //                 &sig_verif.sig_is_valid.clone(),
+        //                 &F::one(),
+        //             );
+        //         }
 
-                Ok(())
-            },
-        )
+        //         Ok(())
+        //     },
+        // )
+        Ok(())
     }
 }
 
@@ -603,8 +603,6 @@ fn assert_crt_int_byte_repr<F: Field>(
     assert!(powers_of_256.len() >= 11);
 
     let gate_chip = GateChip::default();
-
-    let zero = ctx.load_zero();
     let zero_cell = ctx.load_zero();
 
     // apply the overriding flag
@@ -805,7 +803,7 @@ mod sign_verify_tests {
         // pk_hash: d90e2e9d267cbcfd94de06fa7adbe6857c2c733025c0b8938a76beeefc85d6c7
         // addr: 0x7adbe6857c2c733025c0b8938a76beeefc85d6c7
         let mut rng = XorShiftRng::seed_from_u64(1);
-        const MAX_VERIF: usize = 2;
+        const MAX_VERIF: usize = 4;
         const NUM_SIGS: usize = 2;
         let mut signatures = Vec::new();
         for _ in 0..NUM_SIGS {
@@ -826,7 +824,7 @@ mod sign_verify_tests {
             });
         }
 
-        let k = 19;
+        let k = 20;
         run::<Fr>(k, MAX_VERIF, signatures);
     }
 }

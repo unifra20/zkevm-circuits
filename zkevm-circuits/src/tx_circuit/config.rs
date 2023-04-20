@@ -32,7 +32,7 @@ impl<F: Field> SignVerifyConfig<F> {
         #[cfg(feature = "onephase")]
         let num_advice = &[calc_required_advices(MAX_NUM_SIG) + 1];
         #[cfg(not(feature = "onephase"))]
-        let num_advice = &[calc_required_advices(MAX_NUM_SIG), 1];
+        let num_advice = &[calc_required_advices(MAX_NUM_SIG), 2];
 
         let range_config = RangeConfig::configure(
             meta,

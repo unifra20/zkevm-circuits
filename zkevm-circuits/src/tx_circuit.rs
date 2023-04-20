@@ -1444,7 +1444,7 @@ impl<F: Field> TxCircuit<F> {
                     }
 
                     #[cfg(feature = "enable-sign-verify")]
-                    let tx_sign_hash = assigned_sig_verif.msg_hash_rlc;
+                    let tx_sign_hash = Value::known(*assigned_sig_verif.msg_hash_rlc.value());
                     #[cfg(not(feature = "enable-sign-verify"))]
                     let tx_sign_hash = {
                         challenges.evm_word().map(|rand| {
@@ -1604,11 +1604,12 @@ impl<F: Field> TxCircuit<F> {
                             CallerAddress => {
                                 #[cfg(feature = "enable-sign-verify")]
                                 {
+                                    let address = Value::known(*assigned_sig_verif.address.value());
                                     region.assign_advice(
                                         || "sv_address",
                                         config.sv_address,
                                         offset - 1,
-                                        || assigned_sig_verif.address,
+                                        || address,
                                     )?;
                                 }
                                 #[cfg(not(feature = "enable-sign-verify"))]
@@ -1629,6 +1630,12 @@ impl<F: Field> TxCircuit<F> {
                             TxSignHash => {
                                 #[cfg(feature = "enable-sign-verify")]
                                 {
+                                    // FIXME(ZZ):
+                                    // We want to constraint an assigned cell is the same as the one
+                                    // in the tx_table, but  assigned_sig_verif.msg_hash_rlc is an
+                                    // cell allocated by halo2-lib, which has different format as
+                                    // halo2-proofs.
+                                    //
                                     // region.constrain_equal(
                                     //     assigned_sig_verif.msg_hash_rlc.clone().cell.unwrap(),
                                     //     Cell {
@@ -1830,7 +1837,7 @@ impl<F: Field> SubCircuit<F> for TxCircuit<F> {
         {
             let assigned_sig_verifs =
                 self.sign_verify
-                    .assign(&config.sign_verify, layouter,  challenges)?;
+                    .assign(&config.sign_verify, layouter, challenges)?;
             self.sign_verify.assert_sig_is_valid(
                 &config.sign_verify,
                 layouter,

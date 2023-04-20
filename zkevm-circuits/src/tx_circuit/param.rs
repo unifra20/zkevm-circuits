@@ -29,7 +29,7 @@ impl SignVerifyCircuitParams {
         SignVerifyCircuitParams {
             strategy: FpStrategy::Simple,
             degree: 20,
-            num_advice: 34,
+            num_advice: 52,
             num_lookup_advice: 17,
             num_fixed: 1,
             lookup_bits: 13,
