@@ -350,6 +350,8 @@ impl<'a> CircuitInputBuilder {
             StartOp {},
         );
 
+        self.block.withdraw_root = withdraw_root;
+        self.block.prev_withdraw_root = withdraw_root_before;
         self.block.block_steps.end_block_not_last = end_block_not_last;
         self.block.block_steps.end_block_last = end_block_last;
         Ok(())
