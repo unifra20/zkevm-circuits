@@ -2,7 +2,7 @@ use halo2_proofs::arithmetic::FieldExt;
 
 use crate::witness::tx::L1MsgTx;
 
-use super::RlpFsmWitnessGen;
+use super::{RlpFsmWitnessGen, RomTableRow};
 
 impl<F: FieldExt> RlpFsmWitnessGen<F> for L1MsgTx {
     fn gen_witness(
@@ -11,4 +11,8 @@ impl<F: FieldExt> RlpFsmWitnessGen<F> for L1MsgTx {
     ) -> Vec<super::RlpFsmWitnessRow<halo2_proofs::circuit::Value<F>>> {
         unimplemented!()
     }
+}
+
+pub fn rom_table_rows() -> Vec<RomTableRow> {
+    unimplemented!()
 }

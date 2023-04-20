@@ -27,10 +27,11 @@ pub enum Tag {
     To,
     Value,
     Data,
+    ChainId,
+    Zero,
     SigV,
     SigR,
     SigS,
-    ChainId,
     AccessListAddress,
     AccessListStorageKey,
     MaxPriorityFeePerGas,
@@ -48,25 +49,6 @@ impl Tag {
         match &self {
             Self::BeginList | Self::BeginVector | Self::EndList | Self::EndVector => true,
             _ => false,
-        }
-    }
-
-    pub fn max_len(&self) -> usize {
-        match &self {
-            Self::EndList | Self::EndVector => 0,
-            Self::BeginList | Self::BeginVector | Self::Nonce | Self::Gas | Self::SigV => {
-                N_BYTES_U64
-            }
-            Self::To | Self::AccessListAddress => N_BYTES_ACCOUNT_ADDRESS,
-            Self::GasPrice
-            | Self::Value
-            | Self::SigR
-            | Self::SigS
-            | Self::ChainId
-            | Self::AccessListStorageKey
-            | Self::MaxPriorityFeePerGas
-            | Self::MaxFeePerGas => N_BYTES_WORD,
-            Self::Data => 2usize.pow(24),
         }
     }
 }
@@ -98,12 +80,45 @@ impl From<RlpTag> for u64 {
 }
 
 #[derive(Clone, Copy, Debug)]
+pub struct RomTableRow {
+    pub tag: Tag,
+    pub tag_next: Tag,
+    pub max_length: usize,
+    pub is_list: bool,
+    pub format: Format,
+}
+
+impl From<(Tag, Tag, usize, Format)> for RomTableRow {
+    fn from(value: (Tag, Tag, usize, Format)) -> Self {
+        Self {
+            tag: value.0,
+            tag_next: value.1,
+            max_length: value.2,
+            is_list: value.0.is_list(),
+            format: value.3,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, EnumIter)]
 pub enum Format {
     TxSignEip155 = 0,
     TxHashEip155,
     TxSignPreEip155,
     TxHashPreEip155,
     L1MsgHash,
+}
+
+impl Format {
+    pub fn rom_table_rows(&self) -> Vec<RomTableRow> {
+        match self {
+            Self::TxSignEip155 => eip155::tx_sign_rom_table_rows(),
+            Self::TxHashEip155 => eip155::tx_hash_rom_table_rows(),
+            Self::TxSignPreEip155 => pre_eip155::tx_sign_rom_table_rows(),
+            Self::TxHashPreEip155 => pre_eip155::tx_hash_rom_table_rows(),
+            Self::L1MsgHash => l1_msg::rom_table_rows(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, EnumIter)]
