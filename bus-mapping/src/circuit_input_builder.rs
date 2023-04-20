@@ -290,6 +290,9 @@ impl<'a> CircuitInputBuilder {
 
         use crate::precompile::l2_address::{MESSAGE_QUEUE, WITHDRAW_TRIE_ROOT_SLOT};
 
+        let withdraw_root = *self.sdb.get_storage(&*MESSAGE_QUEUE, &*WITHDRAW_TRIE_ROOT_SLOT).1;
+        let withdraw_root_before = *self.sdb.get_committed_storage(&*MESSAGE_QUEUE, &*WITHDRAW_TRIE_ROOT_SLOT).1;
+
         let max_rws = self.block.circuits_params.max_rws;
         let mut end_block_not_last = self.block.block_steps.end_block_not_last.clone();
         let mut end_block_last = self.block.block_steps.end_block_last.clone();
@@ -308,10 +311,6 @@ impl<'a> CircuitInputBuilder {
                 Word::from(state.block.txs.len() as u64),
             );
         }
-
-        // TODO: pick the value from block
-        let withdraw_root = Word::zero();
-        let withdraw_root_before = Word::zero();
 
         // increase the total rwc by 1
         state.push_op(&mut end_block_last, RW::READ, StorageOp::new(
