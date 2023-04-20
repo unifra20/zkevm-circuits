@@ -303,12 +303,13 @@ impl<'a> CircuitInputBuilder {
         let mut dummy_tx_ctx = TransactionContext::default();
         let mut state = self.state_ref(&mut dummy_tx, &mut dummy_tx_ctx);
 
+        let dummy_tx_id = state.block.txs.len();
         if let Some(call_id) = state.block.txs.last().map(|tx| tx.calls[0].call_id) {
             state.call_context_read(
                 &mut end_block_last,
                 call_id,
                 CallContextField::TxId,
-                Word::from(state.block.txs.len() as u64),
+                Word::from(dummy_tx_id as u64),
             );
         }
 
@@ -318,8 +319,7 @@ impl<'a> CircuitInputBuilder {
             *WITHDRAW_TRIE_ROOT_SLOT,
             withdraw_root,
             withdraw_root,
-            // does the dummy_tx_ctx work?
-            state.tx_ctx.id(),
+            dummy_tx_id,
             withdraw_root_before,
         ));
 
