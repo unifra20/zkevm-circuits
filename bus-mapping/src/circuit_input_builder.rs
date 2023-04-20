@@ -15,7 +15,7 @@ pub use self::block::BlockHead;
 use crate::{
     error::Error,
     evm::opcodes::{gen_associated_ops, gen_begin_tx_ops, gen_end_tx_ops},
-    operation::{CallContextField, Operation, RWCounter, StartOp, RW},
+    operation::{CallContextField, Operation, RWCounter, StorageOp, StartOp, RW},
     rpc::GethClient,
     state_db::{self, CodeDB, StateDB},
 };
@@ -287,6 +287,9 @@ impl<'a> CircuitInputBuilder {
 
     /// ..
     pub fn set_end_block(&mut self) -> Result<(), Error> {
+
+        use crate::precompile::l2_address::{MESSAGE_QUEUE, WITHDRAW_TRIE_ROOT_SLOT};
+
         let max_rws = self.block.circuits_params.max_rws;
         let mut end_block_not_last = self.block.block_steps.end_block_not_last.clone();
         let mut end_block_last = self.block.block_steps.end_block_last.clone();
@@ -305,6 +308,21 @@ impl<'a> CircuitInputBuilder {
                 Word::from(state.block.txs.len() as u64),
             );
         }
+
+        // TODO: pick the value from block
+        let withdraw_root = Word::zero();
+        let withdraw_root_before = Word::zero();
+
+        // increase the total rwc by 1
+        state.push_op(&mut end_block_last, RW::READ, StorageOp::new(
+            *MESSAGE_QUEUE,
+            *WITHDRAW_TRIE_ROOT_SLOT,
+            withdraw_root,
+            withdraw_root,
+            // does the dummy_tx_ctx work?
+            state.tx_ctx.id(),
+            withdraw_root_before,
+        ));
 
         let mut push_op = |step: &mut ExecStep, rwc: RWCounter, rw: RW, op: StartOp| {
             let op_ref = state.block.container.insert(Operation::new(rwc, rw, op));

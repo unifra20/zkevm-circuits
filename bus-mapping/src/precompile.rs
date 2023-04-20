@@ -10,6 +10,19 @@ use pallet_evm_precompile_bn128::{Bn128Add, Bn128Mul, Bn128Pairing};
 use pallet_evm_precompile_modexp::Modexp;
 use pallet_evm_precompile_simple::{ECRecover, Identity, Ripemd160, Sha256};
 
+/// addresses and configs for scroll's l2 precompile
+pub mod l2_address {
+    use super::*;
+    use eth_types::U256;
+    use once_cell::sync::Lazy;
+    use std::str::FromStr;
+
+    /// address of L2MessageQueue predeploy
+    pub static MESSAGE_QUEUE: Lazy<Address> = Lazy::new(|| Address::from_str("0x5300000000000000000000000000000000000000").unwrap());
+    /// the slot of withdraw root in L2MessageQueue
+    pub static WITHDRAW_TRIE_ROOT_SLOT: Lazy<U256> = Lazy::new(U256::zero);
+}
+
 /// Check if address is a precompiled or not.
 pub fn is_precompiled(address: &Address) -> bool {
     address.0[0..19] == [0u8; 19] && (1..=9).contains(&address.0[19])
