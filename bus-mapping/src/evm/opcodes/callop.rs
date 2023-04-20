@@ -1,7 +1,7 @@
 use super::Opcode;
 use crate::{
     circuit_input_builder::{CallKind, CircuitInputStateRef, CodeSource, ExecStep},
-    operation::{AccountField, CallContextField, MemoryOp, TxAccessListAccountOp, RW},
+    operation::{AccountField, CallContextField, MemoryWordOp, TxAccessListAccountOp, RW},
     precompile::{execute_precompiled, is_precompiled},
     state_db::CodeDB,
     Error,
@@ -291,20 +291,16 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
                 ] {
                     state.call_context_write(&mut exec_step, current_call.call_id, field, value);
                 }
-                for (i, value) in result.iter().enumerate() {
-                    state.push_op(
-                        &mut exec_step,
-                        RW::WRITE,
-                        MemoryOp::new(call.call_id, (i).into(), *value),
-                    );
-                }
-                for (i, value) in result[..length].iter().enumerate() {
-                    state.push_op(
-                        &mut exec_step,
-                        RW::WRITE,
-                        MemoryOp::new(call.caller_id, (ret_offset + i).into(), *value),
-                    );
-                }
+
+                write_memory_word_ops(state, &mut exec_step, call.call_id, 0, length, &result);
+                write_memory_word_ops(
+                    state,
+                    &mut exec_step,
+                    call.caller_id,
+                    ret_offset,
+                    length,
+                    &result,
+                );
 
                 state.handle_return(geth_step)?;
 
@@ -432,6 +428,33 @@ impl<const N_ARGS: usize> Opcode for CallOpcode<N_ARGS> {
                 Ok(vec![exec_step])
             } //
         }
+    }
+}
+
+fn write_memory_word_ops(
+    state: &mut CircuitInputStateRef,
+    exec_step: &mut ExecStep,
+    call_id: usize,
+    offset: usize,
+    length: usize,
+    data: &[u8],
+) {
+    let shift = offset % 32;
+    let slot = offset - shift;
+
+    let mut i = 0;
+    while i < length {
+        let mut slot_bytes: [u8; 32] = [0; 32];
+        slot_bytes.clone_from_slice(&data[i..length.min(i + 32)]);
+        let addr_word = Word::from_big_endian(&slot_bytes);
+
+        state.push_op(
+            exec_step,
+            RW::WRITE,
+            MemoryWordOp::new(call_id, (slot + i).into(), addr_word),
+        );
+
+        i += 32;
     }
 }
 
