@@ -13,7 +13,7 @@ use crate::{
     util::Expr,
 };
 use eth_types::{Field, ToScalar};
-use halo2_proofs::{circuit::Value, plonk::{Expression, Error}};
+use halo2_proofs::{circuit::{Value, Cell as AssignedCell}, plonk::{Expression, Error}};
 use bus_mapping::precompile::l2_address::{MESSAGE_QUEUE, WITHDRAW_TRIE_ROOT_SLOT};
 
 #[derive(Clone, Debug)]
@@ -25,6 +25,8 @@ pub(crate) struct EndBlockGadget<F> {
     max_txs: Cell<F>,
     phase2_withdraw_root: Cell<F>,
     phase2_withdraw_root_prev: Cell<F>,
+    pub withdraw_root_assigned: std::cell::RefCell<Option<AssignedCell>>,
+    pub withdraw_root_prev_assigned: std::cell::RefCell<Option<AssignedCell>>,
 }
 
 const EMPTY_BLOCK_N_RWS: u64 = 0;
@@ -46,8 +48,10 @@ impl<F: Field> ExecutionGadget<F> for EndBlockGadget<F> {
             IsZeroGadget::construct(cb, cb.curr.state.rw_counter.clone().expr() - 1.expr());
         // If the block is empty, we do 0 rw_table lookups
         // If the block is not empty, we will do 1 call_context lookup
+        // and add 1 withdraw_root lookup
         let total_rws = not::expr(is_empty_block.expr())
-            * (cb.curr.state.rw_counter.clone().expr() - 1.expr() + 1.expr());
+            * (cb.curr.state.rw_counter.clone().expr() - 1.expr() + 1.expr())
+            + 1.expr();
 
         // 1. Constraint total_rws and total_txs witness values depending on the empty
         // block case.
@@ -124,6 +128,8 @@ impl<F: Field> ExecutionGadget<F> for EndBlockGadget<F> {
             total_txs,
             total_txs_is_max_txs,
             is_empty_block,
+            withdraw_root_assigned: Default::default(),
+            withdraw_root_prev_assigned: Default::default(),
         }
     }
 
@@ -149,10 +155,13 @@ impl<F: Field> ExecutionGadget<F> for EndBlockGadget<F> {
             .assign(region, offset, total_txs, max_txs)?;
         let max_txs_assigned = self.max_txs.assign(region, offset, Value::known(max_txs))?;
 
-        let _withdraw_root = self.phase2_withdraw_root
+        let withdraw_root = self.phase2_withdraw_root
             .assign(region, offset, region.word_rlc(block.withdraw_root))?;
-        let _withdraw_root_prev = self.phase2_withdraw_root_prev
+        let withdraw_root_prev = self.phase2_withdraw_root_prev
             .assign(region, offset, region.word_rlc(block.prev_withdraw_root))?;
+
+        self.withdraw_root_assigned.borrow_mut().replace(withdraw_root.cell());
+        self.withdraw_root_prev_assigned.borrow_mut().replace(withdraw_root_prev.cell());
 
         // When rw_indices is not empty, we're at the last row (at a fixed offset),
         // where we need to access the max_rws and max_txs constant.
