@@ -22,10 +22,10 @@ impl<F: FieldExt> RlpFsmWitnessGen<F> for SignedTxEip1559 {
     }
 }
 
-pub fn tx_sign_rom_table_rows() -> Vec<RomTableRow> {
+pub fn tx_sign_rom_table_rows<F: FieldExt>() -> Vec<RomTableRow<F>> {
     unimplemented!()
 }
 
-pub fn tx_hash_rom_table_rows() -> Vec<RomTableRow> {
+pub fn tx_hash_rom_table_rows<F: FieldExt>() -> Vec<RomTableRow<F>> {
     unimplemented!()
 }

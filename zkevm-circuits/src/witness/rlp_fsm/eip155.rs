@@ -32,7 +32,7 @@ impl<F: FieldExt> RlpFsmWitnessGen<F> for SignedTxEip155 {
     }
 }
 
-pub fn tx_sign_rom_table_rows() -> Vec<RomTableRow> {
+pub fn tx_sign_rom_table_rows<F: FieldExt>() -> Vec<RomTableRow<F>> {
     vec![
         (BeginList, Nonce, N_BYTES_U64, TxSignEip155).into(),
         (Nonce, GasPrice, N_BYTES_U64, TxSignEip155).into(),
@@ -48,7 +48,7 @@ pub fn tx_sign_rom_table_rows() -> Vec<RomTableRow> {
     ]
 }
 
-pub fn tx_hash_rom_table_rows() -> Vec<RomTableRow> {
+pub fn tx_hash_rom_table_rows<F: FieldExt>() -> Vec<RomTableRow<F>> {
     vec![
         (BeginList, Nonce, N_BYTES_U64, TxHashEip155).into(),
         (Nonce, GasPrice, N_BYTES_U64, TxHashEip155).into(),

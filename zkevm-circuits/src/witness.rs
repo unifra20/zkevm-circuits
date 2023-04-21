@@ -25,8 +25,8 @@ pub use rlp_encode::{RlpDataType, RlpTxTag, RlpWitnessGen, RlpWitnessRow, N_TX_T
 
 mod rlp_fsm;
 pub use rlp_fsm::{
-    DataTable, Format, RlpFsmWitnessGen, RlpFsmWitnessRow, RlpTable, RlpTag, State, StateMachine,
-    Tag,
+    DataTable, Format, RlpFsmWitnessGen, RlpFsmWitnessRow, RlpTable, RlpTag, RomTableRow, State,
+    StateMachine, Tag,
 };
 
 mod rw;

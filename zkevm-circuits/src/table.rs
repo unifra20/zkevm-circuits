@@ -7,8 +7,9 @@ use crate::{
     impl_expr,
     util::{build_tx_log_address, Challenges},
     witness::{
-        Block, BlockContext, BlockContexts, Bytecode, MptUpdateRow, MptUpdates, RlpFsmWitnessGen,
-        RlpWitnessGen, Rw, RwMap, RwRow, SignedTransaction, Transaction,
+        Block, BlockContext, BlockContexts, Bytecode, Format, MptUpdateRow, MptUpdates,
+        RlpFsmWitnessGen, RlpWitnessGen, RomTableRow, Rw, RwMap, RwRow, SignedTransaction,
+        Transaction,
     },
 };
 use bus_mapping::circuit_input_builder::{CopyDataType, CopyEvent, CopyStep, ExpEvent};
@@ -25,6 +26,7 @@ use halo2_proofs::{
     poly::Rotation,
 };
 use std::iter::repeat;
+use strum::IntoEnumIterator;
 
 #[cfg(feature = "onephase")]
 use halo2_proofs::plonk::FirstPhase as SecondPhase;
@@ -2133,6 +2135,18 @@ pub struct RlpFsmRomTable {
     pub format: Column<Fixed>,
 }
 
+impl RlpFsmRomTable {
+    fn fixed_columns(&self) -> Vec<Column<Fixed>> {
+        vec![
+            self.tag,
+            self.tag_next,
+            self.max_length,
+            self.is_list,
+            self.format,
+        ]
+    }
+}
+
 impl<F: Field> LookupTable<F> for RlpFsmRomTable {
     fn columns(&self) -> Vec<Column<Any>> {
         vec![
@@ -2166,8 +2180,32 @@ impl RlpFsmRomTable {
         }
     }
 
-    pub fn load<F: Field>(layouter: &mut impl Layouter<F>) -> Result<(), Error> {
-        unimplemented!("RlpFsmRomTable::load")
+    pub fn load<F: Field>(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        formats: Vec<Format>,
+    ) -> Result<(), Error> {
+        layouter.assign_region(
+            || "rlp ROM table",
+            |mut region| {
+                let rows: Vec<RomTableRow<F>> = Format::iter()
+                    .map(|format| format.rom_table_rows())
+                    .concat();
+
+                for (offset, row) in rows.iter().enumerate() {
+                    for (&column, value) in RlpFsmRomTable::fixed_columns(self).iter().zip(row.0) {
+                        region.assign_fixed(
+                            || format!("rom table row: offset = {}", offset),
+                            column,
+                            offset,
+                            || value,
+                        )?;
+                    }
+                }
+
+                Ok(())
+            },
+        )
     }
 }
 
