@@ -445,7 +445,9 @@ fn write_memory_word_ops(
     let mut i = 0;
     while i < length {
         let mut slot_bytes: [u8; 32] = [0; 32];
-        slot_bytes.clone_from_slice(&data[i..length.min(i + 32)]);
+        let copy_len = length.min(i + 32);
+        slot_bytes[..copy_len - i].copy_from_slice(&data[i..copy_len]);
+
         let addr_word = Word::from_big_endian(&slot_bytes);
 
         state.push_op(
