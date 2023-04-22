@@ -291,11 +291,11 @@ impl<'a> CircuitInputBuilder {
 
         let withdraw_root = *self
             .sdb
-            .get_storage(&*MESSAGE_QUEUE, &*WITHDRAW_TRIE_ROOT_SLOT)
+            .get_storage(&MESSAGE_QUEUE, &WITHDRAW_TRIE_ROOT_SLOT)
             .1;
         let withdraw_root_before = *self
             .sdb
-            .get_committed_storage(&*MESSAGE_QUEUE, &*WITHDRAW_TRIE_ROOT_SLOT)
+            .get_committed_storage(&MESSAGE_QUEUE, &WITHDRAW_TRIE_ROOT_SLOT)
             .1;
 
         let max_rws = self.block.circuits_params.max_rws;
