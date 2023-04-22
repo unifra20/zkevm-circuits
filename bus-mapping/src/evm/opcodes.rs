@@ -522,39 +522,41 @@ pub fn gen_begin_tx_ops(
     } + call_data_gas_cost;
     exec_step.gas_cost = GasCost(intrinsic_gas_cost);
 
-    // Get code_hash of callee
-    // FIXME: call with value to precompile will cause the codehash of precompile
-    // address to `CodeDB::empty_code_hash()`. FIXME: we should have a
-    // consistent codehash for precompile contract.
-    let callee_account = &state.sdb.get_account(&call.address).1.clone();
     let is_precompile = is_precompiled(&call.address);
-    let callee_exists = !callee_account.is_empty() || is_precompile;
-    if !callee_exists && call.value.is_zero() {
+
+    // Get callee nonce and code hash.
+    let callee_account = state.sdb.get_account(&call.address).1.clone();
+    let callee_nonce = callee_account.nonce.min(u64::MAX.into());
+    let callee_code_hash = callee_account.code_hash.to_word();
+
+    let is_code_hash_zero = callee_account.code_hash.is_zero();
+    let is_code_hash_empty = callee_account.code_hash == CodeDB::empty_code_hash();
+    let no_callee_code = is_code_hash_zero || is_code_hash_empty;
+    let not_create_deployment_collision =
+        !call.is_create() || (callee_nonce.is_zero() && no_callee_code);
+
+    // Re-create callee object if create. It could avoid conflict with writing
+    // new callee code hash by `transfer_with_fee` for state circuit. Since the
+    // previous value of code hash is set to zero in `transfer_with_fee`.
+    let callee_code_hash = if call.is_create() && not_create_deployment_collision {
+        Word::zero()
+    } else {
+        callee_code_hash
+    };
+
+    if is_code_hash_zero && call.value.is_zero() {
         state.sdb.get_account_mut(&call.address).1.storage.clear();
     }
-    if state.tx.is_create()
-        && ((!callee_account.code_hash.is_zero()
-            && !callee_account.code_hash.eq(&CodeDB::empty_code_hash()))
-            || !callee_account.nonce.is_zero())
-    {
-        unimplemented!("deployment collision");
+
+    if call.is_create() {
+        state.account_read(
+            &mut exec_step,
+            call.address,
+            AccountField::Nonce,
+            callee_nonce,
+        );
     }
-    let (callee_code_hash, is_empty_code_hash) = match (state.tx.is_create(), callee_exists) {
-        (true, _) => (call.code_hash.to_word(), false),
-        (_, true) => {
-            debug_assert_eq!(
-                callee_account.code_hash, call.code_hash,
-                "callee account's code hash: {:?}, call's code hash: {:?}",
-                callee_account.code_hash, call.code_hash
-            );
-            (
-                call.code_hash.to_word(),
-                call.code_hash == CodeDB::empty_code_hash(),
-            )
-        }
-        (_, false) => (Word::zero(), true),
-    };
-    if !is_precompile && !call.is_create() {
+    if call.is_create() || !is_precompile {
         state.account_read(
             &mut exec_step,
             call.address,
@@ -563,17 +565,29 @@ pub fn gen_begin_tx_ops(
         );
     }
 
-    // Transfer with fee
-    let fee = state.tx.gas_price * state.tx.gas + state.tx_ctx.l1_fee;
-    state.transfer_with_fee(
-        &mut exec_step,
-        call.caller_address,
-        call.address,
-        callee_exists,
-        call.is_create(),
-        call.value,
-        Some(fee),
-    )?;
+    if not_create_deployment_collision {
+        let fee = state.tx.gas_price * state.tx.gas + state.tx_ctx.l1_fee;
+        state.transfer_with_fee(
+            &mut exec_step,
+            call.caller_address,
+            call.address,
+            !is_code_hash_zero || is_precompile,
+            call.is_create(),
+            call.value,
+            Some(fee),
+        )?;
+        if call.is_create() {
+            state.push_op_reversible(
+                &mut exec_step,
+                AccountOp {
+                    address: call.address,
+                    field: AccountField::Nonce,
+                    value: 1.into(),
+                    value_prev: 0.into(),
+                },
+            )?;
+        }
+    }
 
     // In case of contract creation we wish to verify the correctness of the
     // contract's address (callee). This address is defined as:
@@ -594,18 +608,9 @@ pub fn gen_begin_tx_ops(
     }
 
     // There are 4 branches from here.
-    match (call.is_create(), is_precompile, is_empty_code_hash) {
+    match (call.is_create(), is_precompile, no_callee_code) {
         // 1. Creation transaction.
         (true, _, _) => {
-            state.push_op_reversible(
-                &mut exec_step,
-                AccountOp {
-                    address: call.address,
-                    field: AccountField::Nonce,
-                    value: 1.into(),
-                    value_prev: 0.into(),
-                },
-            )?;
             for (field, value) in [
                 (CallContextField::Depth, call.depth.into()),
                 (
@@ -638,10 +643,10 @@ pub fn gen_begin_tx_ops(
         }
         // 2. Call to precompiled.
         (_, true, _) => (),
-        (_, _, is_empty_code_hash) => {
-            // 3. Call to account with empty code (is_empty_code_hash == true).
-            // 4. Call to account with non-empty code (is_empty_code_hash == false).
-            if !is_empty_code_hash {
+        (_, _, no_callee_code) => {
+            // 3. Call to account with callee code.
+            // 4. Call to account with no callee code.
+            if !no_callee_code {
                 for (field, value) in [
                     (CallContextField::Depth, call.depth.into()),
                     (
