@@ -21,9 +21,8 @@ use halo2_proofs::plonk::SecondPhase;
 #[cfg(feature = "reject-eip2718")]
 use crate::tx_circuit::{TX_HASH_OFFSET, TX_LEN};
 use crate::{
-    evm_circuit::util::constraint_builder::BaseConstraintBuilder,
+    evm_circuit::{util::constraint_builder::BaseConstraintBuilder, EvmCircuitExports},
     state_circuit::StateCircuitExports,
-    evm_circuit::EvmCircuitExports,
     witness::{self, Block, BlockContext, BlockContexts, Transaction},
 };
 use bus_mapping::util::read_env_var;
@@ -1208,7 +1207,6 @@ impl<F: Field> PiCircuitConfig<F> {
 
         Ok(block_value_cells)
     }
-
 }
 
 /// Public Inputs Circuit
@@ -1268,16 +1266,17 @@ impl<F: Field> PiCircuit<F> {
         layouter: &mut impl Layouter<F>,
         state_roots: Option<&StateCircuitExports<Assigned<F>>>,
         withdraw_roots: Option<&EvmCircuitExports<Assigned<F>>>,
-    ) -> Result<(), Error>{
-        
-        let local_conn = self.connections.borrow().clone().expect("expected to be called after syncthesis");
+    ) -> Result<(), Error> {
+        let local_conn = self
+            .connections
+            .borrow()
+            .clone()
+            .expect("expected to be called after syncthesis");
 
         layouter.assign_region(
             || "pi connecting region",
             |mut region| {
-
                 if let Some(state_roots) = state_roots.clone() {
-
                     region.constrain_equal(
                         local_conn.start_state_root.cell(),
                         state_roots.start_state_root.0,
@@ -1286,28 +1285,23 @@ impl<F: Field> PiCircuit<F> {
                         local_conn.end_state_root.cell(),
                         state_roots.end_state_root.0,
                     )?;
-        
                 } else {
                     log::warn!("state roots are not set, skip connection with state circuit");
                 }
-        
+
                 if let Some(withdraw_roots) = withdraw_roots.clone() {
-        
                     region.constrain_equal(
                         local_conn.withdraw_root.cell(),
                         withdraw_roots.withdraw_root.0,
                     )?;
-        
                 } else {
                     log::warn!("withdraw roots are not set, skip connection with evm circuit");
                 }
-        
+
                 Ok(())
-            }
+            },
         )
-
     }
-
 }
 
 impl<F: Field> SubCircuit<F> for PiCircuit<F> {

@@ -517,9 +517,9 @@ impl<
             .synthesize_sub(&config.pi_circuit, challenges, layouter)?;
 
         self.pi_circuit.connect_export(
-            layouter, 
+            layouter,
             // TODO: enable this after zktrie deletion deployed inside l2geth and
-            // test data regenerated.            
+            // test data regenerated.
             None,
             self.evm_circuit.exports.borrow().as_ref(),
         )?;

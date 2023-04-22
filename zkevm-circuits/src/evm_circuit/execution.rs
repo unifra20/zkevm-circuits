@@ -28,8 +28,8 @@ use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{Layouter, Region, Value},
     plonk::{
-        Advice, Column, ConstraintSystem, Error, Expression, FirstPhase, Fixed, Selector,
-        VirtualCells, Assigned,
+        Advice, Assigned, Column, ConstraintSystem, Error, Expression, FirstPhase, Fixed, Selector,
+        VirtualCells,
     },
     poly::Rotation,
 };
@@ -1161,7 +1161,11 @@ impl<F: Field> ExecutionConfig<F> {
 
         log::debug!("assign_block done");
 
-        let final_withdraw_root_cell = self.end_block_gadget.withdraw_root_assigned.borrow().expect("withdraw_root cell should has been assigned");
+        let final_withdraw_root_cell = self
+            .end_block_gadget
+            .withdraw_root_assigned
+            .borrow()
+            .expect("withdraw_root cell should has been assigned");
 
         // sanity check
         let evm_rows = block.circuits_params.max_evm_rows;
@@ -1169,9 +1173,11 @@ impl<F: Field> ExecutionConfig<F> {
             assert_eq!(final_withdraw_root_cell.row_offset, evm_rows - 2);
         }
 
-        let withdraw_root_rlc = challenges.evm_word().map(|r| rlc::value(&block.withdraw_root.to_le_bytes(), r));
+        let withdraw_root_rlc = challenges
+            .evm_word()
+            .map(|r| rlc::value(&block.withdraw_root.to_le_bytes(), r));
 
-        Ok(EvmCircuitExports{
+        Ok(EvmCircuitExports {
             withdraw_root: (final_withdraw_root_cell, withdraw_root_rlc.into()),
         })
     }

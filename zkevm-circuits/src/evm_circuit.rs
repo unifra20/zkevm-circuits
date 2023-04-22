@@ -2,7 +2,7 @@
 
 #![allow(missing_docs)]
 use halo2_proofs::{
-    circuit::{Layouter, SimpleFloorPlanner, Value, Cell},
+    circuit::{Cell, Layouter, SimpleFloorPlanner, Value},
     plonk::*,
 };
 
@@ -68,14 +68,12 @@ pub struct EvmCircuitConfigArgs<F: Field> {
     pub exp_table: ExpTable,
 }
 
-
 /// Circuit exported cells after synthesis, used for subcircuit
 #[derive(Clone, Debug)]
 pub struct EvmCircuitExports<V> {
     /// withdraw root
     pub withdraw_root: (Cell, Value<V>),
 }
-
 
 impl<F: Field> SubCircuitConfig<F> for EvmCircuitConfig<F> {
     type ConfigArgs = EvmCircuitConfigArgs<F>;

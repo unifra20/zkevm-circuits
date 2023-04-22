@@ -12,9 +12,12 @@ use crate::{
     table::{CallContextFieldTag, TxContextFieldTag},
     util::Expr,
 };
-use eth_types::{Field, ToScalar};
-use halo2_proofs::{circuit::{Value, Cell as AssignedCell}, plonk::{Expression, Error}};
 use bus_mapping::precompile::l2_address::{MESSAGE_QUEUE, WITHDRAW_TRIE_ROOT_SLOT};
+use eth_types::{Field, ToScalar};
+use halo2_proofs::{
+    circuit::{Cell as AssignedCell, Value},
+    plonk::{Error, Expression},
+};
 
 #[derive(Clone, Debug)]
 pub(crate) struct EndBlockGadget<F> {
@@ -69,8 +72,10 @@ impl<F: Field> ExecutionGadget<F> for EndBlockGadget<F> {
 
         // 1.1 constraint withdraw_root
         cb.account_storage_read(
-            Expression::Constant(MESSAGE_QUEUE.to_scalar().expect("unexpected Address for message_queue precompile -> Scalar conversion failure")),
-            cb.word_rlc(withdraw_trie_root_slot_le.map(|byte|byte.expr())),
+            Expression::Constant(MESSAGE_QUEUE.to_scalar().expect(
+                "unexpected Address for message_queue precompile -> Scalar conversion failure",
+            )),
+            cb.word_rlc(withdraw_trie_root_slot_le.map(|byte| byte.expr())),
             phase2_withdraw_root.expr(),
             total_txs.expr(),
             phase2_withdraw_root_prev.expr(),
@@ -155,13 +160,23 @@ impl<F: Field> ExecutionGadget<F> for EndBlockGadget<F> {
             .assign(region, offset, total_txs, max_txs)?;
         let max_txs_assigned = self.max_txs.assign(region, offset, Value::known(max_txs))?;
 
-        let withdraw_root = self.phase2_withdraw_root
-            .assign(region, offset, region.word_rlc(block.withdraw_root))?;
-        let withdraw_root_prev = self.phase2_withdraw_root_prev
-            .assign(region, offset, region.word_rlc(block.prev_withdraw_root))?;
+        let withdraw_root = self.phase2_withdraw_root.assign(
+            region,
+            offset,
+            region.word_rlc(block.withdraw_root),
+        )?;
+        let withdraw_root_prev = self.phase2_withdraw_root_prev.assign(
+            region,
+            offset,
+            region.word_rlc(block.prev_withdraw_root),
+        )?;
 
-        self.withdraw_root_assigned.borrow_mut().replace(withdraw_root.cell());
-        self.withdraw_root_prev_assigned.borrow_mut().replace(withdraw_root_prev.cell());
+        self.withdraw_root_assigned
+            .borrow_mut()
+            .replace(withdraw_root.cell());
+        self.withdraw_root_prev_assigned
+            .borrow_mut()
+            .replace(withdraw_root_prev.cell());
 
         // When rw_indices is not empty, we're at the last row (at a fixed offset),
         // where we need to access the max_rws and max_txs constant.

@@ -142,7 +142,7 @@ pub struct Block {
     /// Withdraw root
     pub withdraw_root: Word,
     /// Withdraw roof of the previous block
-    pub prev_withdraw_root: Word,    
+    pub prev_withdraw_root: Word,
     /// Container of operations done in this block.
     pub container: OperationContainer,
     /// Transactions contained in the block
