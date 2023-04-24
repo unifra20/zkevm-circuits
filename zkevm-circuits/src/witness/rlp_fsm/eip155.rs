@@ -18,7 +18,7 @@ impl<F: FieldExt> RlpFsmWitnessGen<F> for TxEip155 {
     fn gen_witness(
         &self,
         challenges: &crate::util::Challenges<halo2_proofs::circuit::Value<F>>,
-    ) -> Vec<super::RlpFsmWitnessRow<halo2_proofs::circuit::Value<F>>> {
+    ) -> Vec<super::RlpFsmWitnessRow<F>> {
         unimplemented!()
     }
 }
@@ -27,7 +27,7 @@ impl<F: FieldExt> RlpFsmWitnessGen<F> for SignedTxEip155 {
     fn gen_witness(
         &self,
         challenges: &crate::util::Challenges<halo2_proofs::circuit::Value<F>>,
-    ) -> Vec<super::RlpFsmWitnessRow<halo2_proofs::circuit::Value<F>>> {
+    ) -> Vec<super::RlpFsmWitnessRow<F>> {
         unimplemented!()
     }
 }

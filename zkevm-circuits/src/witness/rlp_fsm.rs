@@ -154,37 +154,44 @@ impl<F: FieldExt> Expr<F> for RlpTag {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct DataTable {
+pub struct DataTable<F: FieldExt> {
     pub tx_id: u64,
     pub format: Format,
     pub byte_idx: usize,
     pub byte_rev_idx: usize,
     pub byte_value: u8,
+    pub bytes_rlc: Value<F>,
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct RlpTable<F> {
+pub struct RlpTable<F: FieldExt> {
+    pub tx_id: u64,
+    pub format: Format,
     pub rlp_tag: RlpTag,
-    pub tag_value_acc: F,
+    pub tag_value_acc: Value<F>,
     pub is_output: bool,
+    pub is_none: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct StateMachine {
+pub struct StateMachine<F: FieldExt> {
     pub state: State,
     pub tag: Tag,
     pub tag_next: Tag,
+    pub byte_idx: usize,
+    pub byte_rev_idx: usize,
+    pub byte_value: u8,
     pub tag_idx: usize,
     pub tag_length: usize,
     pub depth: usize,
+    pub bytes_rlc: Value<F>,
 }
 
 /// Represents the witness in a single row of the RLP circuit.
 #[derive(Clone, Debug)]
-pub struct RlpFsmWitnessRow<F> {
-    data_table: DataTable,
+pub struct RlpFsmWitnessRow<F: FieldExt> {
     rlp_table: RlpTable<F>,
-    state_machine: StateMachine,
+    state_machine: StateMachine<F>,
 }
 
 /// The RlpFsmWitnessGen trait is implemented by data types who's RLP encoding can
@@ -192,5 +199,5 @@ pub struct RlpFsmWitnessRow<F> {
 pub trait RlpFsmWitnessGen<F: FieldExt>: Encodable + Sized {
     /// Generate witness to the RLP-encoding verifier circuit, as a vector of
     /// RlpFsmWitnessRow.
-    fn gen_witness(&self, challenges: &Challenges<Value<F>>) -> Vec<RlpFsmWitnessRow<Value<F>>>;
+    fn gen_witness(&self, challenges: &Challenges<Value<F>>) -> Vec<RlpFsmWitnessRow<F>>;
 }
