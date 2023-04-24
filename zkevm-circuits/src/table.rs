@@ -53,6 +53,15 @@ pub trait LookupTable<F: Field> {
             .collect()
     }
 
+    /// Returns the list of ALL the table fixed columns following the table order.
+    fn fixed_columns(&self) -> Vec<Column<Fixed>> {
+        self.columns()
+            .iter()
+            .map(|&col| col.try_into())
+            .filter_map(|res| res.ok())
+            .collect()
+    }
+
     /// Returns the String annotations associated to each column of the table.
     fn annotations(&self) -> Vec<String>;
 
@@ -2135,18 +2144,6 @@ pub struct RlpFsmRomTable {
     pub format: Column<Fixed>,
 }
 
-impl RlpFsmRomTable {
-    fn fixed_columns(&self) -> Vec<Column<Fixed>> {
-        vec![
-            self.tag,
-            self.tag_next,
-            self.max_length,
-            self.is_list,
-            self.format,
-        ]
-    }
-}
-
 impl<F: Field> LookupTable<F> for RlpFsmRomTable {
     fn columns(&self) -> Vec<Column<Any>> {
         vec![
@@ -2193,7 +2190,10 @@ impl RlpFsmRomTable {
                     .concat();
 
                 for (offset, row) in rows.iter().enumerate() {
-                    for (&column, value) in RlpFsmRomTable::fixed_columns(self).iter().zip(row.0) {
+                    for (&column, value) in <RlpFsmRomTable as LookupTable<F>>::fixed_columns(self)
+                        .iter()
+                        .zip(row.0)
+                    {
                         region.assign_fixed(
                             || format!("rom table row: offset = {}", offset),
                             column,
@@ -2258,8 +2258,17 @@ impl RlpFsmDataTable {
     pub fn assignments<F: Field, RLP: RlpFsmWitnessGen<F>>(
         inputs: Vec<RLP>,
         challenges: &Challenges<Value<F>>,
-    ) -> Vec<[Value<F>; 5]> {
+    ) -> Vec<[Value<F>; 6]> {
         unimplemented!("RlpFsmDataTable::assignments")
+    }
+
+    pub fn load<F: Field, RLP: RlpFsmWitnessGen<F>>(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        inputs: Vec<RLP>,
+        challenges: &Challenges<Value<F>>,
+    ) -> Result<(), Error> {
+        unimplemented!("RlpFsmDataTable::load")
     }
 }
 
@@ -2294,5 +2303,34 @@ impl<F: Field> LookupTable<F> for RlpFsmRlpTable {
             String::from("is_output"),
             String::from("is_none"),
         ]
+    }
+}
+
+impl RlpFsmRlpTable {
+    pub fn construct<F: Field>(meta: &mut ConstraintSystem<F>) -> Self {
+        Self {
+            tx_id: meta.advice_column(),
+            format: meta.advice_column(),
+            rlp_tag: meta.advice_column(),
+            tag_value_acc: meta.advice_column(),
+            is_output: meta.advice_column(),
+            is_none: meta.advice_column(),
+        }
+    }
+
+    pub fn assignments<F: Field, RLP: RlpFsmWitnessGen<F>>(
+        inputs: Vec<RLP>,
+        challenges: &Challenges<Value<F>>,
+    ) -> Vec<[Value<F>; 6]> {
+        unimplemented!("RlpFsmRlpTable::assignments")
+    }
+
+    pub fn load<F: Field, RLP: RlpFsmWitnessGen<F>>(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        inputs: Vec<RLP>,
+        challenges: &Challenges<Value<F>>,
+    ) -> Result<(), Error> {
+        unimplemented!("RlpFsmRlpTable::load")
     }
 }
